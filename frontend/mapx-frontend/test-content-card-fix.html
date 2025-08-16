@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContentCard Fix Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .results {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .success {
+            border-left-color: #28a745;
+            background: #d4edda;
+            color: #155724;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>ContentCard Fix Test</h1>
+        <p>This page tests the fix for the "Invalid place ID" error in ContentCard.</p>
+        
+        <div>
+            <button class="test-button" onclick="testGooglePlaceIdEndpoint()">Test Google Place ID Endpoint</button>
+            <button class="test-button" onclick="testPlaceRecommendations()">Test Place Recommendations</button>
+            <button class="test-button" onclick="testContentCardFlow()">Test Full ContentCard Flow</button>
+            <button class="test-button" onclick="clearResults()">Clear Results</button>
+        </div>
+        
+        <div id="results" class="results" style="display: none;"></div>
+    </div>
+
+    <script type="module">
+        // Test functions
+        window.testGooglePlaceIdEndpoint = async () => {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.style.display = 'block';
+            resultsDiv.className = 'results';
+            resultsDiv.innerHTML = '<h3>Testing Google Place ID Endpoint...</h3>';
+            
+            try {
+                const response = await fetch('http://localhost:5000/api/recommendations/place/google/ChIJN1t_tDeuEmsRUsoyG83frY4');
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    resultsDiv.className = 'results success';
+                    resultsDiv.innerHTML = `
+                        <h3>✅ Google Place ID Endpoint Working</h3>
+                        <p>Successfully retrieved place information from Google Place ID.</p>
+                        <p><strong>Database ID:</strong> ${data.data.id}</p>
+                        <p><strong>Place Name:</strong> ${data.data.name}</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    throw new Error(`API Error: ${response.status} - ${data.message}`);
+                }
+            } catch (error) {
+                resultsDiv.className = 'results error';
+                resultsDiv.innerHTML = `
+                    <h3>❌ Google Place ID Endpoint Failed</h3>
+                    <p>Error: ${error.message}</p>
+                `;
+            }
+        };
+
+        window.testPlaceRecommendations = async () => {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.style.display = 'block';
+            resultsDiv.className = 'results';
+            resultsDiv.innerHTML = '<h3>Testing Place Recommendations...</h3>';
+            
+            try {
+                // First get the database place ID
+                const placeResponse = await fetch('http://localhost:5000/api/recommendations/place/google/ChIJN1t_tDeuEmsRUsoyG83frY4');
+                const placeData = await placeResponse.json();
+                
+                if (!placeData.success) {
+                    throw new Error('Failed to get place ID');
+                }
+                
+                const dbPlaceId = placeData.data.id;
+                
+                // Now get recommendations for that place
+                const recResponse = await fetch(`http://localhost:5000/api/recommendations/place/${dbPlaceId}`);
+                const recData = await recResponse.json();
+                
+                if (recResponse.ok && recData.success) {
+                    resultsDiv.className = 'results success';
+                    resultsDiv.innerHTML = `
+                        <h3>✅ Place Recommendations Working</h3>
+                        <p>Successfully retrieved recommendations for place ID ${dbPlaceId}.</p>
+                        <p><strong>Reviews found:</strong> ${recData.data.length}</p>
+                        <pre>${JSON.stringify(recData, null, 2)}</pre>
+                    `;
+                } else {
+                    throw new Error(`Recommendations API Error: ${recResponse.status}`);
+                }
+            } catch (error) {
+                resultsDiv.className = 'results error';
+                resultsDiv.innerHTML = `
+                    <h3>❌ Place Recommendations Failed</h3>
+                    <p>Error: ${error.message}</p>
+                `;
+            }
+        };
+
+        window.testContentCardFlow = async () => {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.style.display = 'block';
+            resultsDiv.className = 'results';
+            resultsDiv.innerHTML = '<h3>Testing Full ContentCard Flow...</h3>';
+            
+            try {
+                // Simulate the exact flow that ContentCard uses
+                const googlePlaceId = 'ChIJN1t_tDeuEmsRUsoyG83frY4';
+                
+                // Step 1: Get place info by Google Place ID
+                const placeResponse = await fetch(`http://localhost:5000/api/recommendations/place/google/${googlePlaceId}`);
+                const placeData = await placeResponse.json();
+                
+                if (!placeData.success) {
+                    throw new Error('Step 1 failed: Could not get place info by Google Place ID');
+                }
+                
+                const dbPlaceId = placeData.data.id;
+                
+                // Step 2: Get recommendations using database place ID
+                const recResponse = await fetch(`http://localhost:5000/api/recommendations/place/${dbPlaceId}`);
+                const recData = await recResponse.json();
+                
+                if (!recResponse.ok || !recData.success) {
+                    throw new Error('Step 2 failed: Could not get place recommendations');
+                }
+                
+                // Step 3: Transform data like ContentCard does
+                const reviews = recData.data.map(rec => ({
+                    id: rec.id,
+                    user_name: rec.user_name,
+                    title: rec.title,
+                    notes: rec.notes,
+                    rating: rec.rating,
+                    visit_date: rec.visit_date,
+                    created_at: rec.created_at
+                }));
+                
+                // Step 4: Calculate average rating
+                const averageRating = reviews.length > 0 
+                    ? reviews.reduce((sum, review) => sum + (review.rating || 0), 0) / reviews.length 
+                    : 0;
+                
+                resultsDiv.className = 'results success';
+                resultsDiv.innerHTML = `
+                    <h3>✅ Full ContentCard Flow Working</h3>
+                    <p>Successfully completed the entire ContentCard flow!</p>
+                    <p><strong>Google Place ID:</strong> ${googlePlaceId}</p>
+                    <p><strong>Database Place ID:</strong> ${dbPlaceId}</p>
+                    <p><strong>Place Name:</strong> ${placeData.data.name}</p>
+                    <p><strong>Reviews found:</strong> ${reviews.length}</p>
+                    <p><strong>Average rating:</strong> ${averageRating.toFixed(1)}</p>
+                    <p><strong>Sample review:</strong></p>
+                    <pre>${JSON.stringify(reviews[0] || 'No reviews', null, 2)}</pre>
+                `;
+            } catch (error) {
+                resultsDiv.className = 'results error';
+                resultsDiv.innerHTML = `
+                    <h3>❌ Full ContentCard Flow Failed</h3>
+                    <p>Error: ${error.message}</p>
+                `;
+            }
+        };
+
+        window.clearResults = () => {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.style.display = 'none';
+        };
+
+        // Auto-run basic test on page load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                testGooglePlaceIdEndpoint();
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

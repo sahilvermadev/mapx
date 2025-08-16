@@ -1,0 +1,753 @@
+import express from 'express';
+import { upsertPlace, getPlaceByGoogleId } from '../db/places';
+import { 
+  insertAnnotation, 
+  getAnnotationsByUserId, 
+  getAnnotationsByPlaceId, 
+  getAnnotationById,
+  updateAnnotation, 
+  deleteAnnotation, 
+  searchAnnotationsBySimilarity,
+  regenerateAllEmbeddings
+} from '../db/annotations';
+import { generatePlaceEmbedding, generateSearchEmbedding } from '../utils/embeddings';
+import { generateAISummary, type SearchContext } from '../utils/aiSummaries';
+import pool from '../db'; // Import pool directly from db.ts
+import type { AnnotationSearchResult } from '../db/annotations';
+
+const router = express.Router();
+
+// Interface for the recommendation request
+interface SaveRecommendationRequest {
+  // Place data
+  google_place_id?: string;
+  place_name: string;
+  place_address?: string;
+  place_lat?: number;
+  place_lng?: number;
+  place_metadata?: Record<string, any>;
+  
+  // Annotation data
+  went_with?: string[];
+  labels?: string[];
+  notes?: string;
+  metadata?: Record<string, any>;
+  visit_date?: string;
+  rating?: number;
+  visibility?: 'friends' | 'public';
+  
+  // User data (from authenticated session)
+  user_id: string;
+}
+
+// Interface for the response
+interface SaveRecommendationResponse {
+  success: boolean;
+  place_id: number;
+  annotation_id: number;
+  message: string;
+}
+
+/**
+ * GET /api/recommendations/place/google/:googlePlaceId
+ * Get place information by Google Place ID
+ */
+router.get('/place/google/:googlePlaceId', async (req, res) => {
+  try {
+    const { googlePlaceId } = req.params;
+
+    if (!googlePlaceId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google Place ID is required'
+      });
+    }
+
+    const place = await getPlaceByGoogleId(googlePlaceId);
+    
+    if (!place) {
+      return res.status(404).json({
+        success: false,
+        message: 'Place not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: place.id,
+        google_place_id: place.google_place_id,
+        name: place.name,
+        address: place.address,
+        lat: place.lat,
+        lng: place.lng,
+        metadata: place.metadata
+      },
+      message: 'Place found successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching place by Google ID:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch place',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/recommendations/save
+ * Save a recommendation by upserting place, generating embedding, and inserting annotation
+ */
+router.post('/save', async (req, res) => {
+  try {
+    const {
+      google_place_id,
+      place_name,
+      place_address,
+      place_lat,
+      place_lng,
+      place_metadata,
+      went_with,
+      labels,
+      notes,
+      metadata,
+      visit_date,
+      rating,
+      visibility,
+      user_id
+    }: SaveRecommendationRequest = req.body;
+
+    // Validate required fields
+    if (!place_name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Place name is required'
+      });
+    }
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    // Validate rating if provided
+    if (rating && (rating < 1 || rating > 5)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rating must be between 1 and 5'
+      });
+    }
+
+    // Validate visibility if provided
+    if (visibility && !['friends', 'public'].includes(visibility)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Visibility must be either "friends" or "public"'
+      });
+    }
+
+    // Step 1: Upsert the place
+    console.log('Upserting place:', place_name);
+    const placeId = await upsertPlace({
+      google_place_id,
+      name: place_name,
+      address: place_address,
+      lat: place_lat,
+      lng: place_lng,
+      metadata: place_metadata
+    });
+
+    // Step 2: Generate place embedding if we have place data
+    // TEMPORARILY DISABLED due to network connectivity issues
+    /*
+    let placeEmbedding: number[] | undefined;
+    if (place_name || place_address || place_metadata) {
+      try {
+        placeEmbedding = await generatePlaceEmbedding({
+          name: place_name,
+          address: place_address,
+          metadata: place_metadata
+        });
+        console.log('Generated place embedding');
+      } catch (error) {
+        console.warn('Failed to generate place embedding:', error);
+        // Continue without place embedding
+      }
+    }
+    */
+
+    // Step 3: Insert the annotation with auto-generated embedding
+    console.log('Inserting annotation for place:', placeId);
+    const annotationId = await insertAnnotation({
+      place_id: placeId,
+      user_id,
+      went_with,
+      labels,
+      notes,
+      metadata,
+      visit_date,
+      rating,
+      visibility: visibility || 'friends',
+      auto_generate_embedding: true // Enable embedding generation for semantic search
+    });
+
+    const response: SaveRecommendationResponse = {
+      success: true,
+      place_id: placeId,
+      annotation_id: annotationId,
+      message: 'Recommendation saved successfully'
+    };
+
+    console.log('Recommendation saved successfully:', {
+      place_id: placeId,
+      annotation_id: annotationId,
+      place_name,
+      user_id
+    });
+
+    // Return response in the format expected by the frontend API client
+    res.status(201).json({
+      success: true,
+      data: response,
+      message: 'Recommendation saved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error saving recommendation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save recommendation',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/recommendations/user/:userId
+ * Get all recommendations for a specific user
+ */
+router.get('/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Validate user ID format (should be UUID)
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid user ID is required'
+      });
+    }
+
+    // Get user's annotations with pagination
+    const annotations = await getAnnotationsByUserId(userId, limit + offset);
+    
+    // Apply offset manually since the function doesn't support it
+    const paginatedAnnotations = annotations.slice(offset, offset + limit);
+
+    // Transform annotations to include place information
+    const recommendations = await Promise.all(
+      paginatedAnnotations.map(async (annotation) => {
+        // Get place information (you might want to add a join query for better performance)
+        const placeQuery = await pool.query(
+          'SELECT name, address, lat, lng FROM places WHERE id = $1',
+          [annotation.place_id]
+        );
+        const place = placeQuery.rows[0] || {};
+
+        return {
+          id: annotation.id,
+          place_name: place.name || 'Unknown Place',
+          place_address: place.address,
+          place_lat: place.lat,
+          place_lng: place.lng,
+          notes: annotation.notes,
+          rating: annotation.rating,
+          visit_date: annotation.visit_date,
+          visibility: annotation.visibility,
+          labels: annotation.labels,
+          went_with: annotation.went_with,
+          metadata: annotation.metadata,
+          created_at: annotation.created_at,
+          updated_at: annotation.updated_at
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: recommendations,
+      pagination: {
+        limit,
+        offset,
+        total: annotations.length,
+        hasMore: annotations.length > offset + limit
+      },
+      message: 'User recommendations retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching user recommendations:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recommendations',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/recommendations/place/:placeId
+ * Get all recommendations for a specific place
+ */
+router.get('/place/:placeId', async (req, res) => {
+  try {
+    const { placeId } = req.params;
+    const visibility = req.query.visibility as 'friends' | 'public' | 'all' || 'all';
+    const limit = parseInt(req.query.limit as string) || 50;
+
+    // Validate place ID
+    const placeIdNum = parseInt(placeId);
+    if (isNaN(placeIdNum)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid place ID is required'
+      });
+    }
+
+    // Validate visibility parameter
+    if (!['friends', 'public', 'all'].includes(visibility)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Visibility must be "friends", "public", or "all"'
+      });
+    }
+
+    // Get place recommendations
+    const annotations = await getAnnotationsByPlaceId(placeIdNum, visibility, limit);
+
+    // Transform annotations to include user information
+    const recommendations = await Promise.all(
+      annotations.map(async (annotation) => {
+        // Get user information (you might want to add a join query for better performance)
+        const userQuery = await pool.query(
+          'SELECT display_name, email FROM users WHERE id = $1',
+          [annotation.user_id]
+        );
+        const user = userQuery.rows[0] || {};
+
+        return {
+          id: annotation.id,
+          user_id: annotation.user_id,
+          user_name: user.display_name || 'Anonymous',
+          user_email: user.email,
+          notes: annotation.notes,
+          rating: annotation.rating,
+          visit_date: annotation.visit_date,
+          visibility: annotation.visibility,
+          labels: annotation.labels,
+          went_with: annotation.went_with,
+          metadata: annotation.metadata,
+          created_at: annotation.created_at,
+          updated_at: annotation.updated_at
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: recommendations,
+      place_id: placeIdNum,
+      visibility,
+      total: recommendations.length,
+      message: 'Place recommendations retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching place recommendations:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recommendations',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/recommendations/:annotationId
+ * Get a specific recommendation by ID
+ */
+router.get('/:annotationId', async (req, res) => {
+  try {
+    const { annotationId } = req.params;
+    const annotationIdNum = parseInt(annotationId);
+
+    if (isNaN(annotationIdNum)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid annotation ID is required'
+      });
+    }
+
+    const annotation = await getAnnotationById(annotationIdNum);
+    
+    if (!annotation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recommendation not found'
+      });
+    }
+
+    // Get place and user information
+    const [placeQuery, userQuery] = await Promise.all([
+      pool.query('SELECT name, address, lat, lng FROM places WHERE id = $1', [annotation.place_id]),
+      pool.query('SELECT display_name, email FROM users WHERE id = $1', [annotation.user_id])
+    ]);
+
+    const place = placeQuery.rows[0] || {};
+    const user = userQuery.rows[0] || {};
+
+    const recommendation = {
+      ...annotation,
+      place_name: place.name,
+      place_address: place.address,
+      place_lat: place.lat,
+      place_lng: place.lng,
+      user_name: user.display_name,
+      user_email: user.email
+    };
+
+    res.json({
+      success: true,
+      data: recommendation,
+      message: 'Recommendation retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching recommendation:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recommendation',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * PUT /api/recommendations/:annotationId
+ * Update a specific recommendation
+ */
+router.put('/:annotationId', async (req, res) => {
+  try {
+    const { annotationId } = req.params;
+    const annotationIdNum = parseInt(annotationId);
+    const updates = req.body;
+
+    if (isNaN(annotationIdNum)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid annotation ID is required'
+      });
+    }
+
+    // Validate rating if provided
+    if (updates.rating && (updates.rating < 1 || updates.rating > 5)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rating must be between 1 and 5'
+      });
+    }
+
+    // Validate visibility if provided
+    if (updates.visibility && !['friends', 'public'].includes(updates.visibility)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Visibility must be either "friends" or "public"'
+      });
+    }
+
+    const success = await updateAnnotation(annotationIdNum, updates);
+
+    if (!success) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recommendation not found or no changes made'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Recommendation updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error updating recommendation:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update recommendation',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * DELETE /api/recommendations/:annotationId
+ * Delete a specific recommendation
+ */
+router.delete('/:annotationId', async (req, res) => {
+  try {
+    const { annotationId } = req.params;
+    const annotationIdNum = parseInt(annotationId);
+    const { user_id } = req.body; // User ID should be provided in request body for authorization
+
+    if (isNaN(annotationIdNum)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid annotation ID is required'
+      });
+    }
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required for authorization'
+      });
+    }
+
+    const success = await deleteAnnotation(annotationIdNum, user_id);
+
+    if (!success) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recommendation not found or unauthorized'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Recommendation deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Error deleting recommendation:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete recommendation',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/recommendations/regenerate-embeddings
+ * Regenerate embeddings for all existing annotations with enhanced data
+ */
+router.post('/regenerate-embeddings', async (req, res) => {
+  try {
+    console.log('Starting embedding regeneration...');
+    
+    const result = await regenerateAllEmbeddings();
+    
+    res.json({
+      success: true,
+      data: result,
+      message: `Embedding regeneration complete. Success: ${result.success}, Failed: ${result.failed}`
+    });
+    
+  } catch (error) {
+    console.error('Error regenerating embeddings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to regenerate embeddings',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/recommendations/search
+ * Semantic search for places and recommendations using embeddings
+ */
+router.post('/search', async (req, res) => {
+  try {
+    const { query, limit = 10, threshold = 0.7 } = req.body;
+
+    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query is required'
+      });
+    }
+
+    console.log('Semantic search query:', query);
+
+    // Generate embedding for the search query
+    let searchEmbedding: number[];
+    try {
+      searchEmbedding = await generateSearchEmbedding(query.trim());
+      console.log('Generated search embedding');
+    } catch (error) {
+      console.error('Failed to generate search embedding:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to process search query',
+        error: 'Embedding generation failed'
+      });
+    }
+
+    // Search for similar annotations
+    const similarAnnotations = await searchAnnotationsBySimilarity(
+      searchEmbedding,
+      limit,
+      threshold
+    );
+
+    console.log(`Found ${similarAnnotations.length} similar annotations`);
+
+    // Get detailed information for each annotation
+    const searchResults = await Promise.all(
+      similarAnnotations.map(async (annotation) => {
+        // Get place information
+        const placeQuery = await pool.query(
+          'SELECT name, address, lat, lng, google_place_id FROM places WHERE id = $1',
+          [annotation.place_id]
+        );
+        const place = placeQuery.rows[0] || {};
+
+        // Get user information
+        const userQuery = await pool.query(
+          'SELECT display_name FROM users WHERE id = $1',
+          [annotation.user_id]
+        );
+        const user = userQuery.rows[0] || {};
+
+        return {
+          annotation_id: annotation.id,
+          place_id: annotation.place_id,
+          place_name: place.name || 'Unknown Place',
+          place_address: place.address,
+          place_lat: place.lat,
+          place_lng: place.lng,
+          google_place_id: place.google_place_id,
+          user_name: user.display_name || 'Anonymous',
+          notes: annotation.notes,
+          rating: annotation.rating,
+          visit_date: annotation.visit_date,
+          labels: annotation.labels,
+          went_with: annotation.went_with,
+          metadata: annotation.metadata,
+          similarity: annotation.similarity,
+          created_at: annotation.created_at
+        };
+      })
+    );
+
+    // Group results by place to avoid duplicates
+    const placeGroups = new Map();
+    searchResults.forEach(result => {
+      const placeKey = result.place_id;
+      if (!placeGroups.has(placeKey)) {
+        placeGroups.set(placeKey, {
+          place_id: result.place_id,
+          place_name: result.place_name,
+          place_address: result.place_address,
+          place_lat: result.place_lat,
+          place_lng: result.place_lng,
+          google_place_id: result.google_place_id,
+          recommendations: [],
+          average_similarity: 0,
+          total_recommendations: 0
+        });
+      }
+      
+      const placeGroup = placeGroups.get(placeKey);
+      placeGroup.recommendations.push({
+        annotation_id: result.annotation_id,
+        user_name: result.user_name,
+        notes: result.notes,
+        rating: result.rating,
+        visit_date: result.visit_date,
+        labels: result.labels,
+        went_with: result.went_with,
+        metadata: result.metadata,
+        similarity: result.similarity,
+        created_at: result.created_at
+      });
+      
+      placeGroup.total_recommendations += 1;
+      placeGroup.average_similarity = (
+        (placeGroup.average_similarity * (placeGroup.total_recommendations - 1) + result.similarity) / 
+        placeGroup.total_recommendations
+      );
+    });
+
+    // Convert to array and sort by average similarity
+    const groupedResults = Array.from(placeGroups.values())
+      .sort((a, b) => b.average_similarity - a.average_similarity)
+      .slice(0, limit);
+
+    // Generate AI-powered summary based on the search results
+    let summary = '';
+    try {
+      const searchContext: SearchContext = {
+        query: query.trim(),
+        results: groupedResults,
+        total_places: groupedResults.length,
+        total_recommendations: searchResults.length
+      };
+      
+      summary = await generateAISummary(searchContext);
+      console.log('🤖 AI Summary generated successfully');
+    } catch (error) {
+      console.error('❌ Failed to generate AI summary, using fallback:', error);
+      
+      // Fallback to simple summary
+      if (groupedResults.length === 0) {
+        summary = `No relevant places found for your search query. Try using different keywords or being more specific about what you're looking for.`;
+      } else {
+        const topResult = groupedResults[0];
+        const topRecommendation = topResult.recommendations[0];
+        
+        if (topResult.average_similarity > 0.8) {
+          summary = `Based on ${topResult.total_recommendations} recommendation(s), "${topResult.place_name}" seems to match your search. ${topRecommendation.notes ? `Users say: "${topRecommendation.notes.substring(0, 100)}..."` : ''}`;
+        } else if (topResult.average_similarity > 0.6) {
+          summary = `I found some potentially relevant places. "${topResult.place_name}" has ${topResult.total_recommendations} recommendation(s) that might be related to your search.`;
+        } else {
+          summary = `I found some places that might be related to your search, though the match isn't very strong. Consider refining your query for better results.`;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        query: query.trim(),
+        summary,
+        results: groupedResults,
+        total_places: groupedResults.length,
+        total_recommendations: searchResults.length,
+        search_metadata: {
+          threshold,
+          limit,
+          query_processed: true
+        }
+      },
+      message: 'Search completed successfully'
+    });
+
+  } catch (error) {
+    console.error('Error performing semantic search:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to perform search',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+export default router; 
