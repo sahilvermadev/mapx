@@ -1,15 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaArrowLeft, FaStar, FaHeart, FaBookmark, FaFilter, FaSort, FaSearch } from 'react-icons/fa';
-import { profileApi, type UserData, type UserStats, type FilterOptions, type SortOptions } from '../services/profile';
-import type { PlaceCard } from '../services/profile';
+import { ArrowLeft, Star, Heart, Bookmark, Filter, SortAsc, Search, Users, ChevronDown } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { profileApi, type UserData, type UserStats, type FilterOptions, type SortOptions } from '@/services/profile';
+import type { PlaceCard } from '@/services/profile';
 
-import PlaceCardComponent from '../components/PlaceCard';
-import StatsCard from '../components/StatsCard';
-import FilterPanel from '../components/FilterPanel';
-import LoadingSpinner from '../components/LoadingSpinner';
-import './ProfilePage.css';
+import PlaceCardComponent from '@/components/PlaceCard';
+import StatsCard from '@/components/StatsCard';
+import FilterPanel from '@/components/FilterPanel';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 type TabType = 'recommendations' | 'likes' | 'saved';
 
@@ -235,8 +246,8 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="profile-page">
-        <div className="profile-loading">
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
           <LoadingSpinner />
           <p>Loading profile...</p>
         </div>
@@ -247,13 +258,13 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   // Error state
   if (error) {
     return (
-      <div className="profile-page">
-        <div className="profile-error">
-          <h2>Error Loading Profile</h2>
-          <p>{error}</p>
-          <button onClick={loadUserProfile} className="retry-btn">
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <h2 className="text-xl font-semibold">Error Loading Profile</h2>
+          <p className="text-muted-foreground">{error}</p>
+          <Button onClick={loadUserProfile} variant="outline">
             Try Again
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -262,233 +273,269 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   // Check if user exists
   if (!userData) {
     return (
-      <div className="profile-page">
-        <div className="profile-error">
-          <h2>User Not Found</h2>
-          <p>The requested user profile could not be found.</p>
-          <button onClick={() => navigate('/')} className="back-btn">
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <h2 className="text-xl font-semibold">User Not Found</h2>
+          <p className="text-muted-foreground">The requested user profile could not be found.</p>
+          <Button onClick={() => navigate('/')} variant="outline">
             Back to Map
-          </button>
+          </Button>
         </div>
       </div>
     );
   }
 
+  const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+  const getSortLabel = () => {
+    const { field, direction } = sortOptions;
+    if (field === 'created_at') return direction === 'desc' ? 'Newest First' : 'Oldest First';
+    if (field === 'rating') return direction === 'desc' ? 'Highest Rated' : 'Lowest Rated';
+    if (field === 'place_name') return direction === 'asc' ? 'Name A-Z' : 'Name Z-A';
+    return 'Sort';
+  };
+
   return (
-    <div className="profile-page">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="profile-header">
-        <div className="header-container">
-          <button onClick={() => navigate('/')} className="back-btn" aria-label="Back to map">
-            <FaArrowLeft />
-          </button>
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container mx-auto px-4 h-16 flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Map
+          </Button>
           
-          <div className="user-info">
-            <div className="user-avatar">
-              {userData.profilePictureUrl ? (
-                <img src={userData.profilePictureUrl} alt={userData.displayName} />
-              ) : (
-                <div className="avatar-fallback">
-                  {userData.displayName.charAt(0).toUpperCase()}
-                </div>
-              )}
-            </div>
+          <div className="flex items-center gap-3">
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={userData.profilePictureUrl} alt={userData.displayName} />
+              <AvatarFallback>{getInitials(userData.displayName)}</AvatarFallback>
+            </Avatar>
             
-            <div className="user-details">
-              <h1>{userData.displayName}</h1>
-              <p>{userData.email}</p>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold truncate">{userData.displayName}</h1>
+              <p className="text-sm text-muted-foreground truncate">{userData.email}</p>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="main-container">
+      <div className="container mx-auto px-4 py-8">
+        {/* Stats Dashboard */}
+        {/* {userStats && (
+          <section className="mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <StatsCard
+                title="Recommendations"
+                value={userStats.total_recommendations}
+                icon={<Star className="h-4 w-4" />}
+                color="primary"
+              />
+              <StatsCard
+                title="Likes"
+                value={userStats.total_likes}
+                icon={<Heart className="h-4 w-4" />}
+                color="secondary"
+              />
+              <StatsCard
+                title="Saved"
+                value={userStats.total_saved}
+                icon={<Bookmark className="h-4 w-4" />}
+                color="success"
+              />
+              <StatsCard
+                title="Avg Rating"
+                value={userStats.average_rating.toFixed(1)}
+                icon={<Star className="h-4 w-4" />}
+                color="warning"
+                isRating
+              />
+            </div>
+          </section>
+        )} */}
 
-      {/* Stats Dashboard */}
-      {userStats && (
-        <section className="stats-dashboard">
-          <StatsCard
-            title="Recommendations"
-            value={userStats.total_recommendations}
-            icon={<FaStar />}
-            color="primary"
-          />
-          <StatsCard
-            title="Likes"
-            value={userStats.total_likes}
-            icon={<FaHeart />}
-            color="secondary"
-          />
-          <StatsCard
-            title="Saved"
-            value={userStats.total_saved}
-            icon={<FaBookmark />}
-            color="success"
-          />
-          <StatsCard
-            title="Avg Rating"
-            value={userStats.average_rating.toFixed(1)}
-            icon={<FaStar />}
-            color="warning"
-            isRating
-          />
+        {/* Tab Navigation */}
+        <nav className="flex space-x-1 mb-6">
+          <Button
+            variant={activeTab === 'recommendations' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => handleTabChange('recommendations')}
+            className="flex items-center gap-2"
+          >
+            <Star className="h-4 w-4" />
+            Recommendations
+            <Badge variant="secondary" className="ml-1">
+              {tabCounts.recommendations}
+            </Badge>
+          </Button>
+          <Button
+            variant={activeTab === 'likes' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => handleTabChange('likes')}
+            className="flex items-center gap-2"
+          >
+            <Heart className="h-4 w-4" />
+            Likes
+            <Badge variant="secondary" className="ml-1">
+              {tabCounts.likes}
+            </Badge>
+          </Button>
+          <Button
+            variant={activeTab === 'saved' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => handleTabChange('saved')}
+            className="flex items-center gap-2"
+          >
+            <Bookmark className="h-4 w-4" />
+            Saved
+            <Badge variant="secondary" className="ml-1">
+              {tabCounts.saved}
+            </Badge>
+          </Button>
+        </nav>
+
+        {/* Controls */}
+        <section className="mb-6">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder={`Search ${activeTab}...`}
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            <div className="flex gap-2">
+              <Button
+                variant={showFilters ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowFilters(!showFilters)}
+              >
+                <Filter className="h-4 w-4 mr-2" />
+                Filters
+              </Button>
+              
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <SortAsc className="h-4 w-4 mr-2" />
+                    {getSortLabel()}
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleSortChange({ field: 'created_at', direction: 'desc' })}>
+                    Newest First
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSortChange({ field: 'created_at', direction: 'asc' })}>
+                    Oldest First
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSortChange({ field: 'rating', direction: 'desc' })}>
+                    Highest Rated
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSortChange({ field: 'rating', direction: 'asc' })}>
+                    Lowest Rated
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSortChange({ field: 'place_name', direction: 'asc' })}>
+                    Name A-Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSortChange({ field: 'place_name', direction: 'desc' })}>
+                    Name Z-A
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
         </section>
-      )}
 
-      {/* Tab Navigation */}
-      <nav className="tab-navigation">
-        <button
-          className={`tab-btn ${activeTab === 'recommendations' ? 'active' : ''}`}
-          onClick={() => handleTabChange('recommendations')}
-        >
-          Recommendations
-          <span className="tab-count">{tabCounts.recommendations}</span>
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'likes' ? 'active' : ''}`}
-          onClick={() => handleTabChange('likes')}
-        >
-          Likes
-          <span className="tab-count">{tabCounts.likes}</span>
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'saved' ? 'active' : ''}`}
-          onClick={() => handleTabChange('saved')}
-        >
-          Saved
-          <span className="tab-count">{tabCounts.saved}</span>
-        </button>
-      </nav>
-
-      {/* Controls */}
-      <section className="controls-section">
-        <div className="search-control">
-          <FaSearch className="search-icon" />
-          <input
-            type="text"
-            placeholder={`Search ${activeTab}...`}
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-            className="search-input"
-          />
-        </div>
-        
-        <div className="control-buttons">
-          <button
-            className={`control-btn ${showFilters ? 'active' : ''}`}
-            onClick={() => setShowFilters(!showFilters)}
-            aria-label="Toggle filters"
-          >
-            <FaFilter />
-            Filters
-          </button>
-          
-          <div className="sort-dropdown">
-            <button className="control-btn" aria-label="Sort options">
-              <FaSort />
-              Sort
-            </button>
-            <div className="sort-menu">
-              <button onClick={() => handleSortChange({ field: 'created_at', direction: 'desc' })}>
-                Newest First
-              </button>
-              <button onClick={() => handleSortChange({ field: 'created_at', direction: 'asc' })}>
-                Oldest First
-              </button>
-              <button onClick={() => handleSortChange({ field: 'rating', direction: 'desc' })}>
-                Highest Rated
-              </button>
-              <button onClick={() => handleSortChange({ field: 'rating', direction: 'asc' })}>
-                Lowest Rated
-              </button>
-              <button onClick={() => handleSortChange({ field: 'place_name', direction: 'asc' })}>
-                Name A-Z
-              </button>
-              <button onClick={() => handleSortChange({ field: 'place_name', direction: 'desc' })}>
-                Name Z-A
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Filter Panel */}
-      <AnimatePresence>
-        {showFilters && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="filter-panel-container"
-          >
-            <FilterPanel
-              filters={filters}
-              onFilterChange={handleFilterChange}
-              activeTab={activeTab}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Content Area */}
-      <main className="content-area">
-        {places.length === 0 && !loadingMore ? (
-          <div className="empty-state">
-            <div className="empty-icon">
-              {activeTab === 'recommendations' && <FaStar />}
-              {activeTab === 'likes' && <FaHeart />}
-              {activeTab === 'saved' && <FaBookmark />}
-            </div>
-            <h3>No {activeTab} yet</h3>
-            <p>Start exploring places to build your collection!</p>
-          </div>
-        ) : (
-          <div className="places-grid">
-            <AnimatePresence>
-              {places.map((place, index) => (
-                <motion.div
-                  key={place.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ delay: index * 0.1 }}
-                >
-                                     <PlaceCardComponent
-                     place={place}
-                     onViewOnMap={() => handleViewOnMap(place)}
-                     onDelete={() => handlePlaceAction(place.id, 'delete')}
-                     onUnlike={() => handlePlaceAction(place.id, 'unlike')}
-                     onRemove={() => handlePlaceAction(place.id, 'remove')}
-                     showActions={true}
-                     tabType={activeTab}
-                   />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* Load More */}
-        {hasMore && (
-          <div className="load-more-container">
-            <button
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-              className="load-more-btn"
+        {/* Filter Panel */}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="mb-6"
             >
-              {loadingMore ? (
-                <>
-                  <LoadingSpinner size="small" />
-                  Loading...
-                </>
-              ) : (
-                'Load More'
-              )}
-            </button>
-          </div>
-        )}
-      </main>
+              <Card>
+                <CardContent className="p-4">
+                  <FilterPanel
+                    filters={filters}
+                    onFilterChange={handleFilterChange}
+                    activeTab={activeTab}
+                  />
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Content Area */}
+        <main>
+          {places.length === 0 && !loadingMore ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="h-12 w-12 text-muted-foreground">
+                    {activeTab === 'recommendations' && <Star className="h-full w-full" />}
+                    {activeTab === 'likes' && <Heart className="h-full w-full" />}
+                    {activeTab === 'saved' && <Bookmark className="h-full w-full" />}
+                  </div>
+                  <h3 className="text-lg font-semibold">No {activeTab} yet</h3>
+                  <p className="text-muted-foreground">Start exploring places to build your collection!</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <AnimatePresence>
+                {places.map((place, index) => (
+                  <motion.div
+                    key={place.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <PlaceCardComponent
+                      place={place}
+                      onViewOnMap={() => handleViewOnMap(place)}
+                      onDelete={() => handlePlaceAction(place.id, 'delete')}
+                      onUnlike={() => handlePlaceAction(place.id, 'unlike')}
+                      onRemove={() => handlePlaceAction(place.id, 'remove')}
+                      showActions={true}
+                      tabType={activeTab}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Load More */}
+          {hasMore && (
+            <div className="mt-8 text-center">
+              <Button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                variant="outline"
+                size="lg"
+              >
+                {loadingMore ? (
+                  <>
+                    <LoadingSpinner size="small" />
+                    Loading...
+                  </>
+                ) : (
+                  'Load More'
+                )}
+              </Button>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );

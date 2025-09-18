@@ -210,42 +210,66 @@ exports.up = pgm => {
   pgm.createIndex('media', 'annotation_id');
   pgm.createIndex('media', 'user_id');
 
-  // Keep existing tables for backward compatibility
-  // Table: recommendations (keeping for backward compatibility)
-  pgm.createTable('recommendations', {
-    id: {
-      type: 'UUID',
-      primaryKey: true,
-      default: pgm.func('gen_random_uuid()'),
-    },
-    owner_id: {
+
+
+  // Table: user_follows (follow relationships)
+  pgm.createTable('user_follows', {
+    follower_id: {
       type: 'UUID',
       notNull: true,
       references: 'users(id)',
       onDelete: 'CASCADE',
     },
-    name: {
-      type: 'VARCHAR(255)',
+    following_id: {
+      type: 'UUID',
       notNull: true,
+      references: 'users(id)',
+      onDelete: 'CASCADE',
     },
-    latitude: {
-      type: 'NUMERIC(10, 8)',
-      notNull: true,
+    created_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
     },
-    longitude: {
-      type: 'NUMERIC(11, 8)',
-      notNull: true,
+  });
+  
+  // Primary key constraint
+  pgm.addConstraint('user_follows', 'pk_user_follows', { 
+    primaryKey: ['follower_id', 'following_id'] 
+  });
+  
+  // Prevent self-following
+  pgm.addConstraint('user_follows', 'check_no_self_follow', {
+    check: 'follower_id != following_id'
+  });
+
+  // Table: user_privacy_settings
+  pgm.createTable('user_privacy_settings', {
+    user_id: {
+      type: 'UUID',
+      primaryKey: true,
+      references: 'users(id)',
+      onDelete: 'CASCADE',
     },
-    notes: {
+    profile_visibility: {
       type: 'TEXT',
-    },
-    category: {
-      type: 'VARCHAR(100)',
-    },
-    privacy: {
-      type: 'VARCHAR(50)',
       notNull: true,
       default: 'public',
+      check: "profile_visibility IN ('public', 'private')",
+    },
+    allow_follow_requests: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: true,
+    },
+    show_location_in_feed: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: true,
+    },
+    allow_messages: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: false,
     },
     created_at: {
       type: 'TIMESTAMPTZ',
@@ -256,21 +280,23 @@ exports.up = pgm => {
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
-  pgm.createIndex('recommendations', ['owner_id', 'privacy'], { ifNotExists: true });
-  pgm.createIndex('recommendations', 'privacy', { ifNotExists: true });
 
-  // Table: likes (keeping for backward compatibility)
-  pgm.createTable('likes', {
+  // Table: annotation_likes (for liking annotations/reviews)
+  pgm.createTable('annotation_likes', {
+    id: {
+      type: 'SERIAL',
+      primaryKey: true,
+    },
+    annotation_id: {
+      type: 'INT',
+      notNull: true,
+      references: 'annotations(id)',
+      onDelete: 'CASCADE',
+    },
     user_id: {
       type: 'UUID',
       notNull: true,
       references: 'users(id)',
-      onDelete: 'CASCADE',
-    },
-    recommendation_id: {
-      type: 'UUID',
-      notNull: true,
-      references: 'recommendations(id)',
       onDelete: 'CASCADE',
     },
     created_at: {
@@ -278,20 +304,101 @@ exports.up = pgm => {
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
-  pgm.addConstraint('likes', 'pk_likes', { primaryKey: ['user_id', 'recommendation_id'] });
+  
+  // Add unique constraint to prevent duplicate likes
+  pgm.addConstraint('annotation_likes', 'unique_annotation_like', {
+    unique: ['annotation_id', 'user_id']
+  });
 
-  // Table: saved_recommendations (keeping for backward compatibility)
-  pgm.createTable('saved_recommendations', {
+  // Table: annotation_comments (for commenting on annotations/reviews)
+  pgm.createTable('annotation_comments', {
+    id: {
+      type: 'SERIAL',
+      primaryKey: true,
+    },
+    annotation_id: {
+      type: 'INT',
+      notNull: true,
+      references: 'annotations(id)',
+      onDelete: 'CASCADE',
+    },
     user_id: {
       type: 'UUID',
       notNull: true,
       references: 'users(id)',
       onDelete: 'CASCADE',
     },
-    recommendation_id: {
+    parent_comment_id: {
+      type: 'INT',
+      references: 'annotation_comments(id)',
+      onDelete: 'CASCADE',
+    },
+    comment: {
+      type: 'TEXT',
+      notNull: true,
+    },
+    created_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+    updated_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+  });
+
+  // Table: saved_places (for saving places to user's collection)
+  pgm.createTable('saved_places', {
+    id: {
+      type: 'SERIAL',
+      primaryKey: true,
+    },
+    user_id: {
       type: 'UUID',
       notNull: true,
-      references: 'recommendations(id)',
+      references: 'users(id)',
+      onDelete: 'CASCADE',
+    },
+    place_id: {
+      type: 'INT',
+      notNull: true,
+      references: 'places(id)',
+      onDelete: 'CASCADE',
+    },
+    notes: {
+      type: 'TEXT',
+    },
+    created_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+    updated_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+  });
+  
+  // Add unique constraint to prevent duplicate saves
+  pgm.addConstraint('saved_places', 'unique_saved_place', {
+    unique: ['user_id', 'place_id']
+  });
+
+  // Table: comment_likes (for liking comments)
+  pgm.createTable('comment_likes', {
+    id: {
+      type: 'SERIAL',
+      primaryKey: true,
+    },
+    comment_id: {
+      type: 'INT',
+      notNull: true,
+      references: 'annotation_comments(id)',
+      onDelete: 'CASCADE',
+    },
+    user_id: {
+      type: 'UUID',
+      notNull: true,
+      references: 'users(id)',
       onDelete: 'CASCADE',
     },
     created_at: {
@@ -299,14 +406,68 @@ exports.up = pgm => {
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
-  pgm.addConstraint('saved_recommendations', 'pk_saved_recommendations', { primaryKey: ['user_id', 'recommendation_id'] });
+  
+  // Add unique constraint to prevent duplicate comment likes
+  pgm.addConstraint('comment_likes', 'unique_comment_like', {
+    unique: ['comment_id', 'user_id']
+  });
+
+  // Table: user_blocks
+  pgm.createTable('user_blocks', {
+    blocker_id: {
+      type: 'UUID',
+      notNull: true,
+      references: 'users(id)',
+      onDelete: 'CASCADE',
+    },
+    blocked_id: {
+      type: 'UUID',
+      notNull: true,
+      references: 'users(id)',
+      onDelete: 'CASCADE',
+    },
+    created_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+  });
+  
+  // Primary key constraint
+  pgm.addConstraint('user_blocks', 'pk_user_blocks', { 
+    primaryKey: ['blocker_id', 'blocked_id'] 
+  });
+  
+  // Prevent self-blocking
+  pgm.addConstraint('user_blocks', 'check_no_self_block', {
+    check: 'blocker_id != blocked_id'
+  });
+
+  // Create indexes for social network tables
+  pgm.createIndex('user_follows', 'follower_id');
+  pgm.createIndex('user_follows', 'following_id');
+  pgm.createIndex('annotation_comments', 'annotation_id');
+  pgm.createIndex('annotation_comments', 'user_id');
+  pgm.createIndex('annotation_comments', 'parent_comment_id');
+  pgm.createIndex('annotation_comments', 'created_at');
+  pgm.createIndex('annotation_likes', 'annotation_id');
+  pgm.createIndex('annotation_likes', 'user_id');
+  pgm.createIndex('comment_likes', 'comment_id');
+  pgm.createIndex('comment_likes', 'user_id');
+  pgm.createIndex('saved_places', 'user_id');
+  pgm.createIndex('saved_places', 'place_id');
+  pgm.createIndex('user_blocks', 'blocker_id');
+  pgm.createIndex('user_blocks', 'blocked_id');
 };
 
 exports.down = pgm => {
   // Drop tables in reverse order of dependency
-  pgm.dropTable('saved_recommendations', { ifExists: true, cascade: true });
-  pgm.dropTable('likes', { ifExists: true, cascade: true });
-  pgm.dropTable('recommendations', { ifExists: true, cascade: true });
+  pgm.dropTable('user_blocks', { ifExists: true, cascade: true });
+  pgm.dropTable('comment_likes', { ifExists: true, cascade: true });
+  pgm.dropTable('annotation_likes', { ifExists: true, cascade: true });
+  pgm.dropTable('saved_places', { ifExists: true, cascade: true });
+  pgm.dropTable('annotation_comments', { ifExists: true, cascade: true });
+  pgm.dropTable('user_privacy_settings', { ifExists: true, cascade: true });
+  pgm.dropTable('user_follows', { ifExists: true, cascade: true });
   pgm.dropTable('media', { ifExists: true, cascade: true });
   pgm.dropTable('annotations', { ifExists: true, cascade: true });
   pgm.dropTable('places', { ifExists: true, cascade: true });

@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
-import { useNavigate } from 'react-router-dom';
-import { apiClient } from '../services/api';
 import { placesApiService } from '../services/placesApi';
-import { recommendationsApi, type SearchResponse } from '../services/recommendations';
+import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendations';
+import { useAuth } from '../hooks/useAuth';
 import LoginModal from '../components/LoginModal';
 import ContentCard from '../components/ContentCard';
 import SearchBar from '../components/SearchBar';
 import SearchResults from '../components/SearchResults';
 import type { PlaceDetails } from '../components/ContentCard';
+import { Button } from '@/components/ui/button';
+import Header from '@/components/Header';
 import './MapPage.css';
 
 // Constants
@@ -19,13 +20,7 @@ const POI_DISTANCE_THRESHOLD = 25; // meters
 const LOCATION_ZOOM = 16;
 const TARGET_ZOOM = 25;
 
-// Types
-type UserClaims = {
-  id: string;
-  email?: string;
-  displayName?: string;
-  profilePictureUrl?: string;
-};
+
 
 // Helper functions
 const getCategoryFromTypes = (types: string[]): string => {
@@ -81,24 +76,6 @@ const getCategoryFromTypes = (types: string[]): string => {
   return 'point_of_interest';
 };
 
-// Function to proxy Google profile pictures through our backend
-const getProxiedProfilePicture = (originalUrl: string): string => {
-  if (!originalUrl) return '';
-  
-  // Check if it's a Google profile picture URL
-  if (originalUrl.includes('googleusercontent.com')) {
-    // Use our backend proxy to load the image
-    const proxyUrl = `http://localhost:5000/auth/profile-picture?url=${encodeURIComponent(originalUrl)}`;
-    console.log('🖼️ Proxying Google profile picture:', {
-      original: originalUrl,
-      proxy: proxyUrl
-    });
-    return proxyUrl;
-  }
-  
-  return originalUrl;
-};
-
 const createPlaceDetails = (
   place: google.maps.places.PlaceResult,
   enhancedDetails: any,
@@ -121,49 +98,51 @@ const createPlaceDetails = (
 });
 
 const MapPage: React.FC = () => {
-  const navigate = useNavigate();
-  
-  // State
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
+  // Authentication state
+  const {
+    isAuthenticated,
+    isChecking: isAuthChecking,
+    user,
+    showLoginModal,
+    logout,
+    closeLoginModal,
+  } = useAuth();
+
+  // Component state
   const [selectedPlace, setSelectedPlace] = useState<PlaceDetails | null>(null);
   const [showContentCard, setShowContentCard] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [user, setUser] = useState<UserClaims | null>(null);
-  const [avatarError, setAvatarError] = useState(false);
   const [isLocating, setIsLocating] = useState(true);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [reviewedPlaces, setReviewedPlaces] = useState<ReviewedPlace[]>([]);
+  const [reviewedPlacesLoading, setReviewedPlacesLoading] = useState(false);
+  const [reviewedPlacesError, setReviewedPlacesError] = useState<string | null>(null);
+  const [showReviewedPlaces, setShowReviewedPlaces] = useState(true);
+  const [currentZoom, setCurrentZoom] = useState(9);
 
   // Refs
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
-  const markers = useRef<google.maps.Marker[]>([]);
   const accuracyCircle = useRef<google.maps.Circle | null>(null);
-  const geoWatchId = useRef<number | null>(null);
   const placesService = useRef<google.maps.places.PlacesService | null>(null);
+  const reviewedPlacesMarkers = useRef<google.maps.Marker[]>([]);
 
-  // Semantic search handlers
+  // Event handlers
   const handleSemanticSearch = async (query: string): Promise<SearchResponse> => {
     try {
-      console.log('🔍 Performing semantic search:', query);
       const results = await recommendationsApi.semanticSearch(query);
-      console.log('🔍 Search results:', results);
       return results;
     } catch (error) {
-      console.error('❌ Semantic search failed:', error);
+      console.error('Semantic search failed:', error);
       throw error;
     }
   };
 
   const handleSearchResults = (results: SearchResponse) => {
-    console.log('🔍 Setting search results:', results);
     setSearchResults(results);
   };
 
   const handleSearchLoading = (loading: boolean) => {
-    console.log('🔍 Search loading:', loading);
     setIsSearching(loading);
   };
 
@@ -172,18 +151,15 @@ const MapPage: React.FC = () => {
   };
 
   const handleSearchPlaceSelect = (place: any) => {
-    console.log('🔍 Place selected from search:', place);
-    
-    // Convert search result to PlaceDetails format
     const placeDetails: PlaceDetails = {
       id: place.place_id || place.place_id?.toString() || `search-${place.place_id}`,
       name: place.place_name,
       address: place.place_address || '',
-      category: 'point_of_interest', // Default category
+      category: 'point_of_interest',
       userRating: 0,
       friendsRating: place.recommendations?.[0]?.rating || 0,
       personalReview: '',
-      images: [], // No images from search results
+      images: [],
       isLiked: false,
       isSaved: false,
       latitude: place.place_lat,
@@ -193,203 +169,56 @@ const MapPage: React.FC = () => {
 
     setSelectedPlace(placeDetails);
     setShowContentCard(true);
-    setSearchResults(null); // Close search results
+    setSearchResults(null);
   };
 
-  // Authentication effect
-  useEffect(() => {
-    const checkAuth = () => {
-      console.log('🔍 Checking authentication...');
-      const isAuth = apiClient.isAuthenticated();
-      console.log('🔍 Is authenticated:', isAuth);
-      
-      if (isAuth) {
-        console.log('✅ User is authenticated, setting up map...');
-        setIsAuthenticated(true);
-        setShowLoginModal(false);
-        setUser(apiClient.getCurrentUser());
-        setIsAuthChecking(false);
-      } else {
-        // Check if we're coming from an OAuth redirect
-        const urlParams = new URLSearchParams(window.location.search);
-        const token = urlParams.get('token');
-        
-        if (token) {
-          console.log('🔑 Token found in URL, storing and rechecking...');
-          // Store the token and check again
-          localStorage.setItem('authToken', token);
-          
-          // Recheck authentication after storing token
-          setTimeout(() => {
-            const newIsAuth = apiClient.isAuthenticated();
-            console.log('🔍 Recheck after storing token:', newIsAuth);
-            if (newIsAuth) {
-              setIsAuthenticated(true);
-              setShowLoginModal(false);
-              setUser(apiClient.getCurrentUser());
-            } else {
-              setIsAuthenticated(false);
-              setShowLoginModal(true);
-              setUser(null);
-            }
-            setIsAuthChecking(false);
-          }, 100);
-          return;
-        }
-        
-        console.log('❌ No authentication found, showing login modal');
-        setIsAuthenticated(false);
-        setShowLoginModal(true);
-        setUser(null);
-        setIsAuthChecking(false);
-      }
-    };
+  const handleLogout = () => logout();
 
-    // Check immediately
-    checkAuth();
-
-    // If not authenticated, check again after a short delay to handle OAuth redirects
-    if (!apiClient.isAuthenticated()) {
-      console.log('⏰ Setting up retry timer for auth check...');
-      const retryTimer = setTimeout(() => {
-        console.log('⏰ Retry timer fired, checking auth again...');
-        checkAuth();
-      }, 500); // 500ms delay to allow localStorage to be updated
-
-      return () => {
-        console.log('🧹 Cleaning up retry timer');
-        clearTimeout(retryTimer);
-      };
+  const handleLocateMe = () => {
+    if (!map.current) return;
+    
+    setIsLocating(true);
+    
+    if (accuracyCircle.current) {
+      accuracyCircle.current.setMap(null);
+      accuracyCircle.current = null;
     }
 
-    // Safety timeout to prevent infinite loading state
-    const safetyTimer = setTimeout(() => {
-      console.log('⚠️ Safety timeout reached, forcing auth check completion');
-      setIsAuthChecking(false);
-    }, 3000); // 3 seconds max
+    getUserLocation(window.google);
+  };
 
-    return () => {
-      clearTimeout(safetyTimer);
-    };
-  }, []);
+  const handlePlaceSelected = (place: PlaceDetails) => {
+    if (!map.current) return;
 
-  // Map initialization effect
-  useEffect(() => {
-    console.log('🗺️ Map init effect triggered:', { 
-      isAuthenticated, 
-      hasMapContainer: !!mapContainer.current, 
-      hasMap: !!map.current 
-    });
-    
-    if (!isAuthenticated || !mapContainer.current || map.current) {
-      console.log('🗺️ Map init skipped:', { 
-        reason: !isAuthenticated ? 'not authenticated' : 
-                !mapContainer.current ? 'no container' : 'map already exists' 
-      });
+    if (!place.latitude || !place.longitude || 
+        place.latitude === 0 || place.longitude === 0) {
+      console.warn('No valid coordinates for place:', place.name);
       return;
     }
 
-    console.log('🗺️ Starting map initialization...');
-    const initMap = async () => {
-      // Add a small delay to ensure DOM is fully rendered
-      await new Promise(resolve => setTimeout(resolve, 100));
+    const location = new google.maps.LatLng(place.latitude, place.longitude);
+    map.current.panTo(location);
+    
+    const currentZoom = map.current.getZoom() || 10;
+    const zoomSteps = 20;
+    const zoomInterval = 15;
+    let currentStep = 0;
+    
+    const zoomAnimation = setInterval(() => {
+      currentStep++;
+      const progress = currentStep / zoomSteps;
+      const currentZoomLevel = currentZoom + (TARGET_ZOOM - currentZoom) * progress;
       
-      // Double-check that the container is still available
-      if (!mapContainer.current) {
-        console.error('🗺️ Map container is null, cannot initialize map');
-        return;
+      map.current?.setZoom(Math.round(currentZoomLevel));
+      
+      if (currentStep >= zoomSteps) {
+        clearInterval(zoomAnimation);
       }
+    }, zoomInterval);
 
-      const loader = new Loader({ 
-        apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY, 
-        version: 'weekly', 
-        libraries: ['places', 'geometry'] 
-      });
-
-      try {
-        console.log('🗺️ Loading Google Maps API...');
-        const google = await loader.load();
-        console.log('🗺️ Google Maps API loaded successfully');
-        
-        // Triple-check that the container is still available after API load
-        if (!mapContainer.current) {
-          console.error('🗺️ Map container became null after API load');
-          return;
-        }
-        
-        // Initialize map
-        map.current = new google.maps.Map(mapContainer.current, {
-          center: DEFAULT_CENTER,
-          zoom: DEFAULT_ZOOM,
-          mapId: '95079f4fa5e07d01680ea67e',
-          clickableIcons: true,
-        });
-        console.log('🗺️ Map initialized successfully');
-
-        // Initialize Places service
-        placesService.current = new google.maps.places.PlacesService(map.current);
-
-        // Get user location
-        getUserLocation(google);
-
-        // Setup POI click handler
-        setupPOIClickHandler(google);
-
-        // Add global event listener to prevent default Google info windows
-        setTimeout(() => {
-          const mapElement = mapContainer.current;
-          if (mapElement) {
-            // Intercept clicks on POI elements before Google handles them
-            mapElement.addEventListener('click', (e) => {
-              const target = e.target as HTMLElement;
-              
-              // Check if this is a POI click by looking for Google's POI elements
-              if (target.closest('[role="button"]') || 
-                  target.closest('[aria-label*="restaurant"]') ||
-                  target.closest('[aria-label*="cafe"]') ||
-                  target.closest('[aria-label*="bar"]') ||
-                  target.closest('[aria-label*="hotel"]') ||
-                  target.closest('[aria-label*="park"]') ||
-                  target.closest('[aria-label*="museum"]') ||
-                  target.closest('[aria-label*="store"]') ||
-                  target.closest('[aria-label*="gas"]') ||
-                  target.closest('[aria-label*="hospital"]') ||
-                  target.closest('[aria-label*="school"]') ||
-                  target.closest('[aria-label*="bank"]') ||
-                  target.closest('[aria-label*="pharmacy"]') ||
-                  target.closest('[aria-label*="church"]') ||
-                  target.closest('[aria-label*="temple"]') ||
-                  target.closest('[aria-label*="theater"]') ||
-                  target.closest('[aria-label*="gym"]') ||
-                  target.closest('[aria-label*="library"]') ||
-                  target.closest('[aria-label*="station"]') ||
-                  target.closest('[aria-label*="airport"]') ||
-                  target.closest('.poi') ||
-                  target.closest('.place') ||
-                  target.closest('[data-place-id]')) {
-                
-                // Prevent the default Google info window
-                e.stopPropagation();
-                e.preventDefault();
-                
-                // Also stop immediate propagation to prevent any other handlers
-                e.stopImmediatePropagation();
-              }
-            }, true); // Use capture phase to intercept before Google's handlers
-          }
-        }, 1000); // Wait for map to fully load
-
-      } catch (err) {
-        console.error('🗺️ Error loading Google Maps:', err);
-      }
-    };
-
-    void initMap();
-
-    return () => {
-      cleanup();
-    };
-  }, [isAuthenticated]);
+    setSelectedPlace(place);
+    setShowContentCard(true);
+  };
 
   // Helper functions
   const getUserLocation = (google: typeof globalThis.google) => {
@@ -406,7 +235,6 @@ const MapPage: React.FC = () => {
         map.current?.setCenter(userLocation);
         map.current?.setZoom(LOCATION_ZOOM);
         
-        // Show accuracy circle if accuracy is good
         if (accuracy < 1000) {
           accuracyCircle.current = new google.maps.Circle({
             strokeColor: '#22d3ee',
@@ -434,51 +262,212 @@ const MapPage: React.FC = () => {
     );
   };
 
+  // Function to create markers for reviewed places
+  const createReviewedPlacesMarkers = (places: ReviewedPlace[]) => {
+    if (!map.current || !window.google) return;
+
+    // Clear existing markers
+    reviewedPlacesMarkers.current.forEach(marker => marker.setMap(null));
+    reviewedPlacesMarkers.current = [];
+
+    places.forEach(place => {
+      if (!place.lat || !place.lng) return;
+
+      const position = new google.maps.LatLng(place.lat, place.lng);
+      
+      // Create custom marker with collision behavior
+      const marker = new google.maps.Marker({
+        position,
+        map: map.current,
+        title: `${place.name} (${place.review_count} reviews, ${place.average_rating.toFixed(1)}★)`,
+        icon: {
+          url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+            <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.3)"/>
+                </filter>
+              </defs>
+              <circle cx="14" cy="14" r="12" fill="${place.average_rating >= 4.5 ? '#22c55e' : place.average_rating >= 3.5 ? '#eab308' : '#ef4444'}" stroke="white" stroke-width="2" filter="url(#shadow)"/>
+              <text x="14" y="18" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="Arial, sans-serif">${place.review_count}</text>
+            </svg>
+          `)}`,
+          scaledSize: new google.maps.Size(28, 28),
+          anchor: new google.maps.Point(14, 14)
+        },
+        zIndex: 1000, // Higher z-index for reviewed places
+        collisionBehavior: google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL
+      });
+
+      // Add click listener to marker
+      marker.addListener('click', async () => {
+        try {
+          console.log('Marker clicked for place:', place.name, 'Google Place ID:', place.google_place_id);
+          
+          // If we have a Google Place ID, fetch enhanced details
+          let enhancedDetails = null;
+          let images: string[] = [];
+          let category = place.category_name || place.metadata?.category || 'point_of_interest';
+          
+          if (place.google_place_id) {
+            try {
+              console.log('Fetching enhanced details for Google Place ID:', place.google_place_id);
+              enhancedDetails = await getEnhancedPlaceDetails(place.google_place_id);
+              console.log('Enhanced details received:', enhancedDetails);
+              
+              // Only get category from Google Places API if we don't have it in database
+              if (!place.category_name && enhancedDetails?.types && enhancedDetails.types.length > 0) {
+                category = enhancedDetails.types[0]; // Use the first type as category
+                console.log('Category from Google Places API:', category);
+              }
+              
+              if (enhancedDetails?.photos && enhancedDetails.photos.length > 0) {
+                images = enhancedDetails.photos.slice(0, 3).map((photo: any) => {
+                  const imageUrl = `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`;
+                  console.log('Generated image URL:', imageUrl);
+                  return imageUrl;
+                });
+                console.log('Generated images array:', images);
+              } else {
+                console.log('No photos found in enhanced details');
+              }
+            } catch (error) {
+              console.warn('Could not fetch enhanced details for place:', place.name, error);
+            }
+          } else if (place.lat && place.lng) {
+            // Fallback: try to find the place using nearby search
+            try {
+              console.log('No Google Place ID, trying nearby search for:', place.name);
+              const nearbyResponse = await placesApiService.nearbySearch({
+                location: { latitude: place.lat, longitude: place.lng },
+                radius: 100, // Small radius to find the exact place
+                maxResultCount: 5
+              });
+              
+              // Find the closest match by name
+              const closestMatch = nearbyResponse.places.find(p => 
+                p.displayName.text.toLowerCase().includes(place.name.toLowerCase()) ||
+                place.name.toLowerCase().includes(p.displayName.text.toLowerCase())
+              );
+              
+              if (closestMatch) {
+                // Only get category from nearby search if we don't have it in database
+                if (!place.category_name && closestMatch.types && closestMatch.types.length > 0) {
+                  category = closestMatch.types[0];
+                  console.log('Category from nearby search:', category);
+                }
+                
+                if (closestMatch.photos && closestMatch.photos.length > 0) {
+                  images = closestMatch.photos.slice(0, 3).map((photo: any) => {
+                    const imageUrl = `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`;
+                    console.log('Generated image URL from nearby search:', imageUrl);
+                    return imageUrl;
+                  });
+                  console.log('Generated images array from nearby search:', images);
+                }
+              }
+            } catch (error) {
+              console.warn('Could not find place via nearby search:', place.name, error);
+            }
+          } else {
+            console.log('No Google Place ID or coordinates available for place:', place.name);
+          }
+
+          const placeDetails: PlaceDetails = {
+            id: place.id.toString(),
+            name: place.name,
+            address: place.address || '',
+            category: category, // Use the determined category
+            userRating: 0,
+            friendsRating: place.average_rating,
+            personalReview: '',
+            images: images, // Use fetched images
+            isLiked: false,
+            isSaved: false,
+            latitude: place.lat,
+            longitude: place.lng,
+            google_place_id: place.google_place_id,
+          };
+
+          console.log('Setting place details with images:', placeDetails);
+          setSelectedPlace(placeDetails);
+          setShowContentCard(true);
+        } catch (error) {
+          console.error('Error handling marker click:', error);
+          
+          // Fallback to basic place details without images
+          const placeDetails: PlaceDetails = {
+            id: place.id.toString(),
+            name: place.name,
+            address: place.address || '',
+            category: place.category_name || place.metadata?.category || 'point_of_interest', // Use fallback category
+            userRating: 0,
+            friendsRating: place.average_rating,
+            personalReview: '',
+            images: [],
+            isLiked: false,
+            isSaved: false,
+            latitude: place.lat,
+            longitude: place.lng,
+            google_place_id: place.google_place_id,
+          };
+
+          setSelectedPlace(placeDetails);
+          setShowContentCard(true);
+        }
+      });
+
+      reviewedPlacesMarkers.current.push(marker);
+    });
+
+    // Add zoom-based visibility control
+    const updateMarkerVisibility = () => {
+      if (!map.current) return;
+      
+      const zoom = map.current.getZoom() || 0;
+      const isVisible = showReviewedPlaces && zoom >= 12; // Only show markers at zoom level 12 and higher
+      
+      reviewedPlacesMarkers.current.forEach(marker => {
+        marker.setMap(isVisible ? map.current : null);
+      });
+    };
+
+    // Set initial visibility
+    updateMarkerVisibility();
+
+    // Add zoom change listener
+    map.current.addListener('zoom_changed', updateMarkerVisibility);
+  };
+
+  // Function to setup POI click handler with improved collision behavior
   const setupPOIClickHandler = (google: typeof globalThis.google) => {
     if (!map.current) return;
 
     map.current.addListener('click', (e: google.maps.MapMouseEvent) => {
-      // Prevent ALL default Google Maps click interactions immediately
-      // This is crucial for stopping the default POI info window
       if (e.stop) {
         e.stop();
       }
       
       if (!e.latLng || !map.current) return;
       
-      console.log('Map clicked at:', e.latLng.lat(), e.latLng.lng());
-      
-      // Check if this is a POI click (has placeId property)
-      if ((e as any).placeId) {
-        console.log('POI clicked with placeId:', (e as any).placeId);
-      }
-      
       const request: google.maps.places.PlaceSearchRequest = {
         location: { lat: e.latLng.lat(), lng: e.latLng.lng() },
         radius: POI_SEARCH_RADIUS,
-        type: 'establishment' // Search for all types of establishments
+        type: 'establishment'
       };
 
       if (placesService.current) {
         placesService.current.nearbySearch(request, async (placeResults, placeStatus) => {
-          console.log('Places API results:', placeResults?.length, 'Status:', placeStatus);
-          
           if (placeStatus === google.maps.places.PlacesServiceStatus.OK && placeResults && placeResults.length > 0) {
             const closestPlace = findClosestPlace(placeResults, e.latLng!, google);
             
             if (closestPlace && closestPlace.distance <= POI_DISTANCE_THRESHOLD) {
-              console.log('Found nearby place:', closestPlace.place.name, 'Distance:', closestPlace.distance, 'm');
-              
               const enhancedDetails = await getEnhancedPlaceDetails(closestPlace.place.place_id);
               const placeDetails = createPlaceDetails(closestPlace.place, enhancedDetails, e.latLng!);
               
               setSelectedPlace(placeDetails);
               setShowContentCard(true);
-            } else {
-              console.log('No place found within threshold');
             }
-          } else {
-            console.log('No places found nearby');
           }
         });
       }
@@ -514,156 +503,196 @@ const MapPage: React.FC = () => {
     
     try {
       const enhancedDetails = await placesApiService.getPlaceDetails(placeId);
-      console.log('Enhanced details from New API:', enhancedDetails);
       return enhancedDetails;
     } catch (error) {
-      console.warn('Could not get enhanced details:', error);
+      console.warn('Could not get enhanced details for place ID:', placeId, error);
       return null;
     }
   };
 
+  // Function to fetch reviewed places
+  const fetchReviewedPlaces = async () => {
+    if (!isAuthenticated) return;
+
+    try {
+      setReviewedPlacesLoading(true);
+      setReviewedPlacesError(null);
+      
+      const places = await recommendationsApi.getReviewedPlaces('all', 200, 0);
+      setReviewedPlaces(places);
+      
+      // Create markers for reviewed places
+      createReviewedPlacesMarkers(places);
+    } catch (error) {
+      console.error('Failed to fetch reviewed places:', error);
+      setReviewedPlacesError(error instanceof Error ? error.message : 'Failed to load reviewed places');
+    } finally {
+      setReviewedPlacesLoading(false);
+    }
+  };
+
+  // Function to toggle reviewed places visibility
+  const toggleReviewedPlaces = () => {
+    const newVisibility = !showReviewedPlaces;
+    setShowReviewedPlaces(newVisibility);
+    
+    // Update marker visibility based on zoom level
+    if (map.current) {
+      const zoom = map.current.getZoom() || 0;
+      const isVisible = newVisibility && zoom >= 12;
+      
+      reviewedPlacesMarkers.current.forEach(marker => {
+        marker.setMap(isVisible ? map.current : null);
+      });
+    }
+  };
+
   const cleanup = () => {
-    if (geoWatchId.current !== null && navigator.geolocation) {
-      navigator.geolocation.clearWatch(geoWatchId.current);
-    }
-    accuracyCircle.current = null;
-    markers.current.forEach(marker => marker.setMap(null));
-    markers.current = [];
-    map.current = null;
-    placesService.current = null;
-    
-    // Clean up global event listener
-    const mapElement = mapContainer.current;
-    if (mapElement) {
-      // Remove all click event listeners from the map element
-      mapElement.replaceWith(mapElement.cloneNode(true));
-    }
-  };
-
-  // Event handlers
-  const handleLogout = () => { 
-    localStorage.removeItem('authToken'); 
-    setIsAuthenticated(false); 
-    setShowLoginModal(true); 
-    setUser(null); 
-  };
-
-  const handleRate = (rating: number) => {
-    if (selectedPlace) {
-      setSelectedPlace({ ...selectedPlace, userRating: rating });
-    }
-  };
-
-  const handleLike = () => {
-    if (selectedPlace) {
-      setSelectedPlace({ ...selectedPlace, isLiked: !selectedPlace.isLiked });
-    }
-  };
-
-  const handleSave = () => {
-    if (selectedPlace) {
-      setSelectedPlace({ ...selectedPlace, isSaved: !selectedPlace.isSaved });
-    }
-  };
-
-  const handleShare = () => {
-    if (selectedPlace) {
-      const text = `Check out ${selectedPlace.name} at ${selectedPlace.address}!`;
-      if (navigator.share) {
-        navigator.share({ title: selectedPlace.name, text });
-      } else {
-        navigator.clipboard.writeText(text);
-      }
-    }
-  };
-
-  const handleLocateMe = () => {
-    if (!map.current) return;
-    
-    setIsLocating(true);
-    
-    // Clear existing accuracy circle
     if (accuracyCircle.current) {
       accuracyCircle.current.setMap(null);
       accuracyCircle.current = null;
     }
-
-    getUserLocation(window.google);
+    
+    // Clear reviewed places markers
+    reviewedPlacesMarkers.current.forEach(marker => marker.setMap(null));
+    reviewedPlacesMarkers.current = [];
+    
+    map.current = null;
+    placesService.current = null;
   };
 
-  const handlePlaceSelected = (place: PlaceDetails) => {
-    if (!map.current) return;
+  // Effects
 
-    console.log('Handling place selection:', place.name, 'Coordinates:', place.latitude, place.longitude);
-
-    // Validate coordinates
-    if (!place.latitude || !place.longitude || 
-        place.latitude === 0 || place.longitude === 0) {
-      console.warn('No valid coordinates for place:', place.name);
+  useEffect(() => {
+    if (!isAuthenticated || !mapContainer.current || map.current) {
       return;
     }
 
-    // Clear previous markers
-    markers.current.forEach(m => m.setMap(null));
-    markers.current = [];
-
-    // Navigate to place
-    const location = new google.maps.LatLng(place.latitude, place.longitude);
-    map.current.panTo(location);
-    
-    // Animate zoom
-    const currentZoom = map.current.getZoom() || 10;
-    const zoomSteps = 20;
-    const zoomInterval = 15;
-    let currentStep = 0;
-    
-    const zoomAnimation = setInterval(() => {
-      currentStep++;
-      const progress = currentStep / zoomSteps;
-      const currentZoomLevel = currentZoom + (TARGET_ZOOM - currentZoom) * progress;
+    const initMap = async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
       
-      map.current?.setZoom(Math.round(currentZoomLevel));
-      
-      if (currentStep >= zoomSteps) {
-        clearInterval(zoomAnimation);
+      if (!mapContainer.current) {
+        return;
       }
-    }, zoomInterval);
 
-    setSelectedPlace(place);
-    setShowContentCard(true);
-  };
+      const loader = new Loader({ 
+        apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY, 
+        version: 'weekly', 
+        libraries: ['places', 'geometry'] 
+      });
 
-  // Render helpers
-  const avatar = (user?.profilePictureUrl && !avatarError) ? (
-    <img 
-      src={getProxiedProfilePicture(user.profilePictureUrl)} 
-      alt="" 
-      onError={() => {
-        console.log('❌ Avatar image failed to load:', user.profilePictureUrl);
-        setAvatarError(true);
-      }}
-      onLoad={() => {
-        console.log('✅ Avatar image loaded successfully:', user.profilePictureUrl);
-      }}
-    />
-  ) : (
-    <div className="avatar-fallback" aria-label="Profile">
-      {(user?.displayName || user?.email || '?').charAt(0).toUpperCase()}
-    </div>
-  );
+      try {
+        const google = await loader.load();
+        
+        if (!mapContainer.current) {
+          return;
+        }
+        
+        map.current = new google.maps.Map(mapContainer.current, {
+          center: DEFAULT_CENTER,
+          zoom: DEFAULT_ZOOM,
+          mapId: '95079f4fa5e07d01680ea67e',
+          clickableIcons: true,
+          // Start with POI markers hidden by default
+          styles: [
+            // Hide POI markers completely
+            {
+              featureType: 'poi',
+              elementType: 'all',
+              stylers: [{ visibility: 'off' }]
+            },
+            // Hide business markers
+            {
+              featureType: 'business',
+              elementType: 'all',
+              stylers: [{ visibility: 'off' }]
+            },
+            // Hide transit stations
+            {
+              featureType: 'transit',
+              elementType: 'all',
+              stylers: [{ visibility: 'off' }]
+            },
+            // Hide landmarks
+            {
+              featureType: 'landmark',
+              elementType: 'all',
+              stylers: [{ visibility: 'off' }]
+            },
+            // Hide natural features
+            {
+              featureType: 'natural',
+              elementType: 'all',
+              stylers: [{ visibility: 'off' }]
+            }
+          ]
+        });
 
-  // Debug logging for render
-  console.log('🎨 Rendering MapPage:', {
-    isAuthChecking,
-    isAuthenticated,
-    showLoginModal,
-    showContentCard: !!selectedPlace,
-    hasUser: !!user
-  });
+        placesService.current = new google.maps.places.PlacesService(map.current);
+        getUserLocation(google);
+        setupPOIClickHandler(google);
+        fetchReviewedPlaces(); // Fetch reviewed places on map load
+
+      } catch (err) {
+        console.error('Error loading Google Maps:', err);
+      }
+    };
+
+    void initMap();
+
+    return () => {
+      cleanup();
+    };
+  }, [isAuthenticated]);
+
+  // Fetch reviewed places when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && map.current) {
+      fetchReviewedPlaces();
+    }
+  }, [isAuthenticated]);
+
+  // Add zoom change listener to track current zoom level
+  useEffect(() => {
+    if (!map.current) return;
+
+    const updateZoom = () => {
+      const zoom = map.current?.getZoom() || 9;
+      setCurrentZoom(zoom);
+    };
+
+    map.current.addListener('zoom_changed', updateZoom);
+    updateZoom(); // Set initial zoom
+
+    return () => {
+      // Cleanup listener if needed
+    };
+  }, [map.current]);
+
+  // Show loading only when we're checking auth and don't have a user yet
+  if (isAuthChecking && !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <p>Loading user...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated and not checking auth, show the main container with login modal
+  if (!isAuthenticated && !isAuthChecking) {
+    return (
+      <div className="map-page-container">
+        {showLoginModal && <LoginModal onClose={closeLoginModal} />}
+        <div className="map-container" />
+      </div>
+    );
+  }
 
   return (
     <div className="map-page-container">
-      {/* Show loading screen while checking authentication */}
       {isAuthChecking && (
         <div className="auth-loading-overlay">
           <div className="auth-loading-content">
@@ -673,16 +702,16 @@ const MapPage: React.FC = () => {
         </div>
       )}
 
-      {showLoginModal && <LoginModal onClose={() => setShowLoginModal(false)} />}
+      {showLoginModal && <LoginModal onClose={closeLoginModal} />}
 
       {showContentCard && selectedPlace && (
         <ContentCard
           place={selectedPlace}
           onClose={() => setShowContentCard(false)}
-          onRate={handleRate}
-          onLike={handleLike}
-          onSave={handleSave}
-          onShare={handleShare}
+          onRate={() => {}}
+          onLike={() => {}}
+          onSave={() => {}}
+          onShare={() => {}}
         />
       )}
 
@@ -695,7 +724,63 @@ const MapPage: React.FC = () => {
         />
       )}
 
-      <div className="appbar">
+      {/* Reviewed Places Status */}
+      {isAuthenticated && (
+        <div className="fixed top-20 right-4 z-40 bg-white rounded-lg shadow-lg p-4 max-w-xs">
+          <div className="space-y-3">
+            {/* Reviewed Places Status */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full ${showReviewedPlaces ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                <span className="text-sm font-medium">Reviewed Places</span>
+              </div>
+            </div>
+            
+            {/* Loading and Error States */}
+            {reviewedPlacesLoading && (
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                Loading places...
+              </div>
+            )}
+            
+            {reviewedPlacesError && (
+              <div className="text-sm text-red-600">
+                {reviewedPlacesError}
+              </div>
+            )}
+            
+            {!reviewedPlacesLoading && !reviewedPlacesError && (
+              <div className="text-sm text-gray-600 border-t pt-2">
+                <div>{reviewedPlaces.length} places with reviews</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Zoom: {currentZoom} 
+                  {showReviewedPlaces && currentZoom < 12 && (
+                    <span className="text-orange-600 ml-1">(markers hidden, zoom in)</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Header 
+        currentUserId={user?.id}
+        showMapButton={true}
+        showProfileButton={true}
+        showDiscoverButton={true}
+        showLogoutButton={true}
+        title="RECCE"
+        variant="dark"
+        mapButtonText="Feed"
+        mapButtonLink="/feed"
+        onLogout={handleLogout}
+        profilePictureUrl={user?.profilePictureUrl}
+        displayName={user?.displayName}
+      />
+
+      <div className="search-container">
         <SearchBar 
           isAuthenticated={isAuthenticated}
           onPlaceSelected={handlePlaceSelected}
@@ -704,46 +789,39 @@ const MapPage: React.FC = () => {
           onSearchResults={handleSearchResults}
           onSearchLoading={handleSearchLoading}
         />
-        <div className="profile" onClick={() => setMenuOpen(v => !v)} aria-label="Profile menu">
-          {avatar}
-          {menuOpen && (
-            <div className="menu">
-              <a
-                href={user?.id ? `/profile/${user.id}` : "#"}
-                className="menu-item"
-                onClick={e => {
-                  if (!user?.id) {
-                    e.preventDefault();
-                  } else {
-                    setMenuOpen(false);
-                  }
-                }}
-              >
-                My Profile
-              </a>
-              <a href="#" className="menu-item">My Maps</a>
-              <a href="#" className="menu-item">Friends</a>
-              <a className="menu-item danger" onClick={handleLogout}>Logout</a>
-            </div>
-          )}
-        </div>
       </div>
 
-      <div className="fab-group">
-        <button 
-          className={`fab ${isLocating ? 'locating' : ''}`} 
-          onClick={handleLocateMe} 
-          title="Locate me"
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3">
+        <Button
+          onClick={toggleReviewedPlaces}
+          size="icon"
+          className={`h-14 w-14 rounded-full shadow-lg ${
+            showReviewedPlaces 
+              ? 'bg-green-600 hover:bg-green-700' 
+              : 'bg-gray-600 hover:bg-gray-700'
+          } text-white`}
+          title={showReviewedPlaces ? 'Hide reviewed places' : 'Show reviewed places'}
+        >
+          <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+            <path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+        </Button>
+
+        <Button
+          onClick={handleLocateMe}
           disabled={isLocating}
+          size="icon"
+          className="h-14 w-14 rounded-full shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
+          title="Locate me"
         >
           {isLocating ? (
-            <div className="spinner"></div>
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
           ) : (
-            <svg viewBox="0 0 24 24" className="fab-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
               <path fill="currentColor" d="M12 8a4 4 0 1 0 .001 8.001A4 4 0 0 0 12 8m8.94 3h-2.02A6.99 6.99 0 0 0 13 5.08V3h-2v2.08A6.99 6.99 0 0 0 5.08 11H3v2h2.08A6.99 6.99 0 0 0 11 18.92V21h2v-2.08A6.99 6.99 0 0 0 18.92 13H21v-2z"/>
             </svg>
           )}
-        </button>
+        </Button>
       </div>
 
       <div ref={mapContainer} className="map-container" />

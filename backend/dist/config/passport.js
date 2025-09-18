@@ -61,15 +61,24 @@ function configurePassport() {
             clientID,
             clientSecret,
             callbackURL: 'http://localhost:5000/auth/google/callback',
-            scope: ['profile', 'email'],
+            scope: ['profile', 'email', 'openid'],
         }, async (accessToken, refreshToken, profile, done) => {
             try {
+                console.log('🔐 Google OAuth profile received:', {
+                    id: profile.id,
+                    displayName: profile.displayName,
+                    emails: profile.emails,
+                    photos: profile.photos,
+                    profilePictureUrl: profile.photos?.[0]?.value
+                });
                 const existing = await db_1.default.query('SELECT * FROM users WHERE google_id = $1', [profile.id]);
                 let user = existing.rows[0];
                 if (user) {
+                    console.log('👤 Existing user found:', user.display_name);
                     await db_1.default.query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
                 }
                 else {
+                    console.log('🆕 Creating new user with profile picture:', profile.photos?.[0]?.value);
                     const created = await db_1.default.query(`INSERT INTO users (google_id, email, display_name, profile_picture_url)
                  VALUES ($1, $2, $3, $4) RETURNING *`, [
                         profile.id,
@@ -78,10 +87,12 @@ function configurePassport() {
                         profile.photos?.[0]?.value ?? null,
                     ]);
                     user = created.rows[0];
+                    console.log('✅ New user created:', user.display_name, 'Profile picture:', user.profile_picture_url);
                 }
                 done(null, user);
             }
             catch (err) {
+                console.error('❌ Google OAuth error:', err);
                 done(err, undefined);
             }
         }));

@@ -5,6 +5,7 @@ export interface PlaceData {
   name: string;
   address?: string;
   category_id?: number;
+  category_name?: string; // Add category name for easier upsert
   lat?: number;
   lng?: number;
   metadata?: Record<string, any>;
@@ -25,6 +26,35 @@ export interface Place {
 }
 
 /**
+ * Get or create a category by name
+ */
+export async function getOrCreateCategory(categoryName: string): Promise<number> {
+  const client = await pool.connect();
+  
+  try {
+    // First try to find existing category
+    const findResult = await client.query(
+      'SELECT id FROM categories WHERE name = $1',
+      [categoryName]
+    );
+    
+    if (findResult.rows.length > 0) {
+      return findResult.rows[0].id;
+    }
+    
+    // Create new category if not found
+    const insertResult = await client.query(
+      'INSERT INTO categories (name) VALUES ($1) RETURNING id',
+      [categoryName]
+    );
+    
+    return insertResult.rows[0].id;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Upsert a place - creates if it doesn't exist, updates if it does
  * Uses google_place_id as the unique identifier for upserts
  */
@@ -35,6 +65,14 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
     await client.query('BEGIN');
     
     let placeId: number;
+    let categoryId: number | null = null;
+    
+    // Handle category if provided
+    if (placeData.category_name) {
+      categoryId = await getOrCreateCategory(placeData.category_name);
+    } else if (placeData.category_id) {
+      categoryId = placeData.category_id;
+    }
     
     if (placeData.google_place_id) {
       // Try to find existing place by google_place_id
@@ -56,7 +94,7 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
           [
             placeData.name,
             placeData.address,
-            placeData.category_id,
+            categoryId,
             placeData.lat,
             placeData.lng,
             JSON.stringify(placeData.metadata || {}),
@@ -77,7 +115,7 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
             placeData.google_place_id,
             placeData.name,
             placeData.address,
-            placeData.category_id,
+            categoryId,
             placeData.lat,
             placeData.lng,
             JSON.stringify(placeData.metadata || {})
@@ -95,7 +133,7 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
         [
           placeData.name,
           placeData.address,
-          placeData.category_id,
+          categoryId,
           placeData.lat,
           placeData.lng,
           JSON.stringify(placeData.metadata || {})
@@ -198,6 +236,65 @@ export async function getUserById(userId: string): Promise<{ display_name?: stri
     return result.rows[0];
   } catch (error) {
     console.error('Error getting user by ID:', error);
+    throw error;
+  }
+} 
+
+/**
+ * Get all places that have reviews/annotations
+ */
+export async function getPlacesWithReviews(
+  visibility: 'friends' | 'public' | 'all' = 'all',
+  limit: number = 100,
+  offset: number = 0
+): Promise<Array<Place & {
+  review_count: number;
+  average_rating: number;
+  latest_review_date: string;
+  category_name?: string;
+}>> {
+  try {
+    let query = `
+      SELECT 
+        p.*,
+        c.name as category_name,
+        COUNT(a.id) as review_count,
+        AVG(a.rating) as average_rating,
+        MAX(a.created_at) as latest_review_date
+      FROM places p
+      LEFT JOIN categories c ON p.category_id = c.id
+      INNER JOIN annotations a ON p.id = a.place_id
+    `;
+    
+    const params: any[] = [];
+    let paramCount = 0;
+    
+    if (visibility !== 'all') {
+      paramCount++;
+      query += ` WHERE a.visibility = $${paramCount}`;
+      params.push(visibility);
+    }
+    
+    query += `
+      GROUP BY p.id, p.google_place_id, p.name, p.address, p.category_id, p.lat, p.lng, p.geom, p.metadata, p.created_at, p.updated_at, c.name
+      HAVING COUNT(a.id) > 0
+      ORDER BY latest_review_date DESC
+      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
+    `;
+    
+    params.push(limit, offset);
+    
+    const result = await pool.query(query, params);
+    
+    return result.rows.map(row => ({
+      ...row,
+      average_rating: parseFloat(row.average_rating) || 0,
+      review_count: parseInt(row.review_count),
+      latest_review_date: row.latest_review_date,
+      category_name: row.category_name
+    }));
+  } catch (error) {
+    console.error('Error getting places with reviews:', error);
     throw error;
   }
 } 

@@ -6,7 +6,38 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const passport_1 = __importDefault(require("passport"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const axios_1 = __importDefault(require("axios"));
 const router = express_1.default.Router();
+// Proxy endpoint for Google profile pictures
+router.get('/profile-picture', async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'URL parameter is required' });
+    }
+    try {
+        // Validate that it's a Google profile picture URL
+        if (!url.includes('googleusercontent.com')) {
+            return res.status(400).json({ error: 'Invalid profile picture URL' });
+        }
+        // Fetch the image from Google
+        const response = await axios_1.default.get(url, {
+            responseType: 'arraybuffer',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
+        // Set appropriate headers
+        res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
+        res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        res.set('Access-Control-Allow-Origin', '*');
+        // Send the image data
+        res.send(response.data);
+    }
+    catch (error) {
+        console.error('Error proxying profile picture:', error);
+        res.status(500).json({ error: 'Failed to load profile picture' });
+    }
+});
 // Development-only login endpoint (bypasses OAuth)
 router.get('/dev-login', async (req, res) => {
     if (process.env.NODE_ENV === 'production') {

@@ -11,6 +11,10 @@ exports.generateBatchEmbeddings = generateBatchEmbeddings;
 exports.calculateCosineSimilarity = calculateCosineSimilarity;
 exports.validateEmbedding = validateEmbedding;
 const openai_1 = __importDefault(require("openai"));
+const dotenv_1 = __importDefault(require("dotenv"));
+const path_1 = __importDefault(require("path"));
+// Load .env file from the root directory (two levels up from backend/src)
+dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../../.env') });
 // Initialize OpenAI client
 const openai = new openai_1.default({
     apiKey: process.env.OPENAI_API_KEY,
@@ -40,6 +44,17 @@ async function generateEmbedding(text) {
 async function generateAnnotationEmbedding(annotationData) {
     // Combine relevant fields into a meaningful text representation
     const textParts = [];
+    // Add place information (most important for location-based searches)
+    if (annotationData.place_name) {
+        textParts.push(`Place: ${annotationData.place_name}`);
+    }
+    if (annotationData.place_address) {
+        textParts.push(`Address: ${annotationData.place_address}`);
+    }
+    // Add user information (for searching by reviewer)
+    if (annotationData.user_name) {
+        textParts.push(`Reviewer: ${annotationData.user_name}`);
+    }
     // Add notes if present (most important for semantic meaning)
     if (annotationData.notes) {
         textParts.push(`Review: ${annotationData.notes}`);

@@ -95,12 +95,13 @@ class ApiClient {
   // Check if user is authenticated
   isAuthenticated(): boolean {
     const token = this.getAuthToken();
+    const isAuth = !!token;
     console.log('🔐 isAuthenticated check:', { 
-      hasToken: !!token, 
+      hasToken: isAuth, 
       tokenLength: token?.length,
       tokenPreview: token ? `${token.substring(0, 20)}...` : 'none'
     });
-    return !!token;
+    return isAuth;
   }
 
   // Generic HTTP methods
@@ -131,9 +132,9 @@ class ApiClient {
     }
   }
 
-  async delete<T>(url: string): Promise<ApiResponse<T>> {
+  async delete<T>(url: string, data?: any): Promise<ApiResponse<T>> {
     try {
-      const response = await this.client.delete(url);
+      const response = await this.client.delete(url, { data });
       return response.data;
     } catch (error) {
       return this.handleError(error);

@@ -7,7 +7,10 @@ import path from 'path';
 import configurePassport from './config/passport';
 import authRoutes from './routes/authRoutes';
 import recommendationRoutes from './routes/recommendationRoutes';
+import aiRecommendationRoutes from './routes/aiRecommendationRoutes';
 import profileRoutes from './routes/profileRoutes';
+import socialRoutes from './routes/socialRoutes';
+import feedRoutes from './routes/feedRoutes';
 import pool from './db';
 
 // Load .env file from the root directory (two levels up from backend/src)
@@ -61,7 +64,10 @@ passport.deserializeUser(async (id: string, done) => {
 
 app.use('/auth', authRoutes);
 app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/ai-recommendation', aiRecommendationRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/social', socialRoutes);
+app.use('/api/feed', feedRoutes);
 
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);

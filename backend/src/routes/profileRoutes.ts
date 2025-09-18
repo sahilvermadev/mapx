@@ -1,6 +1,7 @@
 import express from 'express';
 import { getAnnotationsByUserId, deleteAnnotation } from '../db/annotations';
 import { getPlaceByGoogleId } from '../db/places';
+import { getSavedPlacesCount, getSavedPlaces } from '../db/social';
 import pool from '../db';
 
 const router = express.Router();
@@ -71,17 +72,11 @@ router.get('/:userId/stats', async (req, res) => {
       [userId]
     );
 
-    // Get total likes (for now, we'll use a placeholder since likes table might not exist)
-    const likesResult = await pool.query(
-      'SELECT COUNT(*) as count FROM likes WHERE user_id = $1',
-      [userId]
-    );
+    // Get total likes (placeholder - likes functionality not implemented yet)
+    const likesResult = { rows: [{ count: '0' }] };
 
-    // Get total saved (for now, we'll use a placeholder since saved_recommendations table might not exist)
-    const savedResult = await pool.query(
-      'SELECT COUNT(*) as count FROM saved_recommendations WHERE user_id = $1',
-      [userId]
-    );
+    // Get total saved places
+    const savedCount = await getSavedPlacesCount(userId);
 
     // Get average rating
     const avgRatingResult = await pool.query(
@@ -106,7 +101,7 @@ router.get('/:userId/stats', async (req, res) => {
       data: {
         total_recommendations: parseInt(recommendationsResult.rows[0].count),
         total_likes: parseInt(likesResult.rows[0].count),
-        total_saved: parseInt(savedResult.rows[0].count),
+        total_saved: savedCount,
         average_rating: parseFloat(avgRatingResult.rows[0].avg_rating) || 0,
         total_places_visited: parseInt(placesVisitedResult.rows[0].count),
         total_reviews: parseInt(reviewsResult.rows[0].count)
@@ -318,7 +313,7 @@ router.get('/:userId/recommendations', async (req, res) => {
 
 /**
  * GET /api/profile/:userId/likes
- * Get user likes (placeholder - needs likes table implementation)
+ * Get user likes (placeholder - likes functionality not implemented yet)
  */
 router.get('/:userId/likes', async (req, res) => {
   try {
@@ -354,27 +349,30 @@ router.get('/:userId/likes', async (req, res) => {
 
 /**
  * GET /api/profile/:userId/saved
- * Get user saved places (placeholder - needs saved_recommendations table implementation)
+ * Get user saved places
  */
 router.get('/:userId/saved', async (req, res) => {
   try {
     const { userId } = req.params;
     const { 
-      sort_field = 'created_at',
-      sort_direction = 'desc',
       limit = 20,
       offset = 0
     } = req.query;
 
-    // For now, return empty array since saved functionality needs to be implemented
+    const limitNum = parseInt(limit as string);
+    const offsetNum = parseInt(offset as string);
+
+    const savedPlaces = await getSavedPlaces(userId, limitNum, offsetNum);
+    const totalCount = await getSavedPlacesCount(userId);
+
     res.json({
       success: true,
-      data: [],
+      data: savedPlaces,
       pagination: {
-        total: 0,
-        page: 1,
-        limit: parseInt(limit as string),
-        totalPages: 0
+        total: totalCount,
+        page: Math.floor(offsetNum / limitNum) + 1,
+        limit: limitNum,
+        totalPages: Math.ceil(totalCount / limitNum)
       }
     });
 

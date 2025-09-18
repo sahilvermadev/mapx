@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaMapMarkerAlt, FaStar, FaUsers, FaTags, FaCalendarAlt, FaTimes, FaSearch } from 'react-icons/fa';
 import type { SearchResponse, SearchResult } from '../services/recommendations';
+import { formatAddress } from '../utils/addressFormatter';
 import './SearchResults.css';
 
 interface SearchResultsProps {
@@ -139,7 +140,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({
                       {result.place_address && (
                         <p className="place-address">
                           <FaMapMarkerAlt />
-                          {result.place_address}
+                          {formatAddress(result.place_address)}
                         </p>
                       )}
                     </div>

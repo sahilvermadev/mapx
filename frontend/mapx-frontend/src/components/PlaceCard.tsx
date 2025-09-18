@@ -2,6 +2,7 @@ import React from 'react';
 import { FaStar, FaMapMarkerAlt, FaTrash, FaHeart, FaBookmark, FaEye, FaEyeSlash } from 'react-icons/fa';
 import type { PlaceCard as PlaceCardType } from '../services/profile';
 import { formatGoogleTypeForDisplay } from '../utils/placeTypes';
+import { formatAddress } from '../utils/addressFormatter';
 import './PlaceCard.css';
 
 type TabType = 'recommendations' | 'likes' | 'saved';
@@ -82,7 +83,7 @@ const PlaceCard: React.FC<PlaceCardProps> = ({
           {place.place_address && (
             <p className="place-address">
               <FaMapMarkerAlt className="address-icon" />
-              {place.place_address}
+              {formatAddress(place.place_address)}
             </p>
           )}
         </div>

@@ -9,6 +9,7 @@ export interface SaveRecommendationRequest {
   place_lat?: number;
   place_lng?: number;
   place_metadata?: Record<string, any>;
+  place_category?: string; // Add category for the place
   
   // Annotation data
   title?: string;
@@ -100,6 +101,23 @@ export interface SearchResponse {
   };
 }
 
+// Interface for reviewed places
+export interface ReviewedPlace {
+  id: number;
+  google_place_id?: string;
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  metadata?: Record<string, any>;
+  category_name?: string;
+  review_count: number;
+  average_rating: number;
+  latest_review_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // Recommendation API functions
 export const recommendationsApi = {
   /**
@@ -181,6 +199,23 @@ export const recommendationsApi = {
   async deleteRecommendation(annotationId: number): Promise<boolean> {
     const response = await apiClient.delete(`/recommendations/${annotationId}`);
     return response.success;
+  },
+
+  /**
+   * Get all places that have reviews/annotations
+   */
+  async getReviewedPlaces(
+    visibility: 'friends' | 'public' | 'all' = 'all',
+    limit = 100,
+    offset = 0
+  ): Promise<ReviewedPlace[]> {
+    const response = await apiClient.get<ReviewedPlace[]>('/recommendations/places/reviewed', {
+      visibility,
+      limit,
+      offset,
+    });
+    
+    return response.data || [];
   },
 
   /**

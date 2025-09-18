@@ -144,6 +144,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   };
 
   return (
+    <div className="searchbar">
     <div className="search-container">
       <div className="search-mode-toggle">
         <button
@@ -222,6 +223,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
           </button>
         )}
       </form>
+    </div>
     </div>
   );
 };

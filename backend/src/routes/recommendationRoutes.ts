@@ -1,5 +1,5 @@
 import express from 'express';
-import { upsertPlace, getPlaceByGoogleId } from '../db/places';
+import { upsertPlace, getPlaceByGoogleId, getPlacesWithReviews } from '../db/places';
 import { 
   insertAnnotation, 
   getAnnotationsByUserId, 
@@ -26,6 +26,7 @@ interface SaveRecommendationRequest {
   place_lat?: number;
   place_lng?: number;
   place_metadata?: Record<string, any>;
+  place_category?: string; // Add category for the place
   
   // Annotation data
   went_with?: string[];
@@ -109,6 +110,7 @@ router.post('/save', async (req, res) => {
       place_lat,
       place_lng,
       place_metadata,
+      place_category,
       went_with,
       labels,
       notes,
@@ -156,6 +158,7 @@ router.post('/save', async (req, res) => {
       google_place_id,
       name: place_name,
       address: place_address,
+      category_name: place_category, // Include category information
       lat: place_lat,
       lng: place_lng,
       metadata: place_metadata
@@ -745,6 +748,62 @@ router.post('/search', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to perform search',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/recommendations/places/reviewed
+ * Get all places that have reviews/annotations
+ */
+router.get('/places/reviewed', async (req, res) => {
+  try {
+    const visibility = req.query.visibility as 'friends' | 'public' | 'all' || 'all';
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Validate visibility parameter
+    if (!['friends', 'public', 'all'].includes(visibility)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Visibility must be "friends", "public", or "all"'
+      });
+    }
+
+    // Get places with reviews
+    const placesWithReviews = await getPlacesWithReviews(visibility, limit, offset);
+
+    // Transform the data to include review statistics
+    const transformedPlaces = placesWithReviews.map(place => ({
+      id: place.id,
+      google_place_id: place.google_place_id,
+      name: place.name,
+      address: place.address,
+      lat: place.lat,
+      lng: place.lng,
+      metadata: place.metadata,
+      category_name: place.category_name,
+      review_count: place.review_count,
+      average_rating: place.average_rating,
+      latest_review_date: place.latest_review_date,
+      created_at: place.created_at,
+      updated_at: place.updated_at
+    }));
+
+    res.json({
+      success: true,
+      data: transformedPlaces,
+      total: transformedPlaces.length,
+      visibility,
+      message: 'Reviewed places retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching reviewed places:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch reviewed places',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }

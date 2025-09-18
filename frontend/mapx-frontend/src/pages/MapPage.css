@@ -50,16 +50,23 @@
 
 .map-container { position: absolute; inset: 0; }
 
-/* App bar */
-.appbar {
-  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-  width: min(900px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px; border-radius: 18px; backdrop-filter: blur(12px);
-  background: rgba(10, 14, 22, 0.55); border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: 0 10px 30px rgba(0,0,0,.35); z-index: 20;
+/* Dark header styling */
+header[class*="bg-black"] {
+  background: rgba(0, 0, 0, 0.9) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
 }
 
-.appbar .search {
+/* App bar */
+.searchbar {
+  position: relative; top: 16px; left: 50%; transform: translateX(-50%);
+  width: min(900px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 18px; backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.7);  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7); z-index: 20;
+}
+
+.searchbar .search {
   flex: 1;
   margin-right: 12px;
 }
