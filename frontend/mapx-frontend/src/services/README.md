@@ -37,7 +37,7 @@ Test utilities for verifying API functionality.
 
 ```typescript
 import { apiClient } from '../services/api';
-import { recommendationsApi } from '../services/recommendations';
+import { recommendationsApi } from '../services/recommendationsApi';
 
 // Check if user is authenticated
 const isAuth = apiClient.isAuthenticated();

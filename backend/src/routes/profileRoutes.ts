@@ -21,7 +21,7 @@ router.get('/:userId', async (req, res) => {
     const { userId } = req.params;
 
     const result = await pool.query(
-      `SELECT id, display_name, email, profile_picture_url, created_at, last_login_at
+      `SELECT id, display_name, email, profile_picture_url, username, created_at, last_login_at
        FROM users 
        WHERE id = $1`,
       [userId]
@@ -42,6 +42,7 @@ router.get('/:userId', async (req, res) => {
         id: userData.id,
         displayName: userData.display_name,
         email: userData.email,
+        username: userData.username,
         profilePictureUrl: userData.profile_picture_url,
         created_at: userData.created_at,
         last_login_at: userData.last_login_at
@@ -68,7 +69,7 @@ router.get('/:userId/stats', async (req, res) => {
 
     // Get total recommendations
     const recommendationsResult = await pool.query(
-      'SELECT COUNT(*) as count FROM annotations WHERE user_id = $1',
+      'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1',
       [userId]
     );
 
@@ -80,19 +81,19 @@ router.get('/:userId/stats', async (req, res) => {
 
     // Get average rating
     const avgRatingResult = await pool.query(
-      'SELECT AVG(rating) as avg_rating FROM annotations WHERE user_id = $1 AND rating IS NOT NULL',
+      'SELECT AVG(rating) as avg_rating FROM recommendations WHERE user_id = $1 AND rating IS NOT NULL',
       [userId]
     );
 
     // Get total places visited
     const placesVisitedResult = await pool.query(
-      'SELECT COUNT(DISTINCT place_id) as count FROM annotations WHERE user_id = $1',
+      'SELECT COUNT(DISTINCT place_id) as count FROM recommendations WHERE user_id = $1',
       [userId]
     );
 
     // Get total reviews
     const reviewsResult = await pool.query(
-      'SELECT COUNT(*) as count FROM annotations WHERE user_id = $1 AND notes IS NOT NULL AND notes != \'\'',
+      'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1 AND description IS NOT NULL AND description != \'\'',
       [userId]
     );
 
@@ -120,184 +121,35 @@ router.get('/:userId/stats', async (req, res) => {
 
 /**
  * GET /api/profile/:userId/recommendations
- * Get user recommendations with filtering and pagination
+ * Get user recommendations in feed post format
  */
 router.get('/:userId/recommendations', async (req, res) => {
   try {
     const { userId } = req.params;
     const { 
-      rating, 
-      visibility, 
-      category, 
-      search, 
-      date_from, 
-      date_to,
       sort_field = 'created_at',
       sort_direction = 'desc',
       limit = 20,
-      offset = 0
+      offset = 0,
+      content_type
     } = req.query;
 
-    // Build the query with filters
-    let query = `
-      SELECT 
-        a.id,
-        a.notes,
-        a.rating,
-        a.visit_date,
-        a.visibility,
-        a.created_at,
-        a.labels,
-        a.metadata,
-        p.name as place_name,
-        p.address as place_address,
-        p.lat as place_lat,
-        p.lng as place_lng,
-        p.google_place_id,
-        u.display_name as user_name
-      FROM annotations a
-      JOIN places p ON a.place_id = p.id
-      JOIN users u ON a.user_id = u.id
-      WHERE a.user_id = $1
-    `;
-    
-    const queryParams: any[] = [userId];
-    let paramCount = 1;
-
-    // Add filters
-    if (rating) {
-      paramCount++;
-      query += ` AND a.rating >= $${paramCount}`;
-      queryParams.push(rating);
-    }
-
-    if (visibility && visibility !== 'all') {
-      paramCount++;
-      query += ` AND a.visibility = $${paramCount}`;
-      queryParams.push(visibility);
-    }
-
-    if (category) {
-      paramCount++;
-      query += ` AND p.metadata->>'category' = $${paramCount}`;
-      queryParams.push(category);
-    }
-
-    if (search) {
-      paramCount++;
-      query += ` AND (p.name ILIKE $${paramCount} OR a.notes ILIKE $${paramCount})`;
-      queryParams.push(`%${search}%`);
-    }
-
-    if (date_from) {
-      paramCount++;
-      query += ` AND a.visit_date >= $${paramCount}`;
-      queryParams.push(date_from);
-    }
-
-    if (date_to) {
-      paramCount++;
-      query += ` AND a.visit_date <= $${paramCount}`;
-      queryParams.push(date_to);
-    }
-
-    // Add sorting
-    const validSortFields = ['created_at', 'rating', 'place_name', 'visit_date', 'category'];
-    const validSortDirections = ['asc', 'desc'];
-    
-    const sortField = validSortFields.includes(sort_field as string) ? sort_field : 'created_at';
-    const sortDirection = validSortDirections.includes(sort_direction as string) ? sort_direction : 'desc';
-    
-    query += ` ORDER BY ${sortField} ${(sortDirection as string).toUpperCase()}`;
-
-    // Add pagination
-    paramCount++;
-    query += ` LIMIT $${paramCount}`;
-    queryParams.push(parseInt(limit as string));
-    
-    paramCount++;
-    query += ` OFFSET $${paramCount}`;
-    queryParams.push(parseInt(offset as string));
-
-    const result = await pool.query(query, queryParams);
-
-    // Get total count for pagination
-    let countQuery = `
-      SELECT COUNT(*) as total
-      FROM annotations a
-      JOIN places p ON a.place_id = p.id
-      WHERE a.user_id = $1
-    `;
-    
-    const countParams: any[] = [userId];
-    let countParamCount = 1;
-
-    if (rating) {
-      countParamCount++;
-      countQuery += ` AND a.rating >= $${countParamCount}`;
-      countParams.push(rating);
-    }
-
-    if (visibility && visibility !== 'all') {
-      countParamCount++;
-      countQuery += ` AND a.visibility = $${countParamCount}`;
-      countParams.push(visibility);
-    }
-
-    if (category) {
-      countParamCount++;
-      countQuery += ` AND p.metadata->>'category' = $${countParamCount}`;
-      countParams.push(category);
-    }
-
-    if (search) {
-      countParamCount++;
-      countQuery += ` AND (p.name ILIKE $${countParamCount} OR a.notes ILIKE $${countParamCount})`;
-      countParams.push(`%${search}%`);
-    }
-
-    if (date_from) {
-      countParamCount++;
-      countQuery += ` AND a.visit_date >= $${countParamCount}`;
-      countParams.push(date_from);
-    }
-
-    if (date_to) {
-      countParamCount++;
-      countQuery += ` AND a.visit_date <= $${countParamCount}`;
-      countParams.push(date_to);
-    }
-
-    const countResult = await pool.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].total);
-
-    const recommendations = result.rows.map(row => ({
-      id: row.id.toString(),
-      place_name: row.place_name,
-      place_address: row.place_address,
-      category: row.metadata?.category || 'other',
-      rating: row.rating,
-      notes: row.notes,
-      visit_date: row.visit_date,
-      visibility: row.visibility,
-      created_at: row.created_at,
-      place_lat: row.place_lat,
-      place_lng: row.place_lng,
-      google_place_id: row.google_place_id,
-      user_name: row.user_name,
-      title: row.metadata?.title,
-      labels: row.labels || [],
-      metadata: row.metadata || {}
-    }));
+    const { getUserRecommendations } = await import('../db/social');
+    const recommendations = await getUserRecommendations(
+      userId, 
+      parseInt(limit as string), 
+      parseInt(offset as string),
+      (content_type as 'place' | 'service' | undefined)
+    );
 
     res.json({
       success: true,
       data: recommendations,
       pagination: {
-        total,
+        total: recommendations.length,
         page: Math.floor(parseInt(offset as string) / parseInt(limit as string)) + 1,
         limit: parseInt(limit as string),
-        totalPages: Math.ceil(total / parseInt(limit as string))
+        totalPages: Math.ceil(recommendations.length / parseInt(limit as string))
       }
     });
 
@@ -313,7 +165,7 @@ router.get('/:userId/recommendations', async (req, res) => {
 
 /**
  * GET /api/profile/:userId/likes
- * Get user likes (placeholder - likes functionality not implemented yet)
+ * Get user liked posts
  */
 router.get('/:userId/likes', async (req, res) => {
   try {
@@ -325,15 +177,21 @@ router.get('/:userId/likes', async (req, res) => {
       offset = 0
     } = req.query;
 
-    // For now, return empty array since likes functionality needs to be implemented
+    const { getUserLikedPosts } = await import('../db/social');
+    const likedPosts = await getUserLikedPosts(
+      userId, 
+      parseInt(limit as string), 
+      parseInt(offset as string)
+    );
+
     res.json({
       success: true,
-      data: [],
+      data: likedPosts,
       pagination: {
-        total: 0,
-        page: 1,
+        total: likedPosts.length,
+        page: Math.floor(parseInt(offset as string) / parseInt(limit as string)) + 1,
         limit: parseInt(limit as string),
-        totalPages: 0
+        totalPages: Math.ceil(likedPosts.length / parseInt(limit as string))
       }
     });
 

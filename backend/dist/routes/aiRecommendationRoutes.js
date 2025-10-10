@@ -93,4 +93,35 @@ router.post('/validate', requireAuth, async (req, res) => {
         });
     }
 });
+// Format recommendation text using LLM
+router.post('/format', requireAuth, async (req, res) => {
+    try {
+        console.log('=== LLM FORMAT ENDPOINT ===');
+        console.log('aiRecommendationRoutes - req.body:', req.body);
+        const { data, originalText } = req.body;
+        console.log('aiRecommendationRoutes - data:', data);
+        console.log('aiRecommendationRoutes - originalText:', originalText);
+        if (!data) {
+            console.log('aiRecommendationRoutes - No data provided');
+            return res.status(400).json({
+                success: false,
+                error: 'Data is required'
+            });
+        }
+        console.log('aiRecommendationRoutes - Calling recommendationAI.formatRecommendationPost');
+        const formattedText = await recommendationAI_1.recommendationAI.formatRecommendationPost(data, originalText);
+        console.log('aiRecommendationRoutes - formattedText result:', formattedText);
+        res.json({
+            success: true,
+            formattedText
+        });
+    }
+    catch (error) {
+        console.error('Error formatting recommendation:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to format recommendation'
+        });
+    }
+});
 exports.default = router;

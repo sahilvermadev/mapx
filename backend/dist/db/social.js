@@ -18,6 +18,7 @@ exports.likeAnnotation = likeAnnotation;
 exports.unlikeAnnotation = unlikeAnnotation;
 exports.isAnnotationLiked = isAnnotationLiked;
 exports.getAnnotationLikesCount = getAnnotationLikesCount;
+exports.getUserLikedPosts = getUserLikedPosts;
 exports.likeComment = likeComment;
 exports.unlikeComment = unlikeComment;
 exports.isCommentLiked = isCommentLiked;
@@ -30,6 +31,7 @@ exports.blockUser = blockUser;
 exports.unblockUser = unblockUser;
 exports.isBlocked = isBlocked;
 exports.searchUsers = searchUsers;
+exports.getUserRecommendations = getUserRecommendations;
 exports.getSuggestedUsers = getSuggestedUsers;
 exports.getFeedPosts = getFeedPosts;
 const db_1 = __importDefault(require("../db"));
@@ -67,7 +69,7 @@ async function getFollowers(userId, limit = 50, offset = 0) {
       JOIN user_follows f1 ON u.id = f1.follower_id
       LEFT JOIN user_follows f2 ON u.id = f2.following_id
       LEFT JOIN user_follows f3 ON u.id = f3.follower_id
-      LEFT JOIN annotations a ON u.id = a.user_id
+      LEFT JOIN recommendations a ON u.id = a.user_id
       WHERE f1.following_id = $1
       GROUP BY u.id, u.display_name, u.email, u.profile_picture_url, u.created_at, u.last_login_at, f1.created_at
       ORDER BY f1.created_at DESC
@@ -92,7 +94,7 @@ async function getFollowing(userId, limit = 50, offset = 0) {
       JOIN user_follows f1 ON u.id = f1.following_id
       LEFT JOIN user_follows f2 ON u.id = f2.following_id
       LEFT JOIN user_follows f3 ON u.id = f3.follower_id
-      LEFT JOIN annotations a ON u.id = a.user_id
+      LEFT JOIN recommendations a ON u.id = a.user_id
       WHERE f1.follower_id = $1
       GROUP BY u.id, u.display_name, u.email, u.profile_picture_url, u.created_at, u.last_login_at, f1.created_at
       ORDER BY f1.created_at DESC
@@ -154,8 +156,18 @@ async function createPrivacySettings(userId, settings) {
 // Comment functions
 async function addComment(annotationId, userId, comment, parentCommentId) {
     try {
-        const result = await db_1.default.query('INSERT INTO annotation_comments (annotation_id, user_id, parent_comment_id, comment) VALUES ($1, $2, $3, $4) RETURNING *', [annotationId, userId, parentCommentId || null, comment]);
-        return result.rows[0];
+        // Insert the comment
+        const insertResult = await db_1.default.query('INSERT INTO annotation_comments (recommendation_id, user_id, parent_comment_id, comment) VALUES ($1, $2, $3, $4) RETURNING *', [annotationId, userId, parentCommentId || null, comment]);
+        const newComment = insertResult.rows[0];
+        // Get user information for the comment
+        const userResult = await db_1.default.query('SELECT display_name as user_name, profile_picture_url as user_picture FROM users WHERE id = $1', [userId]);
+        const userInfo = userResult.rows[0];
+        // Return the comment with user information
+        return {
+            ...newComment,
+            user_name: userInfo?.user_name,
+            user_picture: userInfo?.user_picture
+        };
     }
     catch (error) {
         console.error('Error adding comment:', error);
@@ -174,8 +186,8 @@ async function getComments(annotationId, currentUserId, limit = 50, offset = 0) 
       JOIN users u ON ac.user_id = u.id
       LEFT JOIN comment_likes cl ON ac.id = cl.comment_id
       LEFT JOIN comment_likes cl2 ON ac.id = cl2.comment_id AND cl2.user_id = $3
-      WHERE ac.annotation_id = $1
-      GROUP BY ac.id, ac.annotation_id, ac.user_id, ac.parent_comment_id, ac.comment, ac.created_at, ac.updated_at, u.display_name, u.profile_picture_url, cl2.id
+      WHERE ac.recommendation_id = $1
+      GROUP BY ac.id, ac.recommendation_id, ac.user_id, ac.parent_comment_id, ac.comment, ac.created_at, ac.updated_at, u.display_name, u.profile_picture_url, cl2.id
       ORDER BY ac.created_at ASC
       LIMIT $2 OFFSET $4`, [annotationId, limit, currentUserId, offset]);
         // Build comment tree structure
@@ -228,7 +240,7 @@ async function deleteComment(commentId, userId) {
 // Like functions
 async function likeAnnotation(annotationId, userId) {
     try {
-        const result = await db_1.default.query('INSERT INTO annotation_likes (annotation_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [annotationId, userId]);
+        const result = await db_1.default.query('INSERT INTO annotation_likes (recommendation_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [annotationId, userId]);
         return (result.rowCount || 0) > 0;
     }
     catch (error) {
@@ -238,7 +250,7 @@ async function likeAnnotation(annotationId, userId) {
 }
 async function unlikeAnnotation(annotationId, userId) {
     try {
-        const result = await db_1.default.query('DELETE FROM annotation_likes WHERE annotation_id = $1 AND user_id = $2', [annotationId, userId]);
+        const result = await db_1.default.query('DELETE FROM annotation_likes WHERE recommendation_id = $1 AND user_id = $2', [annotationId, userId]);
         return (result.rowCount || 0) > 0;
     }
     catch (error) {
@@ -248,7 +260,7 @@ async function unlikeAnnotation(annotationId, userId) {
 }
 async function isAnnotationLiked(annotationId, userId) {
     try {
-        const result = await db_1.default.query('SELECT 1 FROM annotation_likes WHERE annotation_id = $1 AND user_id = $2', [annotationId, userId]);
+        const result = await db_1.default.query('SELECT 1 FROM annotation_likes WHERE recommendation_id = $1 AND user_id = $2', [annotationId, userId]);
         return (result.rowCount || 0) > 0;
     }
     catch (error) {
@@ -258,11 +270,50 @@ async function isAnnotationLiked(annotationId, userId) {
 }
 async function getAnnotationLikesCount(annotationId) {
     try {
-        const result = await db_1.default.query('SELECT COUNT(*) as count FROM annotation_likes WHERE annotation_id = $1', [annotationId]);
+        const result = await db_1.default.query('SELECT COUNT(*) as count FROM annotation_likes WHERE recommendation_id = $1', [annotationId]);
         return parseInt(result.rows[0].count);
     }
     catch (error) {
         console.error('Error getting annotation likes count:', error);
+        throw error;
+    }
+}
+async function getUserLikedPosts(userId, limit = 20, offset = 0) {
+    try {
+        const result = await db_1.default.query(`SELECT 
+        r.id as recommendation_id,
+        r.place_id,
+        r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
+        p.name as place_name, p.address as place_address, p.lat as place_lat, p.lng as place_lng, p.google_place_id,
+        u.id as user_id, u.display_name as user_name, u.profile_picture_url as user_picture,
+        COUNT(DISTINCT ac.id) as comments_count,
+        COUNT(DISTINCT al.id) as likes_count,
+        CASE WHEN al2.id IS NOT NULL THEN true ELSE false END as is_liked_by_current_user,
+        CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved,
+        al.created_at as liked_at
+      FROM annotation_likes al
+      JOIN recommendations r ON al.recommendation_id = r.id
+      JOIN places p ON r.place_id = p.id
+      JOIN users u ON r.user_id = u.id
+      LEFT JOIN annotation_comments ac ON r.id = ac.recommendation_id
+      LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
+      LEFT JOIN saved_places sp ON p.id = sp.place_id AND sp.user_id = $1
+      WHERE al.user_id = $1
+      AND r.visibility IN ('public', 'friends')
+      AND NOT EXISTS (
+        SELECT 1 FROM user_blocks 
+        WHERE (blocker_id = $1 AND blocked_id = r.user_id) 
+        OR (blocker_id = r.user_id AND blocked_id = $1)
+      )
+      GROUP BY r.id, r.place_id, r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
+               p.name, p.address, p.lat, p.lng, p.google_place_id,
+               u.id, u.display_name, u.profile_picture_url, al2.id, sp.id, al.created_at
+      ORDER BY al.created_at DESC
+      LIMIT $2 OFFSET $3`, [userId, limit, offset]);
+        return result.rows;
+    }
+    catch (error) {
+        console.error('Error getting user liked posts:', error);
         throw error;
     }
 }
@@ -396,7 +447,7 @@ async function isBlocked(blockerId, blockedId) {
 async function searchUsers(query, currentUserId, limit = 20, offset = 0) {
     try {
         const result = await db_1.default.query(`SELECT 
-        u.id, u.display_name, u.email, u.profile_picture_url, u.created_at, u.last_login_at,
+        u.id, u.display_name, u.username, u.email, u.profile_picture_url, u.created_at, u.last_login_at,
         COUNT(DISTINCT f2.follower_id) as followers_count,
         COUNT(DISTINCT f3.following_id) as following_count,
         COUNT(DISTINCT a.id) as recommendations_count,
@@ -409,11 +460,11 @@ async function searchUsers(query, currentUserId, limit = 20, offset = 0) {
       LEFT JOIN user_follows f3 ON u.id = f3.follower_id
       LEFT JOIN user_follows f4 ON u.id = f4.follower_id AND f4.following_id = $2
       LEFT JOIN user_blocks b ON (b.blocker_id = $2 AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = $2)
-      LEFT JOIN annotations a ON u.id = a.user_id
+      LEFT JOIN recommendations a ON u.id = a.user_id
       WHERE u.id != $2 
-        AND (u.display_name ILIKE $1 OR u.email ILIKE $1)
+        AND (u.display_name ILIKE $1 OR u.email ILIKE $1 OR u.username ILIKE $1)
         AND b.blocker_id IS NULL
-      GROUP BY u.id, u.display_name, u.email, u.profile_picture_url, u.created_at, u.last_login_at, f1.follower_id, f4.following_id, b.blocker_id
+      GROUP BY u.id, u.display_name, u.username, u.email, u.profile_picture_url, u.created_at, u.last_login_at, f1.follower_id, f4.following_id, b.blocker_id
       ORDER BY 
         CASE WHEN u.display_name ILIKE $1 THEN 1 ELSE 2 END,
         followers_count DESC,
@@ -426,10 +477,58 @@ async function searchUsers(query, currentUserId, limit = 20, offset = 0) {
         throw error;
     }
 }
+async function getUserRecommendations(userId, limit = 20, offset = 0, contentType) {
+    try {
+        // Build dynamic WHERE clause for optional content type filter
+        const whereParts = [
+            'r.user_id = $1',
+            "r.visibility IN ('public', 'friends')"
+        ];
+        const params = [userId];
+        if (contentType) {
+            whereParts.push('r.content_type = $4');
+        }
+        // Final params order: $1 userId, $2 limit, $3 offset, optional $4 contentType
+        params.push(limit); // $2
+        params.push(offset); // $3
+        if (contentType) {
+            params.push(contentType); // $4
+        }
+        const result = await db_1.default.query(`SELECT 
+        r.id as recommendation_id,
+        r.place_id,
+        r.title,
+        r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
+        p.name as place_name, p.address as place_address, p.lat as place_lat, p.lng as place_lng, p.google_place_id,
+        u.id as user_id, u.display_name as user_name, u.profile_picture_url as user_picture,
+        COUNT(DISTINCT ac.id) as comments_count,
+        COUNT(DISTINCT al.id) as likes_count,
+        CASE WHEN al2.id IS NOT NULL THEN true ELSE false END as is_liked_by_current_user,
+        CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved
+      FROM recommendations r
+      LEFT JOIN places p ON r.place_id = p.id
+      JOIN users u ON r.user_id = u.id
+      LEFT JOIN annotation_comments ac ON r.id = ac.recommendation_id
+      LEFT JOIN annotation_likes al ON r.id = al.recommendation_id
+      LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
+      LEFT JOIN saved_places sp ON p.id = sp.place_id AND sp.user_id = $1
+      WHERE ${whereParts.join(' AND ')}
+      GROUP BY r.id, r.place_id, r.title, r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
+               p.name, p.address, p.lat, p.lng, p.google_place_id,
+               u.id, u.display_name, u.profile_picture_url, al2.id, sp.id
+      ORDER BY r.created_at DESC
+      LIMIT $2 OFFSET $3`, params);
+        return result.rows;
+    }
+    catch (error) {
+        console.error('Error getting user recommendations:', error);
+        throw error;
+    }
+}
 async function getSuggestedUsers(currentUserId, limit = 10) {
     try {
         const result = await db_1.default.query(`SELECT 
-        u.id, u.display_name, u.email, u.profile_picture_url, u.created_at, u.last_login_at,
+        u.id, u.display_name, u.username, u.email, u.profile_picture_url, u.created_at, u.last_login_at,
         COUNT(DISTINCT f2.follower_id) as followers_count,
         COUNT(DISTINCT f3.following_id) as following_count,
         COUNT(DISTINCT a.id) as recommendations_count,
@@ -443,14 +542,14 @@ async function getSuggestedUsers(currentUserId, limit = 10) {
       LEFT JOIN user_follows f3 ON u.id = f3.follower_id
       LEFT JOIN user_follows f4 ON u.id = f4.follower_id AND f4.following_id = $1
       LEFT JOIN user_blocks b ON (b.blocker_id = $1 AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = $1)
-      LEFT JOIN annotations a ON u.id = a.user_id
+      LEFT JOIN recommendations a ON u.id = a.user_id
       LEFT JOIN user_follows mutual ON mutual.following_id = u.id AND mutual.follower_id IN (
         SELECT following_id FROM user_follows WHERE follower_id = $1
       )
       WHERE u.id != $1 
         AND f1.follower_id IS NULL
         AND b.blocker_id IS NULL
-      GROUP BY u.id, u.display_name, u.email, u.profile_picture_url, u.created_at, u.last_login_at, f1.follower_id, f4.following_id, b.blocker_id
+      GROUP BY u.id, u.display_name, u.username, u.email, u.profile_picture_url, u.created_at, u.last_login_at, f1.follower_id, f4.following_id, b.blocker_id
       ORDER BY mutual_followers DESC, followers_count DESC, u.created_at DESC
       LIMIT $2`, [currentUserId, limit]);
         return result.rows;
@@ -464,21 +563,21 @@ async function getSuggestedUsers(currentUserId, limit = 10) {
 async function getFeedPosts(userId, limit = 20, offset = 0) {
     try {
         const result = await db_1.default.query(`SELECT 
-        a.id as annotation_id,
+        a.id as recommendation_id,
         a.place_id,
-        a.notes, a.rating, a.visit_date, a.visibility, a.created_at, a.labels, a.metadata,
+        a.description, a.rating, a.visibility, a.created_at, a.labels, a.metadata, a.content_type, a.content_data,
         p.name as place_name, p.address as place_address, p.lat as place_lat, p.lng as place_lng, p.google_place_id,
         u.id as user_id, u.display_name as user_name, u.profile_picture_url as user_picture,
         COUNT(DISTINCT ac.id) as comments_count,
         COUNT(DISTINCT al.id) as likes_count,
         CASE WHEN al2.id IS NOT NULL THEN true ELSE false END as is_liked_by_current_user,
         CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved
-      FROM annotations a
+      FROM recommendations a
       JOIN places p ON a.place_id = p.id
       JOIN users u ON a.user_id = u.id
-      LEFT JOIN annotation_comments ac ON a.id = ac.annotation_id
-      LEFT JOIN annotation_likes al ON a.id = al.annotation_id
-      LEFT JOIN annotation_likes al2 ON a.id = al2.annotation_id AND al2.user_id = $1
+      LEFT JOIN annotation_comments ac ON a.id = ac.recommendation_id
+      LEFT JOIN annotation_likes al ON a.id = al.recommendation_id
+      LEFT JOIN annotation_likes al2 ON a.id = al2.recommendation_id AND al2.user_id = $1
       LEFT JOIN saved_places sp ON p.id = sp.place_id AND sp.user_id = $1
       WHERE a.user_id IN (
         SELECT following_id FROM user_follows WHERE follower_id = $1

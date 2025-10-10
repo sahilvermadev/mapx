@@ -14,7 +14,7 @@
 .search-results-modal {
   background: white;
   border-radius: 16px;
-  width: min(800px, calc(100vw - 40px));
+  width: min(800px, calc(100% - 40px));
   max-height: calc(100vh - 40px);
   overflow: hidden;
   position: relative;

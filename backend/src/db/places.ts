@@ -246,7 +246,9 @@ export async function getUserById(userId: string): Promise<{ display_name?: stri
 export async function getPlacesWithReviews(
   visibility: 'friends' | 'public' | 'all' = 'all',
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  groupIds?: number[],
+  currentUserId?: string
 ): Promise<Array<Place & {
   review_count: number;
   average_rating: number;
@@ -263,16 +265,41 @@ export async function getPlacesWithReviews(
         MAX(a.created_at) as latest_review_date
       FROM places p
       LEFT JOIN categories c ON p.category_id = c.id
-      INNER JOIN annotations a ON p.id = a.place_id
+      INNER JOIN recommendations a ON p.id = a.place_id
     `;
     
     const params: any[] = [];
     let paramCount = 0;
+    const whereConditions: string[] = [];
     
     if (visibility !== 'all') {
       paramCount++;
-      query += ` WHERE a.visibility = $${paramCount}`;
+      whereConditions.push(`a.visibility = $${paramCount}`);
       params.push(visibility);
+    }
+    
+    // Add friends filtering - only show places reviewed by users the current user follows
+    if (visibility === 'friends' && currentUserId) {
+      paramCount++;
+      whereConditions.push(`a.user_id IN (
+        SELECT following_id FROM user_follows WHERE follower_id = $${paramCount}
+      )`);
+      params.push(currentUserId);
+    }
+    
+    // Add group filtering if groupIds are provided
+    if (groupIds && groupIds.length > 0) {
+      paramCount++;
+      whereConditions.push(`a.user_id IN (
+        SELECT DISTINCT fgm.user_id 
+        FROM friend_group_members fgm 
+        WHERE fgm.group_id = ANY($${paramCount})
+      )`);
+      params.push(groupIds);
+    }
+    
+    if (whereConditions.length > 0) {
+      query += ` WHERE ${whereConditions.join(' AND ')}`;
     }
     
     query += `

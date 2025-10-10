@@ -43,30 +43,35 @@ router.get('/profile-picture', async (req, res) => {
 // Development-only login endpoint (bypasses OAuth)
 router.get('/dev-login', async (req, res) => {
   if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ message: 'Development login not available in production' });
+    return res
+      .status(403)
+      .json({ message: 'Development login not available in production' });
   }
 
   try {
-    // Create a mock user for development
     const mockUser = {
       id: 'dev-user-123',
       google_id: 'dev-google-123',
       email: 'dev@example.com',
       display_name: 'Development User',
-      profile_picture_url: null,
+      profile_picture_url: null as string | null,
+      username: null as string | null,
     };
 
+    const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
     const token = jwt.sign(
       {
         id: mockUser.id,
         email: mockUser.email,
         displayName: mockUser.display_name,
         profilePictureUrl: mockUser.profile_picture_url,
+        username: mockUser.username,
       },
-      process.env.JWT_SECRET as string || 'dev-secret-key',
+      jwtSecret,
       { expiresIn: '24h' }
     );
 
+    // Redirect back to frontend with token param
     res.redirect(`http://localhost:5173/auth/success?token=${token}`);
   } catch (error) {
     console.error('Dev login error:', error);
@@ -74,23 +79,31 @@ router.get('/dev-login', async (req, res) => {
   }
 });
 
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+// GET /auth/google
+router.get(
+  '/google',
+  passport.authenticate('google', { scope: ['profile', 'email'] })
+);
 
+// GET /auth/google/callback
 router.get(
   '/google/callback',
   passport.authenticate('google', { failureRedirect: '/auth/failure' }),
   (req, res) => {
-    const user = req.user as any;
+    // user was set by passport strategy
+    const user: any = (req as any).user;
     if (!user?.id) return res.redirect('/auth/failure');
 
+    const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
     const token = jwt.sign(
       {
         id: user.id,
         email: user.email,
         displayName: user.display_name,
         profilePictureUrl: user.profile_picture_url,
+        username: user.username,
       },
-      process.env.JWT_SECRET as string,
+      jwtSecret,
       { expiresIn: '1h' }
     );
 
@@ -98,22 +111,23 @@ router.get(
   }
 );
 
-router.get('/success', (req, res) => {
-  if (req.user) return res.status(200).json({ message: 'Login successful!', user: req.user });
-  res.status(401).json({ message: 'Not authenticated.' });
-});
-
-router.get('/failure', (_req, res) => res.status(401).json({ message: 'Authentication failed!' }));
-
+// GET /auth/logout
 router.get('/logout', (req, res, next) => {
-  req.logout((err) => {
+  // Passport 0.6 requires callback
+  (req as any).logout((err: any) => {
     if (err) return next(err);
-    req.session.destroy((destroyErr) => {
-      if (destroyErr) return res.status(500).json({ message: 'Logout failed.' });
+    req.session?.destroy(() => {
       res.clearCookie('connect.sid');
-      res.status(200).json({ message: 'Logged out successfully.' });
+      res.status(200).json({ message: 'Logged out' });
     });
   });
 });
 
+// GET /auth/failure
+router.get('/failure', (_req, res) => {
+  res.status(401).json({ message: 'Authentication failed' });
+});
+
 export default router;
+
+

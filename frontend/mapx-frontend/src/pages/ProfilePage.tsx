@@ -1,43 +1,41 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Star, Heart, Bookmark, Filter, SortAsc, Search, Users, ChevronDown } from 'lucide-react';
+import { Star, Heart, Filter, SortAsc, Search, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { profileApi, type UserData, type UserStats, type FilterOptions, type SortOptions } from '@/services/profile';
-import type { PlaceCard } from '@/services/profile';
+import { profileApi, type UserData, type FilterOptions, type SortOptions } from '@/services/profile';
+import { useAuth } from '@/contexts/AuthContext';
 
-import PlaceCardComponent from '@/components/PlaceCard';
-import StatsCard from '@/components/StatsCard';
+import FeedPost from '@/components/FeedPost';
 import FilterPanel from '@/components/FilterPanel';
-import LoadingSpinner from '@/components/LoadingSpinner';
 
-type TabType = 'recommendations' | 'likes' | 'saved';
+type TabType = 'recommendations' | 'likes';
 
 interface ProfilePageProps {}
 
 const ProfilePage: React.FC<ProfilePageProps> = () => {
   const { userId } = useParams<{ userId: string }>();
-  const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   
   // State management
   const [userData, setUserData] = useState<UserData | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('recommendations');
-  const [places, setPlaces] = useState<PlaceCard[]>([]);
+  const [places, setPlaces] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [placesLoading, setPlacesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [hasLoadedFirstPage, setHasLoadedFirstPage] = useState(false);
   
   // Pagination state
   const [hasMore, setHasMore] = useState(true);
@@ -48,13 +46,13 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const [filters, setFilters] = useState<FilterOptions>({});
   const [sortOptions, setSortOptions] = useState<SortOptions>({ field: 'created_at', direction: 'desc' });
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   
-  // Tab counts
-  const [tabCounts, setTabCounts] = useState({
-    recommendations: 0,
-    likes: 0,
-    saved: 0
-  });
+  // Request versioning to avoid race conditions on async updates
+  const profileRequestVersionRef = useRef(0);
+  const placesRequestVersionRef = useRef(0);
+  
+
 
   // Load user profile data
   const loadUserProfile = useCallback(async () => {
@@ -66,20 +64,11 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
       
       console.log('Loading profile for user ID:', userId);
       
-      const [profileData, statsData] = await Promise.all([
-        profileApi.getUserProfile(userId),
-        profileApi.getUserStats(userId)
-      ]);
-      
-      setUserData(profileData);
-      setUserStats(statsData);
-      
-      // Update tab counts
-      setTabCounts({
-        recommendations: statsData.total_recommendations,
-        likes: statsData.total_likes,
-        saved: statsData.total_saved
-      });
+      const currentVersion = ++profileRequestVersionRef.current;
+      const profileData = await profileApi.getUserProfile(userId);
+      if (currentVersion === profileRequestVersionRef.current) {
+        setUserData(profileData);
+      }
       
     } catch (err) {
       console.error('Failed to load user profile:', err);
@@ -96,6 +85,8 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     try {
       const currentOffset = reset ? 0 : offset;
       setLoadingMore(!reset);
+      setPlacesLoading(true);
+      const currentVersion = ++placesRequestVersionRef.current;
       
       let result;
       
@@ -103,7 +94,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
         case 'recommendations':
           result = await profileApi.getUserRecommendations(
             userId, 
-            { ...filters, search: searchQuery }, 
+            { ...filters, search: debouncedSearchQuery }, 
             sortOptions, 
             { limit: 20, offset: currentOffset }
           );
@@ -115,20 +106,18 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
             { limit: 20, offset: currentOffset }
           );
           break;
-        case 'saved':
-          result = await profileApi.getUserSaved(
-            userId, 
-            sortOptions, 
-            { limit: 20, offset: currentOffset }
-          );
-          break;
       }
       
+      if (currentVersion !== placesRequestVersionRef.current) {
+        return; // stale response
+      }
+
       if (result) {
         const newPlaces = result.data;
         setPlaces(prev => reset ? newPlaces : [...prev, ...newPlaces]);
         setHasMore(result.pagination.total > (currentOffset + newPlaces.length));
         setOffset(currentOffset + newPlaces.length);
+        setHasLoadedFirstPage(true);
       }
       
     } catch (err) {
@@ -136,8 +125,9 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
       setError(err instanceof Error ? err.message : `Failed to load ${activeTab}`);
     } finally {
       setLoadingMore(false);
+      setPlacesLoading(false);
     }
-  }, [userId, activeTab, filters, sortOptions, searchQuery, offset]);
+  }, [userId, activeTab, filters, sortOptions, debouncedSearchQuery, offset]);
 
   // Handle tab change
   const handleTabChange = (tab: TabType) => {
@@ -146,6 +136,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     setOffset(0);
     setHasMore(true);
     setError(null);
+    setHasLoadedFirstPage(false);
   };
 
   // Handle load more
@@ -161,6 +152,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     setPlaces([]);
     setOffset(0);
     setHasMore(true);
+    setHasLoadedFirstPage(false);
   };
 
   // Handle sort change
@@ -169,6 +161,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     setPlaces([]);
     setOffset(0);
     setHasMore(true);
+    setHasLoadedFirstPage(false);
   };
 
   // Handle search
@@ -177,62 +170,26 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     setPlaces([]);
     setOffset(0);
     setHasMore(true);
+    setHasLoadedFirstPage(false);
   };
 
-  // Handle place actions
-  const handlePlaceAction = async (placeId: string, action: 'delete' | 'unlike' | 'remove') => {
-    try {
-      let success = false;
-      
-      switch (action) {
-        case 'delete':
-          success = await profileApi.deleteRecommendation(parseInt(placeId));
-          break;
-        case 'unlike':
-          success = await profileApi.unlikePlace(parseInt(placeId));
-          break;
-        case 'remove':
-          success = await profileApi.removeFromSaved(parseInt(placeId));
-          break;
-      }
-      
-      if (success) {
-        // Remove from local state
-        setPlaces(prev => prev.filter(place => place.id !== placeId));
-        
-        // Update stats
-        if (userStats) {
-          setUserStats(prev => {
-            if (!prev) return prev;
-            switch (action) {
-              case 'delete':
-                return { ...prev, total_recommendations: prev.total_recommendations - 1 };
-              case 'unlike':
-                return { ...prev, total_likes: prev.total_likes - 1 };
-              case 'remove':
-                return { ...prev, total_saved: prev.total_saved - 1 };
-              default:
-                return prev;
-            }
-          });
-        }
-      }
-    } catch (err) {
-      console.error(`Failed to ${action} place:`, err);
-    }
-  };
 
-  // Handle view on map
-  const handleViewOnMap = (place: PlaceCard) => {
-    if (place.place_lat && place.place_lng) {
-      navigate('/', { 
-        state: { 
-          center: { lat: place.place_lat, lng: place.place_lng },
-          place: place
-        } 
-      });
-    }
-  };
+  // Reset state when userId changes
+  useEffect(() => {
+    setUserData(null);
+    setPlaces([]);
+    setLoading(true);
+    setPlacesLoading(false);
+    setError(null);
+    setHasLoadedFirstPage(false);
+    setHasMore(true);
+    setOffset(0);
+    setFilters({});
+    setSortOptions({ field: 'created_at', direction: 'desc' });
+    setSearchQuery('');
+    setDebouncedSearchQuery('');
+    setActiveTab('recommendations');
+  }, [userId]);
 
   // Effects
   useEffect(() => {
@@ -243,22 +200,17 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     loadPlaces(true);
   }, [loadPlaces]);
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <LoadingSpinner />
-          <p>Loading profile...</p>
-        </div>
-      </div>
-    );
-  }
+  // Debounce search input to reduce flicker and request churn
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 300);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+
 
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4 text-center">
           <h2 className="text-xl font-semibold">Error Loading Profile</h2>
           <p className="text-muted-foreground">{error}</p>
@@ -270,22 +222,10 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     );
   }
 
-  // Check if user exists
-  if (!userData) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <h2 className="text-xl font-semibold">User Not Found</h2>
-          <p className="text-muted-foreground">The requested user profile could not be found.</p>
-          <Button onClick={() => navigate('/')} variant="outline">
-            Back to Map
-          </Button>
-        </div>
-      </div>
-    );
-  }
+
 
   const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
 
   const getSortLabel = () => {
     const { field, direction } = sortOptions;
@@ -296,62 +236,34 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-16 flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Map
-          </Button>
-          
-          <div className="flex items-center gap-3">
-            <Avatar className="h-10 w-10">
-              <AvatarImage src={userData.profilePictureUrl} alt={userData.displayName} />
-              <AvatarFallback>{getInitials(userData.displayName)}</AvatarFallback>
-            </Avatar>
-            
-            <div className="min-w-0">
-              <h1 className="text-lg font-semibold truncate">{userData.displayName}</h1>
-              <p className="text-sm text-muted-foreground truncate">{userData.email}</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <div className="min-h-[calc(100vh-64px)] bg-background">
       <div className="container mx-auto px-4 py-8">
-        {/* Stats Dashboard */}
-        {/* {userStats && (
+        {/* Profile User Info */}
+        {userData ? (
           <section className="mb-8">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <StatsCard
-                title="Recommendations"
-                value={userStats.total_recommendations}
-                icon={<Star className="h-4 w-4" />}
-                color="primary"
-              />
-              <StatsCard
-                title="Likes"
-                value={userStats.total_likes}
-                icon={<Heart className="h-4 w-4" />}
-                color="secondary"
-              />
-              <StatsCard
-                title="Saved"
-                value={userStats.total_saved}
-                icon={<Bookmark className="h-4 w-4" />}
-                color="success"
-              />
-              <StatsCard
-                title="Avg Rating"
-                value={userStats.average_rating.toFixed(1)}
-                icon={<Star className="h-4 w-4" />}
-                color="warning"
-                isRating
-              />
+            <div className="flex items-center gap-4 p-6 bg-card rounded-lg border">
+              <Avatar className="h-16 w-16">
+                <AvatarImage src={userData.profilePictureUrl} alt={userData.displayName} />
+                <AvatarFallback className="text-lg">{getInitials(userData.displayName)}</AvatarFallback>
+              </Avatar>
+
+              <div className="min-w-0 flex-1">
+                <h1 className="text-2xl font-bold truncate">{userData.displayName}</h1>
+                <p className="text-muted-foreground truncate">@{userData.username || 'no-username'}</p>
+              </div>
             </div>
           </section>
-        )} */}
+        ) : (
+          <section className="mb-8">
+            <div className="flex items-center gap-4 p-6 bg-card rounded-lg border">
+              <Skeleton className="h-16 w-16 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-4 w-32" />
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Tab Navigation */}
         <nav className="flex space-x-1 mb-6">
@@ -362,10 +274,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
             className="flex items-center gap-2"
           >
             <Star className="h-4 w-4" />
-            Recommendations
-            <Badge variant="secondary" className="ml-1">
-              {tabCounts.recommendations}
-            </Badge>
+            My Recommendations
           </Button>
           <Button
             variant={activeTab === 'likes' ? 'default' : 'ghost'}
@@ -374,22 +283,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
             className="flex items-center gap-2"
           >
             <Heart className="h-4 w-4" />
-            Likes
-            <Badge variant="secondary" className="ml-1">
-              {tabCounts.likes}
-            </Badge>
-          </Button>
-          <Button
-            variant={activeTab === 'saved' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => handleTabChange('saved')}
-            className="flex items-center gap-2"
-          >
-            <Bookmark className="h-4 w-4" />
-            Saved
-            <Badge variant="secondary" className="ml-1">
-              {tabCounts.saved}
-            </Badge>
+            My Likes
           </Button>
         </nav>
 
@@ -475,14 +369,34 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
 
         {/* Content Area */}
         <main>
-          {places.length === 0 && !loadingMore ? (
+          {/* Content skeletons stay until posts are actually present */}
+          {(places.length === 0 && (loading || placesLoading)) ? (
+            <div className="space-y-6">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
+                  <div className="flex items-start space-x-4">
+                    <Skeleton className="h-12 w-12 rounded-full" />
+                    <div className="flex-1 space-y-3">
+                      <Skeleton className="h-4 w-[200px]" />
+                      <Skeleton className="h-4 w-[150px]" />
+                      <Skeleton className="h-20 w-full" />
+                      <div className="flex space-x-4">
+                        <Skeleton className="h-8 w-16" />
+                        <Skeleton className="h-8 w-16" />
+                        <Skeleton className="h-8 w-16" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : places.length === 0 && !loading && !placesLoading && hasLoadedFirstPage ? (
             <Card>
               <CardContent className="py-12 text-center">
                 <div className="flex flex-col items-center gap-4">
                   <div className="h-12 w-12 text-muted-foreground">
                     {activeTab === 'recommendations' && <Star className="h-full w-full" />}
                     {activeTab === 'likes' && <Heart className="h-full w-full" />}
-                    {activeTab === 'saved' && <Bookmark className="h-full w-full" />}
                   </div>
                   <h3 className="text-lg font-semibold">No {activeTab} yet</h3>
                   <p className="text-muted-foreground">Start exploring places to build your collection!</p>
@@ -490,24 +404,20 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-6">
               <AnimatePresence>
                 {places.map((place, index) => (
                   <motion.div
-                    key={place.id}
+                    key={place.id || `place-${index}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
                     transition={{ delay: index * 0.1 }}
                   >
-                    <PlaceCardComponent
-                      place={place}
-                      onViewOnMap={() => handleViewOnMap(place)}
-                      onDelete={() => handlePlaceAction(place.id, 'delete')}
-                      onUnlike={() => handlePlaceAction(place.id, 'unlike')}
-                      onRemove={() => handlePlaceAction(place.id, 'remove')}
-                      showActions={true}
-                      tabType={activeTab}
+                    <FeedPost
+                      post={place}
+                      currentUserId={currentUser?.id || ''}
+                      onPostUpdate={() => loadUserProfile()}
                     />
                   </motion.div>
                 ))}
@@ -516,23 +426,23 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
           )}
 
           {/* Load More */}
-          {hasMore && (
+          {hasMore && hasLoadedFirstPage && (
             <div className="mt-8 text-center">
-              <Button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                variant="outline"
-                size="lg"
-              >
-                {loadingMore ? (
-                  <>
-                    <LoadingSpinner size="small" />
-                    Loading...
-                  </>
-                ) : (
-                  'Load More'
-                )}
-              </Button>
+              {loadingMore ? (
+                <div className="flex items-center justify-center gap-2">
+                  <Skeleton className="h-4 w-4 rounded-full" />
+                  <Skeleton className="h-6 w-20" />
+                </div>
+              ) : (
+                <Button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  variant="outline"
+                  size="lg"
+                >
+                  Load More
+                </Button>
+              )}
             </div>
           )}
         </main>
@@ -541,4 +451,4 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   );
 };
 
-export default ProfilePage; 
+export default React.memo(ProfilePage); 

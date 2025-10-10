@@ -48,9 +48,9 @@ function configurePassport() {
             await pool.query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
           } else {
             const created = await pool.query(
-              `INSERT INTO users (google_id, email, display_name, profile_picture_url)
-               VALUES ($1, $2, $3, $4) RETURNING *`,
-              [mockUser.google_id, mockUser.email, mockUser.display_name, mockUser.profile_picture_url]
+              `INSERT INTO users (google_id, email, display_name, profile_picture_url, username, username_set_at)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+              [mockUser.google_id, mockUser.email, mockUser.display_name, mockUser.profile_picture_url, null, null]
             );
             user = created.rows[0];
           }
@@ -95,13 +95,15 @@ function configurePassport() {
             } else {
               console.log('🆕 Creating new user with profile picture:', profile.photos?.[0]?.value);
               const created = await pool.query(
-                `INSERT INTO users (google_id, email, display_name, profile_picture_url)
-                 VALUES ($1, $2, $3, $4) RETURNING *`,
+                `INSERT INTO users (google_id, email, display_name, profile_picture_url, username, username_set_at)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
                 [
                   profile.id,
                   profile.emails?.[0]?.value ?? null,
                   profile.displayName,
                   profile.photos?.[0]?.value ?? null,
+                  null, // username starts as null
+                  null  // username_set_at starts as null
                 ]
               );
               user = created.rows[0];

@@ -171,7 +171,7 @@ async function getUserById(userId) {
 /**
  * Get all places that have reviews/annotations
  */
-async function getPlacesWithReviews(visibility = 'all', limit = 100, offset = 0) {
+async function getPlacesWithReviews(visibility = 'all', limit = 100, offset = 0, groupIds) {
     try {
         let query = `
       SELECT 
@@ -182,14 +182,28 @@ async function getPlacesWithReviews(visibility = 'all', limit = 100, offset = 0)
         MAX(a.created_at) as latest_review_date
       FROM places p
       LEFT JOIN categories c ON p.category_id = c.id
-      INNER JOIN annotations a ON p.id = a.place_id
+      INNER JOIN recommendations a ON p.id = a.place_id
     `;
         const params = [];
         let paramCount = 0;
+        const whereConditions = [];
         if (visibility !== 'all') {
             paramCount++;
-            query += ` WHERE a.visibility = $${paramCount}`;
+            whereConditions.push(`a.visibility = $${paramCount}`);
             params.push(visibility);
+        }
+        // Add group filtering if groupIds are provided
+        if (groupIds && groupIds.length > 0) {
+            paramCount++;
+            whereConditions.push(`a.user_id IN (
+        SELECT DISTINCT fgm.user_id 
+        FROM friend_group_members fgm 
+        WHERE fgm.group_id = ANY($${paramCount})
+      )`);
+            params.push(groupIds);
+        }
+        if (whereConditions.length > 0) {
+            query += ` WHERE ${whereConditions.join(' AND ')}`;
         }
         query += `
       GROUP BY p.id, p.google_place_id, p.name, p.address, p.category_id, p.lat, p.lng, p.geom, p.metadata, p.created_at, p.updated_at, c.name

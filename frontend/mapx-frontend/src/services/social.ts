@@ -4,6 +4,7 @@ import { apiClient, type ApiResponse } from './api';
 export interface User {
   id: string;
   display_name: string;
+  username?: string;
   email: string;
   profile_picture_url?: string;
   created_at: string;
@@ -15,12 +16,12 @@ export interface User {
 
 export interface Comment {
   id: number;
-  annotation_id: number;
+  recommendation_id: number;
   user_id: string;
   comment: string;
   created_at: string;
   updated_at: string;
-  user_name: string;
+  user_name?: string;
   user_picture?: string;
   likes_count?: number;
   is_liked_by_current_user?: boolean;
@@ -35,15 +36,18 @@ export interface PrivacySettings {
 }
 
 export interface FeedPost {
-  annotation_id: number;
+  recommendation_id: number;
   place_id: number;
-  notes: string;
+  description: string;
   rating: number;
   visit_date?: string;
   visibility: string;
   created_at: string;
   labels?: string[];
   metadata: any;
+  content_type?: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  title?: string;
+  content_data?: any;
   place_name: string;
   place_address: string;
   place_lat: number;
@@ -85,11 +89,11 @@ export const socialApi = {
   },
 
   async getFollowers(userId: string, currentUserId: string, limit: number = 20, offset: number = 0): Promise<ApiResponse<{ users: User[], pagination: PaginationInfo }>> {
-    return apiClient.get(`/social/users/${userId}/followers`, { currentUserId, limit, offset });
+    return apiClient.get(`/social/followers/${userId}`, { currentUserId, limit, offset });
   },
 
   async getFollowing(userId: string, currentUserId: string, limit: number = 20, offset: number = 0): Promise<ApiResponse<{ users: User[], pagination: PaginationInfo }>> {
-    return apiClient.get(`/social/users/${userId}/following`, { currentUserId, limit, offset });
+    return apiClient.get(`/social/following/${userId}`, { currentUserId, limit, offset });
   },
 
   async isFollowing(followerId: string, followingId: string): Promise<ApiResponse<{ is_following: boolean }>> {
@@ -119,29 +123,29 @@ export const socialApi = {
   },
 
   // Comments
-  async addComment(annotationId: number, currentUserId: string, comment: string): Promise<ApiResponse<Comment>> {
-    return apiClient.post(`/social/comments/${annotationId}`, { currentUserId, comment });
+  async addComment(recommendationId: number, currentUserId: string, comment: string): Promise<ApiResponse<Comment>> {
+    return apiClient.post(`/social/comments/${recommendationId}`, { currentUserId, comment });
   },
 
-  async getComments(annotationId: number, currentUserId: string, limit: number = 50, offset: number = 0): Promise<ApiResponse<Comment[]>> {
-    return apiClient.get(`/social/comments/${annotationId}`, { currentUserId, limit, offset });
+  async getComments(recommendationId: number, currentUserId: string, limit: number = 50, offset: number = 0): Promise<ApiResponse<Comment[]>> {
+    return apiClient.get(`/social/comments/${recommendationId}`, { currentUserId, limit, offset });
   },
 
   async deleteComment(commentId: number, currentUserId: string): Promise<ApiResponse<{ deleted: boolean }>> {
     return apiClient.delete(`/social/comments/${commentId}`, { currentUserId });
   },
 
-  // Likes for annotations (posts)
-  async likeAnnotation(annotationId: number, currentUserId: string): Promise<ApiResponse<{ liked: boolean }>> {
-    return apiClient.post(`/social/likes/annotation/${annotationId}`, { currentUserId });
+  // Likes for recommendations (posts)
+  async likeAnnotation(recommendationId: number, currentUserId: string): Promise<ApiResponse<{ liked: boolean }>> {
+    return apiClient.post(`/social/likes/recommendation/${recommendationId}`, { currentUserId });
   },
 
-  async unlikeAnnotation(annotationId: number, currentUserId: string): Promise<ApiResponse<{ unliked: boolean }>> {
-    return apiClient.delete(`/social/likes/annotation/${annotationId}`, { currentUserId });
+  async unlikeAnnotation(recommendationId: number, currentUserId: string): Promise<ApiResponse<{ unliked: boolean }>> {
+    return apiClient.delete(`/social/likes/recommendation/${recommendationId}`, { currentUserId });
   },
 
-  async getAnnotationLikes(annotationId: number, currentUserId: string): Promise<ApiResponse<{ likes_count: number, is_liked: boolean }>> {
-    return apiClient.get(`/social/likes/annotation/${annotationId}`, { currentUserId });
+  async getAnnotationLikes(recommendationId: number, currentUserId: string): Promise<ApiResponse<{ likes_count: number, is_liked: boolean }>> {
+    return apiClient.get(`/social/likes/recommendation/${recommendationId}`, { currentUserId });
   },
 
   // Likes for comments

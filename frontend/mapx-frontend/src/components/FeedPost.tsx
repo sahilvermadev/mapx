@@ -1,16 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, MapPin, Star, Clock, Share2, Bookmark, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
+import { Heart, MessageCircle, MapPin, Star, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { socialApi, type FeedPost as FeedPostType, type Comment } from '@/services/social';
-import { apiClient } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { formatUserDisplay, getUserInitials } from '../utils/userDisplay';
+import { renderWithMentions, insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
+import { socialApi as SocialApi } from '@/services/social';
+import { toast } from 'sonner';
 
 // Types
 interface FeedPostProps {
-  post: FeedPostType;
-  currentUserId: string;
+  post?: FeedPostType;
+  currentUserId?: string;
   onPostUpdate?: () => void;
+  noOuterSpacing?: boolean;
+  isLoading?: boolean;
 }
 
 // Constants
@@ -37,12 +45,14 @@ const formatDate = (dateString: string): string => {
   return date.toLocaleDateString();
 };
 
-const getInitials = (name: string): string => 
-  name.split(' ')
+const getInitials = (name: string | undefined | null): string => {
+  if (!name) return 'U';
+  return name.split(' ')
     .map(n => n[0])
     .join('')
     .toUpperCase()
     .slice(0, 2);
+};
 
 const getProxiedImageUrl = (url?: string): string => {
   if (!url) return '';
@@ -70,7 +80,16 @@ const renderStars = (rating: number) => (
 );
 
 // Component
-const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }) => {
+// onPostUpdate currently unused
+const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing, isLoading }) => {
+  if (isLoading) {
+    return <FeedPostSkeleton noOuterSpacing={noOuterSpacing} />;
+  }
+
+  if (!post || !currentUserId) {
+    return null;
+  }
+  const navigate = useNavigate();
   // State
   const [postData, setPostData] = useState(post);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -79,9 +98,14 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isLiked, setIsLiked] = useState(post.is_liked_by_current_user);
-  const [isSaved, setIsSaved] = useState(post.is_saved || false);
+  // Mentions state for comment input
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]);
+  const [showMentionMenu, setShowMentionMenu] = useState(false);
+  const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number } | null>(null);
+  const [usernameToUser, setUsernameToUser] = useState<Record<string, { id: string; displayName: string }>>({});
 
-  const currentUser = apiClient.getCurrentUser();
+  const { user: currentUser } = useAuth();
 
   // Effects
   useEffect(() => {
@@ -90,11 +114,30 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
     }
   }, [showComments]);
 
+  // Fetch mention suggestions for comment input
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      if (!mentionQuery || mentionQuery.length < 1) {
+        if (active) setMentionSuggestions([]);
+        return;
+      }
+      try {
+        const res = await SocialApi.searchUsers(mentionQuery, currentUserId);
+        if (active && (res as any).success) setMentionSuggestions((res as any).data || []);
+      } catch {
+        if (active) setMentionSuggestions([]);
+      }
+    };
+    run();
+    return () => { active = false; };
+  }, [mentionQuery, currentUserId]);
+
   // Event handlers
   const loadComments = async () => {
     setIsLoadingComments(true);
     try {
-      const response = await socialApi.getComments(postData.annotation_id, currentUserId);
+      const response = await socialApi.getComments(postData.recommendation_id, currentUserId);
       if (response.success && response.data) {
         setComments(response.data);
       } else {
@@ -115,7 +158,9 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
 
     setIsSubmitting(true);
     try {
-      const response = await socialApi.addComment(postData.annotation_id, currentUserId, newComment);
+      // Convert any @username to stable @[id:name] tokens based on mapping
+      const textWithTokens = convertUsernamesToTokens(newComment, usernameToUser);
+      const response = await socialApi.addComment(postData.recommendation_id, currentUserId, textWithTokens);
       if (response.success && response.data) {
         setComments(prev => [response.data!, ...prev]);
         setNewComment('');
@@ -145,14 +190,14 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
   const handleLike = async () => {
     try {
       if (isLiked) {
-        const response = await socialApi.unlikeAnnotation(postData.annotation_id, currentUserId);
+        const response = await socialApi.unlikeAnnotation(postData.recommendation_id, currentUserId);
         if (response.success) {
           setIsLiked(false);
           // Update like count locally without full reload
           setPostData(prev => ({ ...prev, likes_count: Math.max(0, prev.likes_count - 1) }));
         }
       } else {
-        const response = await socialApi.likeAnnotation(postData.annotation_id, currentUserId);
+        const response = await socialApi.likeAnnotation(postData.recommendation_id, currentUserId);
         if (response.success) {
           setIsLiked(true);
           // Update like count locally without full reload
@@ -166,23 +211,37 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
 
   const handleToggleComments = () => setShowComments(!showComments);
 
-  const handleSave = async () => {
+  const handleShare = async () => {
     try {
-      if (isSaved) {
-        const response = await socialApi.unsavePlace(postData.place_id, currentUserId);
-        if (response.success) {
-          setIsSaved(false);
-        }
+      const url = `${window.location.origin}/post/${postData.recommendation_id}`;
+      const shareData: ShareData = {
+        title: postData.place_name || postData.title || 'Post',
+        text: postData.description || 'Check out this post on RECCE',
+        url
+      };
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast.success('Link copied to clipboard');
       } else {
-        const response = await socialApi.savePlace(postData.place_id, currentUserId);
-        if (response.success) {
-          setIsSaved(true);
+        // Fallback
+        const success = document.execCommand && document.execCommand('copy');
+        if (!success) {
+          // As a last resort, show the URL to the user
+          window.prompt('Copy this link', url);
         }
       }
-    } catch (error) {
-      console.error('Failed to toggle save:', error);
+    } catch (e) {
+      console.error('Failed to share link', e);
+      try {
+        const url = `${window.location.origin}/post/${postData.recommendation_id}`;
+        await navigator.clipboard.writeText(url);
+        toast.success('Link copied to clipboard');
+      } catch {}
     }
   };
+
 
   // Render components
   const renderRatingBadge = () => (
@@ -198,50 +257,79 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
     </div>
   );
 
-  const renderUserInfo = () => (
-    <div className="flex items-start gap-3">
-      <Avatar className="h-12 w-12 flex-shrink-0">
-        <AvatarImage src={getProxiedImageUrl(postData.user_picture)} alt={postData.user_name} />
-        <AvatarFallback>{getInitials(postData.user_name)}</AvatarFallback>
-      </Avatar>
+  const renderUserInfo = () => {
+    const userDisplay = formatUserDisplay({
+      displayName: postData.user_name,
+      username: postData.user_name, // Use user_name as fallback
+      email: undefined // Email not available in post data
+    });
 
-      <div className="flex-1 min-w-0">
-        <div className="mb-2">
-          <span className="font-semibold text-sm">{postData.user_name}</span>
-          <span className="text-sm text-muted-foreground"> rated </span>
-          <span className="font-semibold text-sm">{postData.place_name}</span>
-        </div>
+    return (
+      <div className="flex items-start gap-3 pr-32">
+        <Avatar className="h-12 w-12 flex-shrink-0">
+          <AvatarImage src={getProxiedImageUrl(postData.user_picture)} alt={userDisplay.name} />
+          <AvatarFallback>{getUserInitials({ displayName: postData.user_name })}</AvatarFallback>
+        </Avatar>
 
-        <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-          <MapPin className="h-3 w-3" />
-          <span>{postData.place_address}</span>
-        </div>
+        <div className="flex-1 min-w-0">
+          <div className="mb-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-sm">{userDisplay.name}</span>
+              {userDisplay.subtitle && (
+                <span className="text-sm text-muted-foreground">{userDisplay.subtitle}</span>
+              )}
+              {postData.place_name ? (
+                <>
+                  <span className="text-sm text-muted-foreground"> rated </span>
+                  <span className="font-semibold text-sm">{postData.place_name}</span>
+                </>
+              ) : postData.title ? (
+                <>
+                  <span className="text-sm text-muted-foreground"> recommended </span>
+                  <span className="font-semibold text-sm">{postData.title}</span>
+                </>
+              ) : null}
+              <span className="text-xs text-muted-foreground">•</span>
+              <span className="text-xs text-muted-foreground">{formatDate(postData.created_at)}</span>
+            </div>
+          </div>
 
-        <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3">
-          <Clock className="h-3 w-3" />
-          <span>1 visit</span>
-        </div>
+        {postData.place_address && (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3 pr-32">
+            <MapPin className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{postData.place_address}</span>
+          </div>
+        )}
 
-        {postData.notes && (
+        {(postData.description || (postData as any).notes) && (
           <div className="mb-3">
-            <h4 className="font-semibold text-sm mb-1">Notes:</h4>
-            <p className="text-sm leading-relaxed">{postData.notes}</p>
+            {/* <h4 className="font-semibold text-sm mb-1">Notes:</h4> */}
+            <p className="text-sm leading-relaxed">
+              {renderWithMentions(postData.description || (postData as any).notes, (userId) => navigate(`/profile/${userId}`))}
+            </p>
           </div>
         )}
 
         {postData.labels && postData.labels.length > 0 && (
-          <div className="mb-3">
-            <h4 className="font-semibold text-sm mb-1">Favorite Dishes:</h4>
-            <div className="space-y-1">
-              {postData.labels.map((label, i) => (
-                <div key={i} className="text-sm">• {label}</div>
+          <div className="mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              {postData.labels.slice(0, 6).map((label: string, i: number) => (
+                <span key={i} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition-colors">
+                  {label}
+                </span>
               ))}
+              {postData.labels.length > 6 && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                  +{postData.labels.length - 6} more
+                </span>
+              )}
             </div>
           </div>
         )}
       </div>
     </div>
   );
+};
 
   const renderInteractionButtons = () => (
     <div className="flex items-center justify-between">
@@ -271,25 +359,13 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
         <Button
           variant="ghost"
           size="sm"
+          onClick={handleShare}
           className="flex items-center gap-2 h-8 px-2 text-muted-foreground hover:text-foreground"
         >
           <Share2 className="h-4 w-4" />
         </Button>
       </div>
       
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-          <Plus className="h-4 w-4" />
-        </Button>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className={`h-8 w-8 p-0 ${isSaved ? 'text-blue-500' : 'text-muted-foreground hover:text-foreground'}`}
-          onClick={handleSave}
-        >
-          <Bookmark className={`h-4 w-4 ${isSaved ? 'fill-current' : ''}`} />
-        </Button>
-      </div>
     </div>
   );
 
@@ -332,7 +408,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
   const renderComment = (comment: Comment, isReply: boolean = false) => (
     <div key={comment.id} className={`flex items-start gap-3 ${isReply ? 'ml-10' : ''}`}>
       <Avatar className="h-6 w-6 flex-shrink-0 mt-0.5">
-        <AvatarImage src={getProxiedImageUrl(comment.user_picture)} alt={comment.user_name} />
+        <AvatarImage src={getProxiedImageUrl(comment.user_picture)} alt={comment.user_name || 'User'} />
         <AvatarFallback className="text-xs">
           {getInitials(comment.user_name)}
         </AvatarFallback>
@@ -340,8 +416,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
       
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold">{comment.user_name}</span>
-          <span className="text-sm text-foreground">{comment.comment}</span>
+          <span className="text-sm font-semibold">{comment.user_name || 'Anonymous User'}</span>
+          <span className="text-sm text-foreground">{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
         </div>
         
         <div className="flex items-center gap-4 mt-1">
@@ -398,14 +474,91 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
         </Avatar>
         
         <div className="flex-1 flex items-center">
+          <div className="relative flex-1 flex items-center">
           <Input
             type="text"
             value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setNewComment(v);
+              const pos = (e.target as HTMLInputElement).selectionStart || v.length;
+              const left = v.slice(0, pos);
+              const at = left.lastIndexOf('@');
+              if (at >= 0 && (at === 0 || /\s|[([{-]/.test(left[at - 1] || ''))) {
+                const query = left.slice(at + 1);
+                if (/^[\w.\-]{0,30}$/.test(query)) {
+                  setMentionQuery(query);
+                  setShowMentionMenu(true);
+                  const el = e.target as HTMLInputElement;
+                  const rect = el.getBoundingClientRect();
+                  const computed = window.getComputedStyle(el);
+                  const textUpToCursor = el.value.substring(0, at);
+                  const lines = textUpToCursor.split('\n');
+                  const currentLine = lines.length - 1;
+                  const currentLineText = lines[currentLine] || '';
+                  const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2;
+                  const fontSize = parseFloat(computed.fontSize);
+                  const charWidth = fontSize * 0.6;
+                  const paddingLeft = parseFloat(computed.paddingLeft) || 0;
+                  const paddingTop = parseFloat(computed.paddingTop) || 0;
+                  const p = {
+                    x: rect.left + paddingLeft + (currentLineText.length * charWidth),
+                    y: rect.top + paddingTop + (currentLine * lineHeight)
+                  };
+                  const pickerWidth = 256;
+                  const pickerHeight = 200;
+                  let top = p.y + window.scrollY + 20;
+                  let leftPx = p.x + window.scrollX;
+                  if (top + pickerHeight > window.innerHeight) top = p.y + window.scrollY - pickerHeight - 8;
+                  if (leftPx + pickerWidth > window.innerWidth) leftPx = window.innerWidth - pickerWidth - 8;
+                  if (leftPx < 8) leftPx = 8;
+                  setMentionPosition({ top, left: leftPx });
+                } else {
+                  setShowMentionMenu(false);
+                  setMentionQuery(null);
+                }
+              } else {
+                setShowMentionMenu(false);
+                setMentionQuery(null);
+              }
+            }}
             placeholder="Add a comment..."
             disabled={isSubmitting}
             className="flex-1 text-sm border-0 bg-transparent px-0 py-2 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
           />
+          {showMentionMenu && mentionSuggestions.length > 0 && (
+            <div className="fixed z-50 w-64 rounded-md border bg-popover text-popover-foreground shadow-md" style={{ top: mentionPosition?.top || 0, left: mentionPosition?.left || 0 }}>
+              {mentionSuggestions.map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent"
+                  onClick={() => {
+                    const cursor = newComment.length;
+                    const uname = (u.username || '').toLowerCase() || (u.display_name || u.user_name || '').toLowerCase().replace(/\s+/g, '');
+                    const { text: nt } = insertPlainMention(newComment, cursor, uname);
+                    const display = u.display_name || u.user_name || uname;
+                    setUsernameToUser(prev => ({ ...prev, [uname]: { id: u.id, displayName: display } }));
+                    setNewComment(nt);
+                    setShowMentionMenu(false);
+                    setMentionQuery(null);
+                    setMentionPosition(null);
+                  }}
+                >
+                  {u.profile_picture_url && (
+                    <img src={u.profile_picture_url} className="h-6 w-6 rounded-full" />
+                  )}
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-medium">{u.display_name || u.user_name}</span>
+                    {u.username && (
+                      <span className="text-xs text-muted-foreground">@{u.username}</span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          </div>
           <Button
             type="submit"
             variant="ghost"
@@ -452,7 +605,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, onPostUpdate }
 
   // Main render
   return (
-    <article className="w-full border-b border-border/50 pb-6 mb-6 last:border-b-0">
+    <article className={noOuterSpacing ? "w-full" : "w-full border-b border-border/50 pb-6 mb-6 last:border-b-0"}>
       <div className="relative">
         {renderRatingBadge()}
         {renderUserInfo()}        

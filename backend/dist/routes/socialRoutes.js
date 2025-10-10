@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const social_1 = require("../db/social");
+const mentions_1 = require("../db/mentions");
 const router = express_1.default.Router();
 // Temporary authentication middleware (will be replaced with proper auth)
 const requireAuth = (req, res, next) => {
@@ -298,13 +299,13 @@ router.delete('/unblock/:userId', requireAuth, async (req, res) => {
     }
 });
 /**
- * POST /api/social/comments/:annotationId
- * Add a comment to an annotation
+ * POST /api/social/comments/:recommendationId
+ * Add a comment to a recommendation
  */
-router.post('/comments/:annotationId', requireAuth, async (req, res) => {
+router.post('/comments/:recommendationId', requireAuth, async (req, res) => {
     try {
         const userId = req.user.id;
-        const annotationId = parseInt(req.params.annotationId);
+        const recommendationId = parseInt(req.params.recommendationId);
         const { comment, parent_comment_id } = req.body;
         if (!comment || comment.trim().length === 0) {
             return res.status(400).json({
@@ -312,7 +313,17 @@ router.post('/comments/:annotationId', requireAuth, async (req, res) => {
                 message: 'Comment text is required'
             });
         }
-        const newComment = await (0, social_1.addComment)(annotationId, userId, comment.trim(), parent_comment_id);
+        const newComment = await (0, social_1.addComment)(recommendationId, userId, comment.trim(), parent_comment_id);
+        // Save mentions in the comment, if any
+        try {
+            const mentioned = (0, mentions_1.extractMentionUserIds)(comment);
+            if (mentioned.length > 0) {
+                await (0, mentions_1.saveCommentMentions)(newComment.id, mentioned, userId, comment.trim());
+            }
+        }
+        catch (e) {
+            console.error('Failed to process/save comment mentions', e);
+        }
         res.status(201).json({
             success: true,
             data: newComment,
@@ -329,16 +340,16 @@ router.post('/comments/:annotationId', requireAuth, async (req, res) => {
     }
 });
 /**
- * GET /api/social/comments/:annotationId
- * Get comments for an annotation
+ * GET /api/social/comments/:recommendationId
+ * Get comments for a recommendation
  */
-router.get('/comments/:annotationId', requireAuth, async (req, res) => {
+router.get('/comments/:recommendationId', requireAuth, async (req, res) => {
     try {
         const currentUserId = req.user.id;
-        const annotationId = parseInt(req.params.annotationId);
+        const recommendationId = parseInt(req.params.recommendationId);
         const limit = parseInt(req.query.limit) || 50;
         const offset = parseInt(req.query.offset) || 0;
-        const comments = await (0, social_1.getComments)(annotationId, currentUserId, limit, offset);
+        const comments = await (0, social_1.getComments)(recommendationId, currentUserId, limit, offset);
         res.json({
             success: true,
             data: comments,
@@ -414,14 +425,14 @@ router.delete('/comments/:commentId', requireAuth, async (req, res) => {
     }
 });
 /**
- * POST /api/social/likes/annotation/:annotationId
- * Like an annotation
+ * POST /api/social/likes/recommendation/:recommendationId
+ * Like a recommendation
  */
-router.post('/likes/annotation/:annotationId', requireAuth, async (req, res) => {
+router.post('/likes/recommendation/:recommendationId', requireAuth, async (req, res) => {
     try {
         const userId = req.user.id;
-        const annotationId = parseInt(req.params.annotationId);
-        const success = await (0, social_1.likeAnnotation)(annotationId, userId);
+        const recommendationId = parseInt(req.params.recommendationId);
+        const success = await (0, social_1.likeAnnotation)(recommendationId, userId);
         res.json({
             success: true,
             data: { liked: success },
@@ -438,14 +449,14 @@ router.post('/likes/annotation/:annotationId', requireAuth, async (req, res) => 
     }
 });
 /**
- * DELETE /api/social/likes/annotation/:annotationId
- * Unlike an annotation
+ * DELETE /api/social/likes/recommendation/:recommendationId
+ * Unlike a recommendation
  */
-router.delete('/likes/annotation/:annotationId', requireAuth, async (req, res) => {
+router.delete('/likes/recommendation/:recommendationId', requireAuth, async (req, res) => {
     try {
         const userId = req.user.id;
-        const annotationId = parseInt(req.params.annotationId);
-        const success = await (0, social_1.unlikeAnnotation)(annotationId, userId);
+        const recommendationId = parseInt(req.params.recommendationId);
+        const success = await (0, social_1.unlikeAnnotation)(recommendationId, userId);
         res.json({
             success: true,
             data: { unliked: success },
@@ -462,16 +473,16 @@ router.delete('/likes/annotation/:annotationId', requireAuth, async (req, res) =
     }
 });
 /**
- * GET /api/social/likes/annotation/:annotationId
- * Get annotation likes count and check if current user liked it
+ * GET /api/social/likes/recommendation/:recommendationId
+ * Get recommendation likes count and check if current user liked it
  */
-router.get('/likes/annotation/:annotationId', requireAuth, async (req, res) => {
+router.get('/likes/recommendation/:recommendationId', requireAuth, async (req, res) => {
     try {
         const userId = req.user.id;
-        const annotationId = parseInt(req.params.annotationId);
+        const recommendationId = parseInt(req.params.recommendationId);
         const [likesCount, isLiked] = await Promise.all([
-            (0, social_1.getAnnotationLikesCount)(annotationId),
-            (0, social_1.isAnnotationLiked)(annotationId, userId)
+            (0, social_1.getAnnotationLikesCount)(recommendationId),
+            (0, social_1.isAnnotationLiked)(recommendationId, userId)
         ]);
         res.json({
             success: true,

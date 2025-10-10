@@ -1,15 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 import { placesApiService } from '../services/placesApi';
-import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendations';
-import { useAuth } from '../hooks/useAuth';
-import LoginModal from '../components/LoginModal';
+import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendationsApi';
+import { useAuth } from '../contexts/AuthContext';
 import ContentCard from '../components/ContentCard';
 import SearchBar from '../components/SearchBar';
 import SearchResults from '../components/SearchResults';
 import type { PlaceDetails } from '../components/ContentCard';
 import { Button } from '@/components/ui/button';
-import Header from '@/components/Header';
+import { getPrimaryGoogleType } from '../utils/placeTypes';
 import './MapPage.css';
 
 // Constants
@@ -20,61 +19,7 @@ const POI_DISTANCE_THRESHOLD = 25; // meters
 const LOCATION_ZOOM = 16;
 const TARGET_ZOOM = 25;
 
-
-
 // Helper functions
-const getCategoryFromTypes = (types: string[]): string => {
-  // Map common place types to categories
-  if (types.includes('restaurant')) return 'restaurant';
-  if (types.includes('bar')) return 'bar';
-  if (types.includes('cafe')) return 'cafe';
-  if (types.includes('hotel')) return 'hotel';
-  if (types.includes('park')) return 'park';
-  if (types.includes('museum')) return 'museum';
-  if (types.includes('shopping_mall')) return 'shopping';
-  if (types.includes('store')) return 'store';
-  if (types.includes('gas_station')) return 'gas_station';
-  if (types.includes('hospital')) return 'hospital';
-  if (types.includes('school')) return 'school';
-  if (types.includes('university')) return 'university';
-  if (types.includes('bank')) return 'bank';
-  if (types.includes('atm')) return 'atm';
-  if (types.includes('pharmacy')) return 'pharmacy';
-  if (types.includes('post_office')) return 'post_office';
-  if (types.includes('police')) return 'police';
-  if (types.includes('fire_station')) return 'fire_station';
-  if (types.includes('church')) return 'church';
-  if (types.includes('mosque')) return 'mosque';
-  if (types.includes('synagogue')) return 'synagogue';
-  if (types.includes('temple')) return 'temple';
-  if (types.includes('movie_theater')) return 'movie_theater';
-  if (types.includes('stadium')) return 'stadium';
-  if (types.includes('gym')) return 'gym';
-  if (types.includes('spa')) return 'spa';
-  if (types.includes('beauty_salon')) return 'beauty_salon';
-  if (types.includes('car_rental')) return 'car_rental';
-  if (types.includes('car_dealer')) return 'car_dealer';
-  if (types.includes('car_repair')) return 'car_repair';
-  if (types.includes('dentist')) return 'dentist';
-  if (types.includes('doctor')) return 'doctor';
-  if (types.includes('veterinary_care')) return 'veterinary_care';
-  if (types.includes('library')) return 'library';
-  if (types.includes('tourist_attraction')) return 'tourist_attraction';
-  if (types.includes('amusement_park')) return 'amusement_park';
-  if (types.includes('aquarium')) return 'aquarium';
-  if (types.includes('art_gallery')) return 'art_gallery';
-  if (types.includes('bowling_alley')) return 'bowling_alley';
-  if (types.includes('casino')) return 'casino';
-  if (types.includes('night_club')) return 'night_club';
-  if (types.includes('parking')) return 'parking';
-  if (types.includes('subway_station')) return 'subway_station';
-  if (types.includes('train_station')) return 'train_station';
-  if (types.includes('bus_station')) return 'bus_station';
-  if (types.includes('airport')) return 'airport';
-  
-  // Default fallback
-  return 'point_of_interest';
-};
 
 const createPlaceDetails = (
   place: google.maps.places.PlaceResult,
@@ -84,13 +29,10 @@ const createPlaceDetails = (
   id: place.place_id || `poi-${Date.now()}`,
   name: enhancedDetails?.displayName?.text || place.name || 'Unknown place',
   address: enhancedDetails?.formattedAddress || place.vicinity || '',
-  category: getCategoryFromTypes(place.types || []),
-  userRating: 0,
-  friendsRating: enhancedDetails?.rating || place.rating || 0,
+  category: getPrimaryGoogleType(place.types || []),
   images: enhancedDetails?.photos?.slice(0, 3).map((photo: any) => 
     `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`
   ) || place.photos?.slice(0, 3).map((photo: google.maps.places.PlacePhoto) => photo.getUrl()) || [],
-  isLiked: false,
   isSaved: false,
   latitude: place.geometry?.location?.lat() || latLng.lat(),
   longitude: place.geometry?.location?.lng() || latLng.lng(),
@@ -98,15 +40,8 @@ const createPlaceDetails = (
 });
 
 const MapPage: React.FC = () => {
-  // Authentication state
-  const {
-    isAuthenticated,
-    isChecking: isAuthChecking,
-    user,
-    showLoginModal,
-    logout,
-    closeLoginModal,
-  } = useAuth();
+  // Use global authentication state
+  const { isAuthenticated, isChecking: isAuthChecking, user } = useAuth();
 
   // Component state
   const [selectedPlace, setSelectedPlace] = useState<PlaceDetails | null>(null);
@@ -119,75 +54,132 @@ const MapPage: React.FC = () => {
   const [reviewedPlacesError, setReviewedPlacesError] = useState<string | null>(null);
   const [showReviewedPlaces, setShowReviewedPlaces] = useState(true);
   const [currentZoom, setCurrentZoom] = useState(9);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
+  const [isMapReady, setIsMapReady] = useState(false);
 
   // Refs
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
   const accuracyCircle = useRef<google.maps.Circle | null>(null);
+  const userLocationMarker = useRef<google.maps.Marker | null>(null);
   const placesService = useRef<google.maps.places.PlacesService | null>(null);
   const reviewedPlacesMarkers = useRef<google.maps.Marker[]>([]);
 
-  // Event handlers
-  const handleSemanticSearch = async (query: string): Promise<SearchResponse> => {
+  // Event handlers - memoized to prevent unnecessary re-renders
+  const handleSemanticSearch = useCallback(async (query: string): Promise<SearchResponse> => {
     try {
-      const results = await recommendationsApi.semanticSearch(query);
+      const results = await recommendationsApi.semanticSearch(query, 10, 0.7, selectedGroupIds.length > 0 ? selectedGroupIds : undefined, 'place');
       return results;
     } catch (error) {
       console.error('Semantic search failed:', error);
       throw error;
     }
-  };
+  }, [selectedGroupIds]);
 
-  const handleSearchResults = (results: SearchResponse) => {
+  const handleSearchResults = useCallback((results: SearchResponse) => {
     setSearchResults(results);
-  };
+  }, []);
 
-  const handleSearchLoading = (loading: boolean) => {
+  const handleSearchLoading = useCallback((loading: boolean) => {
     setIsSearching(loading);
-  };
+  }, []);
 
-  const handleSearchClose = () => {
+  const handleSearchClose = useCallback(() => {
     setSearchResults(null);
-  };
+  }, []);
 
-  const handleSearchPlaceSelect = (place: any) => {
-    const placeDetails: PlaceDetails = {
-      id: place.place_id || place.place_id?.toString() || `search-${place.place_id}`,
-      name: place.place_name,
-      address: place.place_address || '',
-      category: 'point_of_interest',
-      userRating: 0,
-      friendsRating: place.recommendations?.[0]?.rating || 0,
-      personalReview: '',
-      images: [],
-      isLiked: false,
-      isSaved: false,
-      latitude: place.place_lat,
-      longitude: place.place_lng,
-      google_place_id: place.google_place_id,
-    };
+  const handleSearchPlaceSelect = useCallback(async (place: any) => {
+    try {
+      // Create basic place details first
+      const placeDetails: PlaceDetails = {
+        id: place.place_id || place.place_id?.toString() || `search-${place.place_id}`,
+        name: place.place_name,
+        address: place.place_address || '',
+        category: 'point_of_interest',
+        images: [],
+        isSaved: false,
+        latitude: place.place_lat,
+        longitude: place.place_lng,
+        google_place_id: place.google_place_id,
+      };
 
-    setSelectedPlace(placeDetails);
-    setShowContentCard(true);
-    setSearchResults(null);
-  };
+      // Set the place immediately to show the content card
+      setSelectedPlace(placeDetails);
+      setShowContentCard(true);
+      setSearchResults(null);
 
-  const handleLogout = () => logout();
+      // Navigate map to the place
+      if (place.place_lat && place.place_lng) {
+        moveMapToPlace(placeDetails);
+      }
 
-  const handleLocateMe = () => {
+      // Fetch enhanced details and images if we have a Google Place ID
+      if (place.google_place_id) {
+        try {
+          const enhancedDetails = await getEnhancedPlaceDetails(place.google_place_id);
+          if (enhancedDetails) {
+            // Update the place details with enhanced information
+            const updatedPlaceDetails: PlaceDetails = {
+              ...placeDetails,
+              name: enhancedDetails?.displayName?.text || place.place_name,
+              address: enhancedDetails?.formattedAddress || place.place_address || '',
+              category: getPrimaryGoogleType(enhancedDetails?.types || []),
+              images: enhancedDetails?.photos?.slice(0, 3).map((photo: any) => 
+                `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`
+              ) || [],
+            };
+            
+            // Update the selected place with enhanced details
+            setSelectedPlace(updatedPlaceDetails);
+          }
+        } catch (error) {
+          console.warn('Could not fetch enhanced details for place:', place.place_name, error);
+        }
+      }
+    } catch (error) {
+      console.error('Error handling search place select:', error);
+    }
+  }, []);
+
+  const handleGroupToggle = useCallback((groupId: number) => {
+    setSelectedGroupIds(prev => 
+      prev.includes(groupId) 
+        ? prev.filter(id => id !== groupId)
+        : [...prev, groupId]
+    );
+  }, []);
+
+  const handleClearGroups = useCallback(() => {
+    setSelectedGroupIds([]);
+  }, []);
+
+  // Reload reviewed places when group selection changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchReviewedPlaces();
+    }
+  }, [selectedGroupIds, isAuthenticated]);
+
+  const handleLocateMe = useCallback(() => {
     if (!map.current) return;
     
     setIsLocating(true);
     
+    // Clear existing user location indicators
     if (accuracyCircle.current) {
       accuracyCircle.current.setMap(null);
       accuracyCircle.current = null;
     }
+    
+    if (userLocationMarker.current) {
+      userLocationMarker.current.setMap(null);
+      userLocationMarker.current = null;
+    }
 
     getUserLocation(window.google);
-  };
+  }, []);
 
-  const handlePlaceSelected = (place: PlaceDetails) => {
+  const moveMapToPlace = useCallback((place: PlaceDetails) => {
     if (!map.current) return;
 
     if (!place.latitude || !place.longitude || 
@@ -199,7 +191,7 @@ const MapPage: React.FC = () => {
     const location = new google.maps.LatLng(place.latitude, place.longitude);
     map.current.panTo(location);
     
-    const currentZoom = map.current.getZoom() || 10;
+    const initialZoom = map.current.getZoom() || 10;
     const zoomSteps = 20;
     const zoomInterval = 15;
     let currentStep = 0;
@@ -207,7 +199,7 @@ const MapPage: React.FC = () => {
     const zoomAnimation = setInterval(() => {
       currentStep++;
       const progress = currentStep / zoomSteps;
-      const currentZoomLevel = currentZoom + (TARGET_ZOOM - currentZoom) * progress;
+      const currentZoomLevel = initialZoom + (TARGET_ZOOM - initialZoom) * progress;
       
       map.current?.setZoom(Math.round(currentZoomLevel));
       
@@ -218,7 +210,7 @@ const MapPage: React.FC = () => {
 
     setSelectedPlace(place);
     setShowContentCard(true);
-  };
+  }, []);
 
   // Helper functions
   const getUserLocation = (google: typeof globalThis.google) => {
@@ -235,16 +227,38 @@ const MapPage: React.FC = () => {
         map.current?.setCenter(userLocation);
         map.current?.setZoom(LOCATION_ZOOM);
         
+        // Create user location marker with pulsing animation
+        userLocationMarker.current = new google.maps.Marker({
+          position: userLocation,
+          map: map.current,
+          title: 'Your location',
+          icon: {
+            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+              <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" fill="#10b981"/>
+                <circle cx="12" cy="12" r="4" fill="white"/>
+              </svg>
+            `)}`,
+            scaledSize: new google.maps.Size(24, 24),
+            anchor: new google.maps.Point(12, 12)
+          },
+          zIndex: 2000, // High z-index to appear above other markers
+          animation: google.maps.Animation.DROP
+        });
+        
+        
+        // Create accuracy circle for high accuracy locations
         if (accuracy < 1000) {
           accuracyCircle.current = new google.maps.Circle({
-            strokeColor: '#22d3ee',
-            strokeOpacity: 0.8,
-            strokeWeight: 2,
-            fillColor: '#22d3ee',
-            fillOpacity: 0.1,
+            strokeColor: '#10b981',
+            strokeOpacity: 0.5,
+            strokeWeight: 1.5,
+            fillColor: '#10b981',
+            fillOpacity: 0.08,
             map: map.current,
             center: userLocation,
             radius: accuracy,
+            zIndex: 1000
           });
         }
         
@@ -293,7 +307,7 @@ const MapPage: React.FC = () => {
             </svg>
           `)}`,
           scaledSize: new google.maps.Size(28, 28),
-          anchor: new google.maps.Point(14, 14)
+          anchor: new google.maps.Point(14, 28)
         },
         zIndex: 1000, // Higher z-index for reviewed places
         collisionBehavior: google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL
@@ -317,7 +331,7 @@ const MapPage: React.FC = () => {
               
               // Only get category from Google Places API if we don't have it in database
               if (!place.category_name && enhancedDetails?.types && enhancedDetails.types.length > 0) {
-                category = enhancedDetails.types[0]; // Use the first type as category
+                category = getPrimaryGoogleType(enhancedDetails.types); // Use standardized category determination
                 console.log('Category from Google Places API:', category);
               }
               
@@ -353,7 +367,7 @@ const MapPage: React.FC = () => {
               if (closestMatch) {
                 // Only get category from nearby search if we don't have it in database
                 if (!place.category_name && closestMatch.types && closestMatch.types.length > 0) {
-                  category = closestMatch.types[0];
+                  category = getPrimaryGoogleType(closestMatch.types); // Use standardized category determination
                   console.log('Category from nearby search:', category);
                 }
                 
@@ -378,11 +392,7 @@ const MapPage: React.FC = () => {
             name: place.name,
             address: place.address || '',
             category: category, // Use the determined category
-            userRating: 0,
-            friendsRating: place.average_rating,
-            personalReview: '',
             images: images, // Use fetched images
-            isLiked: false,
             isSaved: false,
             latitude: place.lat,
             longitude: place.lng,
@@ -401,11 +411,7 @@ const MapPage: React.FC = () => {
             name: place.name,
             address: place.address || '',
             category: place.category_name || place.metadata?.category || 'point_of_interest', // Use fallback category
-            userRating: 0,
-            friendsRating: place.average_rating,
-            personalReview: '',
             images: [],
-            isLiked: false,
             isSaved: false,
             latitude: place.lat,
             longitude: place.lng,
@@ -441,9 +447,14 @@ const MapPage: React.FC = () => {
 
   // Function to setup POI click handler with improved collision behavior
   const setupPOIClickHandler = (google: typeof globalThis.google) => {
-    if (!map.current) return;
+    if (!map.current) {
+      console.log('Map not available for POI click handler setup');
+      return;
+    }
 
+    console.log('Setting up POI click handler');
     map.current.addListener('click', (e: google.maps.MapMouseEvent) => {
+      console.log('Map clicked at:', e.latLng);
       if (e.stop) {
         e.stop();
       }
@@ -456,20 +467,56 @@ const MapPage: React.FC = () => {
         type: 'establishment'
       };
 
+      console.log('Searching for places near:', request.location, 'with radius:', request.radius);
       if (placesService.current) {
-        placesService.current.nearbySearch(request, async (placeResults, placeStatus) => {
-          if (placeStatus === google.maps.places.PlacesServiceStatus.OK && placeResults && placeResults.length > 0) {
-            const closestPlace = findClosestPlace(placeResults, e.latLng!, google);
-            
-            if (closestPlace && closestPlace.distance <= POI_DISTANCE_THRESHOLD) {
-              const enhancedDetails = await getEnhancedPlaceDetails(closestPlace.place.place_id);
-              const placeDetails = createPlaceDetails(closestPlace.place, enhancedDetails, e.latLng!);
+        try {
+          placesService.current.nearbySearch(request, async (placeResults, placeStatus) => {
+            console.log('Places search result:', placeStatus, placeResults?.length, 'places found');
+            if (placeStatus === google.maps.places.PlacesServiceStatus.OK && placeResults && placeResults.length > 0) {
+              const closestPlace = findClosestPlace(placeResults, e.latLng!, google);
+              console.log('Closest place:', closestPlace?.place.name, 'distance:', closestPlace?.distance);
               
-              setSelectedPlace(placeDetails);
-              setShowContentCard(true);
+              if (closestPlace && closestPlace.distance <= POI_DISTANCE_THRESHOLD) {
+                console.log('Place within threshold, getting enhanced details');
+                const enhancedDetails = await getEnhancedPlaceDetails(closestPlace.place.place_id);
+                const placeDetails = createPlaceDetails(closestPlace.place, enhancedDetails, e.latLng!);
+                
+                setSelectedPlace(placeDetails);
+                setShowContentCard(true);
+              } else {
+                console.log('No places within threshold');
+              }
+            } else {
+              console.log('No places found or search failed:', placeStatus);
             }
+          });
+        } catch (error) {
+          console.error('Places search error:', error);
+        }
+      } else {
+        console.log('Places service not available, attempting to initialize...');
+        // Try to initialize places service if it's not available
+        if (map.current) {
+          try {
+            placesService.current = new google.maps.places.PlacesService(map.current!);
+            console.log('Places service initialized on demand:', placesService.current);
+            // Retry the search
+            placesService.current.nearbySearch(request, async (placeResults, placeStatus) => {
+              console.log('Retry search result:', placeStatus, placeResults?.length, 'places found');
+              if (placeStatus === google.maps.places.PlacesServiceStatus.OK && placeResults && placeResults.length > 0) {
+                const closestPlace = findClosestPlace(placeResults, e.latLng!, google);
+                if (closestPlace && closestPlace.distance <= POI_DISTANCE_THRESHOLD) {
+                  const enhancedDetails = await getEnhancedPlaceDetails(closestPlace.place.place_id);
+                  const placeDetails = createPlaceDetails(closestPlace.place, enhancedDetails, e.latLng!);
+                  setSelectedPlace(placeDetails);
+                  setShowContentCard(true);
+                }
+              }
+            });
+          } catch (initError) {
+            console.error('Failed to initialize places service on demand:', initError);
           }
-        });
+        }
       }
     });
   };
@@ -518,7 +565,7 @@ const MapPage: React.FC = () => {
       setReviewedPlacesLoading(true);
       setReviewedPlacesError(null);
       
-      const places = await recommendationsApi.getReviewedPlaces('all', 200, 0);
+      const places = await recommendationsApi.getReviewedPlaces('friends', 200, 0, selectedGroupIds.length > 0 ? selectedGroupIds : undefined);
       setReviewedPlaces(places);
       
       // Create markers for reviewed places
@@ -532,7 +579,7 @@ const MapPage: React.FC = () => {
   };
 
   // Function to toggle reviewed places visibility
-  const toggleReviewedPlaces = () => {
+  const toggleReviewedPlaces = useCallback(() => {
     const newVisibility = !showReviewedPlaces;
     setShowReviewedPlaces(newVisibility);
     
@@ -545,12 +592,17 @@ const MapPage: React.FC = () => {
         marker.setMap(isVisible ? map.current : null);
       });
     }
-  };
+  }, [showReviewedPlaces]);
 
   const cleanup = () => {
     if (accuracyCircle.current) {
       accuracyCircle.current.setMap(null);
       accuracyCircle.current = null;
+    }
+    
+    if (userLocationMarker.current) {
+      userLocationMarker.current.setMap(null);
+      userLocationMarker.current = null;
     }
     
     // Clear reviewed places markers
@@ -591,46 +643,54 @@ const MapPage: React.FC = () => {
         map.current = new google.maps.Map(mapContainer.current, {
           center: DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
-          mapId: '95079f4fa5e07d01680ea67e',
           clickableIcons: true,
-          // Start with POI markers hidden by default
-          styles: [
-            // Hide POI markers completely
-            {
-              featureType: 'poi',
-              elementType: 'all',
-              stylers: [{ visibility: 'off' }]
-            },
-            // Hide business markers
-            {
-              featureType: 'business',
-              elementType: 'all',
-              stylers: [{ visibility: 'off' }]
-            },
-            // Hide transit stations
-            {
-              featureType: 'transit',
-              elementType: 'all',
-              stylers: [{ visibility: 'off' }]
-            },
-            // Hide landmarks
-            {
-              featureType: 'landmark',
-              elementType: 'all',
-              stylers: [{ visibility: 'off' }]
-            },
-            // Hide natural features
-            {
-              featureType: 'natural',
-              elementType: 'all',
-              stylers: [{ visibility: 'off' }]
-            }
-          ]
+          mapId: '95079f4fa5e07d01680ea67e'
         });
 
-        placesService.current = new google.maps.places.PlacesService(map.current);
+        // Wait for map to be fully loaded before initializing places service
+        google.maps.event.addListenerOnce(map.current, 'idle', () => {
+          console.log('Map is idle, initializing places service...');
+          try {
+            placesService.current = new google.maps.places.PlacesService(map.current!);
+            console.log('Places service initialized:', placesService.current);
+            
+            // Now that places service is ready, set up click handler
+            setupPOIClickHandler(google);
+            
+            // Mark map as ready for SearchBar
+            setIsMapReady(true);
+          } catch (error) {
+            console.error('Failed to initialize places service:', error);
+            // Fallback: try again after a short delay
+            setTimeout(() => {
+              try {
+                placesService.current = new google.maps.places.PlacesService(map.current!);
+                console.log('Places service initialized on retry:', placesService.current);
+                setupPOIClickHandler(google);
+                setIsMapReady(true);
+              } catch (retryError) {
+                console.error('Places service retry failed:', retryError);
+              }
+            }, 1000);
+          }
+        });
+
+        // Fallback timeout in case the idle event doesn't fire
+        setTimeout(() => {
+          if (!placesService.current && map.current) {
+            console.log('Fallback: Initializing places service after timeout...');
+            try {
+              placesService.current = new google.maps.places.PlacesService(map.current!);
+              console.log('Places service initialized via fallback:', placesService.current);
+              setupPOIClickHandler(google);
+              setIsMapReady(true);
+            } catch (error) {
+              console.error('Fallback places service initialization failed:', error);
+            }
+          }
+        }, 3000);
+
         getUserLocation(google);
-        setupPOIClickHandler(google);
         fetchReviewedPlaces(); // Fetch reviewed places on map load
 
       } catch (err) {
@@ -672,7 +732,7 @@ const MapPage: React.FC = () => {
   // Show loading only when we're checking auth and don't have a user yet
   if (isAuthChecking && !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           <p>Loading user...</p>
@@ -681,11 +741,10 @@ const MapPage: React.FC = () => {
     );
   }
 
-  // If not authenticated and not checking auth, show the main container with login modal
+  // If not authenticated and not checking auth, show empty map container
   if (!isAuthenticated && !isAuthChecking) {
     return (
       <div className="map-page-container">
-        {showLoginModal && <LoginModal onClose={closeLoginModal} />}
         <div className="map-container" />
       </div>
     );
@@ -693,23 +752,11 @@ const MapPage: React.FC = () => {
 
   return (
     <div className="map-page-container">
-      {isAuthChecking && (
-        <div className="auth-loading-overlay">
-          <div className="auth-loading-content">
-            <div className="auth-loading-spinner"></div>
-            <p>Checking authentication...</p>
-          </div>
-        </div>
-      )}
-
-      {showLoginModal && <LoginModal onClose={closeLoginModal} />}
 
       {showContentCard && selectedPlace && (
         <ContentCard
           place={selectedPlace}
           onClose={() => setShowContentCard(false)}
-          onRate={() => {}}
-          onLike={() => {}}
           onSave={() => {}}
           onShare={() => {}}
         />
@@ -735,6 +782,13 @@ const MapPage: React.FC = () => {
                 <span className="text-sm font-medium">Reviewed Places</span>
               </div>
             </div>
+            
+            {/* Group Filter Status */}
+            {selectedGroupIds.length > 0 && (
+              <div className="text-xs text-blue-600 bg-blue-50 rounded px-2 py-1">
+                Filtered by {selectedGroupIds.length} group{selectedGroupIds.length !== 1 ? 's' : ''}
+              </div>
+            )}
             
             {/* Loading and Error States */}
             {reviewedPlacesLoading && (
@@ -765,31 +819,22 @@ const MapPage: React.FC = () => {
         </div>
       )}
 
-      <Header 
-        currentUserId={user?.id}
-        showMapButton={true}
-        showProfileButton={true}
-        showDiscoverButton={true}
-        showLogoutButton={true}
-        title="RECCE"
-        variant="dark"
-        mapButtonText="Feed"
-        mapButtonLink="/feed"
-        onLogout={handleLogout}
-        profilePictureUrl={user?.profilePictureUrl}
-        displayName={user?.displayName}
-      />
-
-      <div className="search-container">
-        <SearchBar 
-          isAuthenticated={isAuthenticated}
-          onPlaceSelected={handlePlaceSelected}
-          onClear={() => {}}
-          onSemanticSearch={handleSemanticSearch}
-          onSearchResults={handleSearchResults}
-          onSearchLoading={handleSearchLoading}
-        />
-      </div>
+      {isMapReady && (
+        <div className="search-container">
+          <SearchBar 
+            isAuthenticated={isAuthenticated}
+            onPlaceSelected={moveMapToPlace}
+            onSemanticSearch={handleSemanticSearch}
+            onSearchResults={handleSearchResults}
+            onSearchLoading={handleSearchLoading}
+            currentUserId={user?.id}
+            selectedGroupIds={selectedGroupIds}
+            onGroupToggle={handleGroupToggle}
+            onClearGroups={handleClearGroups}
+            showGroupFilters={true}
+          />
+        </div>
+      )}
 
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3">
         <Button
@@ -829,4 +874,4 @@ const MapPage: React.FC = () => {
   );
 };
 
-export default MapPage;
+export default React.memo(MapPage);

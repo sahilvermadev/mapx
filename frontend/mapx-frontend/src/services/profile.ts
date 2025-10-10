@@ -5,6 +5,7 @@ export interface UserData {
   id: string;
   displayName: string;
   email: string;
+  username?: string;
   profilePictureUrl?: string;
   created_at: string;
   last_login_at: string;
@@ -19,24 +20,6 @@ export interface UserStats {
   total_reviews: number;
 }
 
-export interface PlaceCard {
-  id: string;
-  place_name: string;
-  place_address?: string;
-  category?: string;
-  rating?: number;
-  notes?: string;
-  visit_date?: string;
-  visibility: 'public' | 'friends';
-  created_at: string;
-  place_lat?: number;
-  place_lng?: number;
-  google_place_id?: string;
-  user_name?: string;
-  title?: string;
-  labels?: string[];
-  metadata?: Record<string, any>;
-}
 
 export interface FilterOptions {
   rating?: number;
@@ -45,6 +28,7 @@ export interface FilterOptions {
   search?: string;
   date_from?: string;
   date_to?: string;
+  content_type?: 'place' | 'service' | 'all';
 }
 
 export interface SortOptions {
@@ -106,7 +90,7 @@ class ProfileApiService {
     filters: FilterOptions = {}, 
     sort: SortOptions = { field: 'created_at', direction: 'desc' },
     pagination: PaginationOptions = { limit: 20, offset: 0 }
-  ): Promise<{ data: PlaceCard[], pagination: any }> {
+  ): Promise<{ data: any[], pagination: any }> {
     const params = {
       ...filters,
       sort_field: sort.field,
@@ -115,7 +99,7 @@ class ProfileApiService {
       offset: pagination.offset,
     };
 
-    const response = await apiClient.get<PlaceCard[]>(`/profile/${userId}/recommendations`, params);
+    const response = await apiClient.get<any[]>(`/profile/${userId}/recommendations`, params);
     
     if (!response.success) {
       throw new Error(response.error || 'Failed to fetch recommendations');
@@ -134,7 +118,7 @@ class ProfileApiService {
     userId: string, 
     sort: SortOptions = { field: 'created_at', direction: 'desc' },
     pagination: PaginationOptions = { limit: 20, offset: 0 }
-  ): Promise<{ data: PlaceCard[], pagination: any }> {
+  ): Promise<{ data: any[], pagination: any }> {
     const params = {
       sort_field: sort.field,
       sort_direction: sort.direction,
@@ -142,7 +126,7 @@ class ProfileApiService {
       offset: pagination.offset,
     };
 
-    const response = await apiClient.get<PlaceCard[]>(`/profile/${userId}/likes`, params);
+    const response = await apiClient.get<any[]>(`/profile/${userId}/likes`, params);
     
     if (!response.success) {
       throw new Error(response.error || 'Failed to fetch likes');
@@ -161,7 +145,7 @@ class ProfileApiService {
     userId: string, 
     sort: SortOptions = { field: 'created_at', direction: 'desc' },
     pagination: PaginationOptions = { limit: 20, offset: 0 }
-  ): Promise<{ data: PlaceCard[], pagination: any }> {
+  ): Promise<{ data: any[], pagination: any }> {
     const params = {
       sort_field: sort.field,
       sort_direction: sort.direction,
@@ -169,7 +153,7 @@ class ProfileApiService {
       offset: pagination.offset,
     };
 
-    const response = await apiClient.get<PlaceCard[]>(`/profile/${userId}/saved`, params);
+    const response = await apiClient.get<any[]>(`/profile/${userId}/saved`, params);
     
     if (!response.success) {
       throw new Error(response.error || 'Failed to fetch saved places');

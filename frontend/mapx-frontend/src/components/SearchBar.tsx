@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { FaSearch, FaBrain, FaMapMarkerAlt } from 'react-icons/fa';
 import type { PlaceDetails } from './ContentCard';
-import type { SearchResponse } from '../services/recommendations';
+import type { SearchResponse } from '../services/recommendationsApi';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
+import { friendGroupsApi, type FriendGroup } from '../services/friendGroups';
 import './SearchBar.css';
 
 interface SearchBarProps {
@@ -12,6 +13,12 @@ interface SearchBarProps {
   onSemanticSearch?: (query: string) => Promise<SearchResponse>;
   onSearchResults?: (results: SearchResponse) => void;
   onSearchLoading?: (loading: boolean) => void;
+  // Group filter props
+  currentUserId?: string;
+  selectedGroupIds?: number[];
+  onGroupToggle?: (groupId: number) => void;
+  onClearGroups?: () => void;
+  showGroupFilters?: boolean;
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({ 
@@ -20,43 +27,84 @@ const SearchBar: React.FC<SearchBarProps> = ({
   onClear,
   onSemanticSearch,
   onSearchResults,
-  onSearchLoading
+  onSearchLoading,
+  currentUserId,
+  selectedGroupIds = [],
+  onGroupToggle,
+  onClearGroups,
+  showGroupFilters = false
 }) => {
   const placesInput = useRef<HTMLInputElement>(null);
   const aiSearchInput = useRef<HTMLInputElement>(null);
   const autocomplete = useRef<google.maps.places.Autocomplete | null>(null);
   const [searchMode, setSearchMode] = useState<'places' | 'semantic'>('places');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [semanticQuery, setSemanticQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [groups, setGroups] = useState<FriendGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+
+  // Load groups when component mounts or currentUserId changes
+  useEffect(() => {
+    if (showGroupFilters && currentUserId && isAuthenticated) {
+      loadGroups();
+    }
+  }, [currentUserId, isAuthenticated, showGroupFilters]);
+
+  const loadGroups = async () => {
+    if (!currentUserId) return;
+    
+    setGroupsLoading(true);
+    try {
+      const response = await friendGroupsApi.getUserGroups(currentUserId);
+      if (response && response.success && response.data) {
+        setGroups(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load groups:', error);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!placesInput.current || !window.google) {
+    const g: any = (window as any).google;
+    if (
+      !placesInput.current ||
+      !g ||
+      !g.maps ||
+      !g.maps.places ||
+      !g.maps.places.Autocomplete
+    ) {
       return;
     }
 
     // Clean up existing autocomplete
     if (autocomplete.current) {
-      google.maps.event.clearInstanceListeners(autocomplete.current);
+      g.maps.event.clearInstanceListeners(autocomplete.current);
       autocomplete.current = null;
     }
 
     // Only initialize autocomplete for places mode
     if (searchMode === 'places') {
       console.log('🔍 SearchBar: Initializing autocomplete...');
-      autocomplete.current = new window.google.maps.places.Autocomplete(placesInput.current, {
+      autocomplete.current = new g.maps.places.Autocomplete(placesInput.current, {
         types: ['establishment'],
         fields: ['place_id', 'geometry', 'name', 'formatted_address', 'types', 'photos']
       });
 
-      autocomplete.current.addListener('place_changed', () => {
+      if (autocomplete.current) {
+        autocomplete.current.addListener('place_changed', () => {
         const place = autocomplete.current?.getPlace();
         if (place && place.geometry && onPlaceSelected) {
           // Validate coordinates
           const lat = place.geometry?.location?.lat();
           const lng = place.geometry?.location?.lng();
-          
-          if (!lat || !lng || lat === 0 || lng === 0) {
-            console.warn('Invalid coordinates from Google Places API:', place.name);
+
+          const latIsValid = typeof lat === 'number' && !Number.isNaN(lat);
+          const lngIsValid = typeof lng === 'number' && !Number.isNaN(lng);
+
+          if (!latIsValid || !lngIsValid) {
+            console.warn('Invalid coordinates from Google Places API:', place?.name);
             return;
           }
           
@@ -73,23 +121,26 @@ const SearchBar: React.FC<SearchBarProps> = ({
             name: place.name || '',
             address: place.formatted_address || '',
             category: primaryType, // Use Google Places type directly
-            placeType: primaryType, // Keep for backward compatibility
-            userRating: 0,
-            friendsRating: 4.2, // Default rating for demo
-            personalReview: '',
             images: place.photos?.map(photo => photo.getUrl()) || [],
-            isLiked: false,
             isSaved: false,
             // Add coordinates for map positioning
-            latitude: lat,
-            longitude: lng,
+            latitude: lat as number,
+            longitude: lng as number,
             google_place_id: place.place_id,
           };
           onPlaceSelected(placeDetails);
         }
       });
+      }
     }
-  }, [onPlaceSelected, window.google, searchMode]); // Add searchMode as dependency
+    // Cleanup on unmount or when toggling modes
+    return () => {
+      if (autocomplete.current && g?.maps?.event) {
+        g.maps.event.clearInstanceListeners(autocomplete.current);
+      }
+      autocomplete.current = null;
+    };
+  }, [onPlaceSelected, searchMode]); // Initialize when dependencies ready
 
   const handleClearSearch = () => {
     // Clear both inputs
@@ -99,22 +150,18 @@ const SearchBar: React.FC<SearchBarProps> = ({
     if (aiSearchInput.current) {
       aiSearchInput.current.value = '';
     }
-    setSearchQuery('');
+    setSemanticQuery('');
     if (onClear) {
       onClear();
     }
   };
 
-  const handleSearchModeToggle = () => {
-    const newMode = searchMode === 'places' ? 'semantic' : 'places';
-    setSearchMode(newMode);
-    handleClearSearch();
-  };
+  // Note: removed unused toggle helper to satisfy linter
 
   const handleSemanticSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!searchQuery.trim() || !onSemanticSearch || !onSearchResults || !onSearchLoading) {
+    if (!semanticQuery.trim() || !onSemanticSearch || !onSearchResults || !onSearchLoading) {
       return;
     }
 
@@ -122,7 +169,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
     onSearchLoading(true);
 
     try {
-      const results = await onSemanticSearch(searchQuery.trim());
+      const results = await onSemanticSearch(semanticQuery.trim());
       onSearchResults(results);
     } catch (error) {
       console.error('Semantic search failed:', error);
@@ -134,12 +181,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.target.value);
+    setSemanticQuery(e.target.value);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (searchMode === 'semantic' && e.key === 'Enter') {
       handleSemanticSearch(e);
+    } else if (searchMode === 'places' && e.key === 'Enter') {
+      e.preventDefault();
     }
   };
 
@@ -174,10 +223,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
             placeholder="Search places, users, recs..."
             className="search-bar-input" 
             disabled={!isAuthenticated || isSearching}
-            value={searchQuery}
-            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             style={{ minWidth: 0 }}
+            aria-label="Search places"
           />
         )}
         
@@ -189,7 +237,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             placeholder="Ask about places (e.g., 'best cafe with wifi in Hauz Khas')"
             className="search-bar-input" 
             disabled={!isAuthenticated || isSearching}
-            value={searchQuery}
+            value={semanticQuery}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             style={{ minWidth: 0 }}
@@ -198,12 +246,14 @@ const SearchBar: React.FC<SearchBarProps> = ({
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
+            aria-label="AI search query"
           />
         )}
         <button 
+          type="button"
           className="clear-btn" 
           onClick={handleClearSearch} 
-          aria-label="Clear"
+          aria-label="Clear search"
           disabled={isSearching}
         >
           ✕
@@ -212,7 +262,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
           <button 
             type="submit"
             className="search-btn"
-            disabled={!searchQuery.trim() || isSearching}
+            disabled={!semanticQuery.trim() || isSearching}
             aria-label="Search"
           >
             {isSearching ? (
@@ -223,6 +273,45 @@ const SearchBar: React.FC<SearchBarProps> = ({
           </button>
         )}
       </form>
+
+      {/* Group Filters */}
+      {showGroupFilters && isAuthenticated && (
+        <div className="group-filters">
+          {groupsLoading ? (
+            <div className="group-filters-loading">
+              <div className="group-filter-spinner"></div>
+              <span>Loading groups...</span>
+            </div>
+          ) : groups.length > 0 ? (
+            <div className="group-filters-container">
+              {/* Clear all button if any groups are selected */}
+              {selectedGroupIds.length > 0 && (
+                <button
+                  className="group-filter-clear"
+                  onClick={onClearGroups}
+                >
+                  Clear All
+                </button>
+              )}
+              
+              {/* Group buttons */}
+              {groups.map((group) => {
+                const isSelected = selectedGroupIds.includes(group.id);
+                return (
+                  <button
+                    key={group.id}
+                    className={`group-filter-btn ${isSelected ? 'selected' : ''}`}
+                    onClick={() => onGroupToggle?.(group.id)}
+                  >
+                    <span className="group-filter-icon">{group.icon || '👥'}</span>
+                    <span className="group-filter-name">{group.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
     </div>
   );

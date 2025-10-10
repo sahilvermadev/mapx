@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import path from 'path';
-import { AnnotationData } from '../db/annotations';
+// NOTE: Avoid importing deprecated annotation types. Accept a flexible shape instead.
 
 // Load .env file from the root directory (two levels up from backend/src)
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -35,7 +35,15 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 /**
  * Generate embedding from annotation data by combining relevant fields
  */
-export async function generateAnnotationEmbedding(annotationData: AnnotationData & {
+export async function generateAnnotationEmbedding(annotationData: {
+  // legacy/compatible fields used for embedding text
+  notes?: string;
+  labels?: string[];
+  went_with?: string[];
+  rating?: number;
+  visit_date?: string;
+  metadata?: Record<string, any>;
+  // enriched fields
   place_name?: string;
   place_address?: string;
   user_name?: string;
@@ -107,6 +115,112 @@ export async function generateAnnotationEmbedding(annotationData: AnnotationData
  */
 export async function generateSearchEmbedding(searchText: string): Promise<number[]> {
   return generateEmbedding(searchText);
+}
+
+/**
+ * Generate embedding for recommendations, capturing rich context like title, description,
+ * content type, labels, rating, place/service info, and arbitrary content_data/metadata.
+ */
+export async function generateRecommendationEmbedding(recommendationData: {
+  content_type?: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  title?: string;
+  description?: string;
+  labels?: string[];
+  rating?: number;
+  // Enrichment from joins/lookups
+  place_name?: string;
+  place_address?: string;
+  service_name?: string;
+  service_type?: string;
+  business_name?: string;
+  address?: string;
+  user_name?: string;
+  // Structured payloads
+  content_data?: Record<string, any>;
+  metadata?: Record<string, any>;
+}): Promise<number[]> {
+  const textParts: string[] = [];
+
+  if (recommendationData.content_type) {
+    textParts.push(`Type: ${recommendationData.content_type}`);
+  }
+
+  if (recommendationData.title) {
+    textParts.push(`Title: ${recommendationData.title}`);
+  }
+
+  if (recommendationData.description) {
+    textParts.push(`Description: ${recommendationData.description}`);
+  }
+
+  if (recommendationData.labels && recommendationData.labels.length > 0) {
+    textParts.push(`Tags: ${recommendationData.labels.join(', ')}`);
+  }
+
+  if (typeof recommendationData.rating === 'number') {
+    textParts.push(`Rating: ${recommendationData.rating}/5`);
+  }
+
+  // Place context
+  if (recommendationData.place_name) {
+    textParts.push(`Place: ${recommendationData.place_name}`);
+  }
+  if (recommendationData.place_address) {
+    textParts.push(`Address: ${recommendationData.place_address}`);
+  }
+
+  // Service context
+  if (recommendationData.service_name) {
+    textParts.push(`Service: ${recommendationData.service_name}`);
+  }
+  if (recommendationData.service_type) {
+    textParts.push(`Service Type: ${recommendationData.service_type}`);
+  }
+  if (recommendationData.business_name) {
+    textParts.push(`Business: ${recommendationData.business_name}`);
+  }
+  if (recommendationData.address) {
+    textParts.push(`Service Address: ${recommendationData.address}`);
+  }
+
+  if (recommendationData.user_name) {
+    textParts.push(`By: ${recommendationData.user_name}`);
+  }
+
+  // Extract price information from content_data in a consistent way
+  const cd = recommendationData.content_data || {};
+  const price_level: number | undefined = cd.price_level || cd.priceLevel;
+  const price_label: string | undefined = cd.price_label;
+  const price_text: string | undefined = cd.price_text;
+  if (typeof price_level === 'number' || price_label || price_text) {
+    const label = price_label || (price_level === 1 ? 'budget' : price_level === 2 ? 'moderate' : price_level === 3 ? 'higher-end' : price_level === 4 ? 'luxury' : undefined);
+    const symbol = price_text || (price_level === 1 ? '₹' : price_level === 2 ? '₹₹' : price_level === 3 ? '₹₹₹' : price_level === 4 ? '₹₹₹₹' : undefined);
+    const priceParts: string[] = [];
+    if (symbol) priceParts.push(`Price ${symbol}`);
+    if (label) priceParts.push(`Pricing ${label}`);
+    if (priceParts.length > 0) textParts.push(priceParts.join(' '));
+  }
+
+  // Flatten JSON structures in a stable way
+  const flattenRecord = (obj?: Record<string, any>, label?: string) => {
+    if (!obj) return;
+    const entries = Object.entries(obj)
+      .filter(([_, v]) => v !== undefined && v !== null && `${v}`.trim().length > 0)
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+    if (entries.length > 0) {
+      textParts.push(`${label || 'Data'}: ${entries.join(', ')}`);
+    }
+  };
+
+  flattenRecord(recommendationData.content_data, 'Details');
+  flattenRecord(recommendationData.metadata, 'Metadata');
+
+  const combinedText = textParts.join('. ');
+  if (!combinedText.trim()) {
+    throw new Error('No meaningful text content found in recommendation data');
+  }
+
+  return generateEmbedding(combinedText);
 }
 
 /**

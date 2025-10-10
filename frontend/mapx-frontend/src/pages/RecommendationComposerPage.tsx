@@ -1,27 +1,38 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import RecommendationComposer from '@/components/RecommendationComposer';
-import { apiClient } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 const RecommendationComposerPage: React.FC = () => {
   const navigate = useNavigate();
-  const currentUser = apiClient.getCurrentUser();
+  const { user: currentUser, isAuthenticated, isChecking } = useAuth();
 
   useEffect(() => {
-    if (!currentUser) {
-      // Add a small delay to ensure auth state is properly cleared
-      setTimeout(() => {
-        navigate('/');
-      }, 100);
+    // Only redirect if auth check is complete and user is not authenticated
+    if (!isChecking && !isAuthenticated) {
+      navigate('/');
+      return;
     }
-  }, [currentUser, navigate]);
+  }, [isChecking, isAuthenticated, navigate]);
+
+  // Show loading while authentication is being checked
+  if (isChecking) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <p>Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return null;
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-[calc(100vh-64px)]">
       <RecommendationComposer
         isOpen={true}
         onClose={() => navigate(-1)}
@@ -32,6 +43,4 @@ const RecommendationComposerPage: React.FC = () => {
   );
 };
 
-export default RecommendationComposerPage;
-
-
+export default React.memo(RecommendationComposerPage);

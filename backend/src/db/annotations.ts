@@ -1,6 +1,5 @@
 import pool from '../db';
-import { generateAnnotationEmbedding } from '../utils/embeddings';
-import { getPlaceById, getUserById } from './places';
+import { embeddingQueue } from '../services/embeddingQueue';
 
 export interface AnnotationData {
   place_id: number;
@@ -58,28 +57,12 @@ export async function insertAnnotation(annotationData: AnnotationData): Promise<
     
     // Auto-generate embedding if requested and not provided
     let embedding = annotationData.embedding;
+    let shouldQueueEmbedding = false;
+    
     if (annotationData.auto_generate_embedding && !embedding) {
-      try {
-        // Get place and user information for better embedding
-        const [place, user] = await Promise.all([
-          getPlaceById(annotationData.place_id),
-          getUserById(annotationData.user_id)
-        ]);
-        
-        // Create enhanced annotation data with place and user info
-        const enhancedAnnotationData = {
-          ...annotationData,
-          place_name: place?.name,
-          place_address: place?.address,
-          user_name: user?.display_name
-        };
-        
-        embedding = await generateAnnotationEmbedding(enhancedAnnotationData);
-        console.log('Auto-generated embedding for annotation with place and user info');
-      } catch (error) {
-        console.warn('Failed to auto-generate embedding:', error);
-        // Continue without embedding rather than failing the entire operation
-      }
+      // Queue embedding generation for async processing
+      shouldQueueEmbedding = true;
+      console.log('Queued embedding generation for async processing');
     }
     
     // Prepare the insert query
@@ -108,6 +91,18 @@ export async function insertAnnotation(annotationData: AnnotationData): Promise<
     const annotationId = insertResult.rows[0].id;
     
     await client.query('COMMIT');
+    
+    // Queue embedding generation if needed (after successful commit)
+    if (shouldQueueEmbedding) {
+      try {
+        await embeddingQueue.enqueue('annotation', annotationId, annotationData, 'normal');
+        console.log(`Queued embedding generation for annotation ${annotationId}`);
+      } catch (error) {
+        console.warn(`Failed to queue embedding generation for annotation ${annotationId}:`, error);
+        // Don't fail the operation if queuing fails
+      }
+    }
+    
     return annotationId;
     
   } catch (error) {
@@ -282,64 +277,10 @@ export async function searchAnnotationsBySimilarity(
   return result.rows;
 } 
 
-/**
- * Regenerate embedding for an existing annotation with place and user information
- */
-export async function regenerateAnnotationEmbedding(annotationId: number): Promise<void> {
-  const client = await pool.connect();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // Get the annotation
-    const annotationResult = await client.query(
-      'SELECT * FROM annotations WHERE id = $1',
-      [annotationId]
-    );
-    
-    if (annotationResult.rows.length === 0) {
-      throw new Error('Annotation not found');
-    }
-    
-    const annotation = annotationResult.rows[0];
-    
-    // Get place and user information
-    const [place, user] = await Promise.all([
-      getPlaceById(annotation.place_id),
-      getUserById(annotation.user_id)
-    ]);
-    
-    // Create enhanced annotation data with place and user info
-    const enhancedAnnotationData = {
-      ...annotation,
-      place_name: place?.name,
-      place_address: place?.address,
-      user_name: user?.display_name
-    };
-    
-    // Generate new embedding
-    const newEmbedding = await generateAnnotationEmbedding(enhancedAnnotationData);
-    
-    // Update the annotation with the new embedding
-    await client.query(
-      'UPDATE annotations SET embedding = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [`[${newEmbedding.join(',')}]`, annotationId]
-    );
-    
-    await client.query('COMMIT');
-    console.log(`Regenerated embedding for annotation ${annotationId}`);
-    
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error(`Failed to regenerate embedding for annotation ${annotationId}:`, error);
-    throw error;
-  } finally {
-    client.release();
-  }
-}
 
 /**
  * Regenerate embeddings for all annotations (useful for migration)
+ * Now uses async queue for better performance
  */
 export async function regenerateAllEmbeddings(): Promise<{ success: number; failed: number }> {
   const client = await pool.connect();
@@ -349,35 +290,29 @@ export async function regenerateAllEmbeddings(): Promise<{ success: number; fail
     const result = await client.query('SELECT id FROM annotations');
     const annotationIds = result.rows.map(row => row.id);
     
-    let success = 0;
-    let failed = 0;
+    console.log(`Queuing embedding regeneration for ${annotationIds.length} annotations...`);
     
-    console.log(`Starting to regenerate embeddings for ${annotationIds.length} annotations...`);
-    
-    // Process in batches to avoid overwhelming the system
-    const batchSize = 10;
-    for (let i = 0; i < annotationIds.length; i += batchSize) {
-      const batch = annotationIds.slice(i, i + batchSize);
-      
-      await Promise.allSettled(
-        batch.map(async (id) => {
-          try {
-            await regenerateAnnotationEmbedding(id);
-            success++;
-          } catch (error) {
-            console.error(`Failed to regenerate embedding for annotation ${id}:`, error);
-            failed++;
-          }
-        })
-      );
-      
-      // Log progress
-      if ((i + batchSize) % 50 === 0 || i + batchSize >= annotationIds.length) {
-        console.log(`Progress: ${Math.min(i + batchSize, annotationIds.length)}/${annotationIds.length} annotations processed`);
+    // Queue all annotations for async processing
+    const queuePromises = annotationIds.map(async (id) => {
+      try {
+        // Queue with minimal data - the embedding queue will fetch full data
+        await embeddingQueue.enqueue('annotation', id, { id }, 'low');
+        return { success: true, id };
+      } catch (error) {
+        console.error(`Failed to queue embedding regeneration for annotation ${id}:`, error);
+        return { success: false, id, error: error instanceof Error ? error.message : 'Unknown error' };
       }
-    }
+    });
     
-    console.log(`Embedding regeneration complete. Success: ${success}, Failed: ${failed}`);
+    const results = await Promise.allSettled(queuePromises);
+    
+    const success = results.filter(result => 
+      result.status === 'fulfilled' && result.value.success
+    ).length;
+    
+    const failed = results.length - success;
+    
+    console.log(`Embedding regeneration queued. Success: ${success}, Failed: ${failed}`);
     return { success, failed };
     
   } catch (error) {

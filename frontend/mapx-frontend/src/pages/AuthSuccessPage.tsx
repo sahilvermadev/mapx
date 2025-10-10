@@ -1,35 +1,35 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const AuthSuccessPage: React.FC = () => {
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
 
     if (token) {
-      // Store the token
-      localStorage.setItem('authToken', token);
-      console.log('JWT Token stored successfully');
+      console.log('JWT Token found, logging in...');
       
-      // Verify the token was stored correctly
-      const storedToken = localStorage.getItem('authToken');
-      if (storedToken === token) {
-        console.log('Token verification successful, redirecting...');
-        // Redirect back to the home page after ensuring token is stored
-        setTimeout(() => {
-          navigate('/', { replace: true }); // Use replace to avoid back button issues
-        }, 100);
-      } else {
-        console.error('Token storage verification failed');
-        navigate('/');
-      }
+      // Use the auth context login function
+      login(token);
+      
+      // Clear URL parameters
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+      
+      console.log('Token verification successful, redirecting...');
+      // Redirect back to the home page
+      setTimeout(() => {
+        navigate('/', { replace: true });
+      }, 100);
     } else {
       console.error('No token found in URL parameters.');
-      navigate('/'); // Redirect to home, which will then show the modal
+      navigate('/');
     }
-  }, [navigate]);
+  }, [navigate, login]);
 
   return (
     <div className="loading-container">

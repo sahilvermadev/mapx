@@ -12,20 +12,40 @@ const groq = new Groq({
 
 export interface SearchContext {
   query: string;
-  results: Array<{
-    place_name: string;
-    place_address?: string;
-    total_recommendations: number;
-    average_similarity: number;
-    recommendations: Array<{
-      user_name: string;
-      notes?: string;
-      rating?: number;
-      labels?: string[];
-      went_with?: string[];
-      visit_date?: string;
-    }>;
-  }>;
+  results: Array<
+    | {
+        type: 'place';
+        place_name: string;
+        place_address?: string;
+        total_recommendations: number;
+        average_similarity: number;
+        recommendations: Array<{
+          user_name: string;
+          notes?: string;
+          rating?: number;
+          labels?: string[];
+          went_with?: string[];
+          visit_date?: string;
+        }>;
+      }
+    | {
+        type: 'service';
+        service_name: string;
+        service_type?: string | null;
+        service_business_name?: string | null;
+        service_address?: string | null;
+        total_recommendations: number;
+        average_similarity: number;
+        recommendations: Array<{
+          user_name: string;
+          notes?: string;
+          rating?: number;
+          labels?: string[];
+          went_with?: string[];
+          visit_date?: string;
+        }>;
+      }
+  >;
   total_places: number;
   total_recommendations: number;
 }
@@ -49,36 +69,48 @@ export async function generateAISummary(context: SearchContext): Promise<string>
     // Prepare the context for the AI model
     const searchResultsText = context.results.map(result => {
       const topRecommendation = result.recommendations[0];
-      return `
-Place: ${result.place_name}
-${result.place_address ? `Address: ${result.place_address}` : ''}
-Match Score: ${Math.round(result.average_similarity * 100)}%
-Reviews: ${result.total_recommendations}
+      if ((result as any).type === 'place') {
+        const r = result as any;
+        return `
+Place: ${r.place_name}
+${r.place_address ? `Address: ${r.place_address}` : ''}
+Match Score: ${Math.round(r.average_similarity * 100)}%
+Reviews: ${r.total_recommendations}
 ${topRecommendation.notes ? `Top Review: "${topRecommendation.notes}"` : ''}
 ${topRecommendation.rating ? `Rating: ${topRecommendation.rating}/5` : ''}
 ${topRecommendation.labels && topRecommendation.labels.length > 0 ? `Tags: ${topRecommendation.labels.join(', ')}` : ''}
-      `.trim();
+        `.trim();
+      } else {
+        const r = result as any;
+        return `
+Service: ${r.service_name}${r.service_type ? ` (${r.service_type})` : ''}
+${r.service_address ? `Location: ${r.service_address}` : ''}
+Match Score: ${Math.round(r.average_similarity * 100)}%
+Recommendations: ${r.total_recommendations}
+${topRecommendation.notes ? `Top Note: "${topRecommendation.notes}"` : ''}
+${topRecommendation.rating ? `Rating: ${topRecommendation.rating}/5` : ''}
+${topRecommendation.labels && topRecommendation.labels.length > 0 ? `Tags: ${topRecommendation.labels.join(', ')}` : ''}
+        `.trim();
+      }
     }).join('\n\n');
 
-    const prompt = `You are a helpful travel and dining assistant. A user searched for: "${context.query}"
+    const prompt = `You are a helpful assistant. A user searched for: "${context.query}"
 
-Here are the possible relevant places found:
+Here are the possible relevant results (places and/or services):
 
 ${searchResultsText}
 
-Total places found: ${context.total_places}
-Total recommendations: ${context.total_recommendations}
+Totals — Places: ${context.total_places}, Recommendations: ${context.total_recommendations}
 
-In case the data that we have collected answers the user's query, provide a concise, helpful summary (3-4 sentences maximum) that:
-1. Directly answers the user's query
-2. Don't mention any deatils about the places that are not relevant to the user's query.
-3. Always attribute recommendations to the users who made them (e.g., "Sahil recommends...")
-4. Include location context when relevant
-5. Keep it conversational and helpful
+If the data answers the user's query, write a concise, helpful summary (3-4 sentences max) that:
+1) Directly answers the query
+2) Mentions who made any recommendations
+3) Includes location context when relevant
+4) Keeps it conversational
 
-Other wise, tell the user that unfortunately we don't have any data that answers the user's query.
+Otherwise, say we unfortunately don't have data that answers the query.
 
-Format: Use plain text, no markdown. Be direct and clear.`;
+Format: Plain text.`;
 
     const completion = await groq.chat.completions.create({
       messages: [
@@ -152,12 +184,27 @@ function generateFallbackSummary(context: SearchContext): string {
   const topResult = context.results[0];
   const topRecommendation = topResult.recommendations[0];
   
-  if (topResult.average_similarity > 0.8) {
-    return `Based on ${topResult.total_recommendations} recommendation(s), "${topResult.place_name}" seems to match your search. ${topRecommendation.notes ? `Users say: "${topRecommendation.notes.substring(0, 100)}..."` : ''}`;
-  } else if (topResult.average_similarity > 0.6) {
-    return `I found some potentially relevant places. "${topResult.place_name}" has ${topResult.total_recommendations} recommendation(s) that might be related to your search.`;
+  const highMatch = topResult.average_similarity > 0.8;
+  const mediumMatch = topResult.average_similarity > 0.6;
+
+  if ((topResult as any).type === 'place') {
+    const r: any = topResult as any;
+    if (highMatch) {
+      return `Based on ${r.total_recommendations} recommendation(s), "${r.place_name}" seems to match your search. ${topRecommendation.notes ? `Users say: "${topRecommendation.notes.substring(0, 100)}..."` : ''}`;
+    } else if (mediumMatch) {
+      return `I found some potentially relevant places. "${r.place_name}" has ${r.total_recommendations} recommendation(s) that might be related to your search.`;
+    } else {
+      return `I found some places that might be related to your search, though the match isn't very strong. Consider refining your query for better results.`;
+    }
   } else {
-    return `I found some places that might be related to your search, though the match isn't very strong. Consider refining your query for better results.`;
+    const r: any = topResult as any;
+    if (highMatch) {
+      return `Based on ${r.total_recommendations} recommendation(s), ${r.service_name}${r.service_type ? ` (${r.service_type})` : ''} seems to match your search${r.service_address ? ` in ${r.service_address}` : ''}. ${topRecommendation.notes ? `Users say: "${topRecommendation.notes.substring(0, 100)}..."` : ''}`;
+    } else if (mediumMatch) {
+      return `I found a potentially relevant service. ${r.service_name}${r.service_type ? ` (${r.service_type})` : ''} has ${r.total_recommendations} recommendation(s).`;
+    } else {
+      return `I found some services that might be related to your search, though the match isn't very strong. Consider refining your query for better results.`;
+    }
   }
 }
 

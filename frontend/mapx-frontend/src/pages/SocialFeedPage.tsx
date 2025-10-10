@@ -1,17 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Plus, Sparkles, Users } from 'lucide-react';
+import { Plus, Sparkles, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import Header from '@/components/Header';
+import { Skeleton } from '@/components/ui/skeleton';
 import FeedPost from '@/components/FeedPost';
+import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
+import SimpleGroupFilter from '@/components/SimpleGroupFilter';
 import { feedApi } from '@/services/feed';
 import { socialApi, type User, type FeedPost as FeedPostType } from '@/services/social';
-import { apiClient } from '@/services/api';
+import FeedAISearch from '@/components/FeedAISearch';
+import type { SearchResponse } from '@/services/recommendationsApi';
+import { useAuth } from '@/contexts/AuthContext';
+import AIResponseBanner from '@/components/SocialFeed/AIResponseBanner';
+import FeedGroups from '@/components/SocialFeed/FeedGroups';
+import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
 
-// Types
-// type FeedType = 'all' | 'friends' | 'category';
 
 // Constants
 const FEED_LIMIT = 20;
@@ -36,61 +41,77 @@ const getProxiedImageUrl = (url?: string): string => {
 // Component
 const SocialFeedPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user: currentUser, isAuthenticated, isChecking } = useAuth();
   
   // State
   const [posts, setPosts] = useState<FeedPostType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedCategory] = useState<string>('');
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const [suggestedUsers, setSuggestedUsers] = useState<User[]>([]);
+  // Search state handled by hook
+  const {
+    searchScores,
+    searchRecommendationScores,
+    searchResponse,
+    streamingText,
+    recIdToGroupKey,
+    groupKeyToMeta,
+    clearSearch,
+    loadFromResponse,
+  } = useFeedSearchResults();
+  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
+  
 
   // Effects
   useEffect(() => {
-    const user = apiClient.getCurrentUser();
-    if (!user) {
-      // Add a small delay to ensure auth state is properly cleared
-      setTimeout(() => {
-        navigate('/');
-      }, 100);
+    // Only redirect if auth check is complete and user is not authenticated
+    if (!isChecking && !isAuthenticated) {
+      navigate('/');
       return;
     }
-    setCurrentUser(user);
-  }, [navigate]);
+  }, [isChecking, isAuthenticated, navigate]);
 
   useEffect(() => {
     if (!currentUser) return;
     loadFeed();
     loadSuggestedUsers();
-  }, [currentUser, selectedCategory]);
+  }, [currentUser, selectedGroupIds]);
 
   // Event handlers
-  const loadFeed = async () => {
-    console.log('=== LOADING SOCIAL FEED ===');
-    console.log('SocialFeedPage - currentUser:', currentUser);
-    console.log('SocialFeedPage - currentUser.id:', currentUser.id);
-    
-    setLoading(true);
+  const loadFeed = async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     
     try {
-      console.log('SocialFeedPage - Calling feedApi.getFeed with:', { userId: currentUser.id, limit: FEED_LIMIT, offset: FEED_OFFSET });
-      let response = await feedApi.getFeed(currentUser.id, FEED_LIMIT, FEED_OFFSET);
-      console.log('SocialFeedPage - Feed API response:', response);
-      console.log('SocialFeedPage - Feed posts count:', response.data?.length || 0);
+      let response;
+      if (selectedGroupIds.length > 0) {
+        response = await feedApi.getFeed(currentUser.id, FEED_LIMIT, FEED_OFFSET, selectedGroupIds);
+      } else {
+        response = await feedApi.getFeed(currentUser.id, FEED_LIMIT, FEED_OFFSET);
+      }
       
       if (response.success && response.data) {
         setPosts(response.data);
       } else {
         setError(response.error || 'Failed to load feed');
-        setPosts([]);
+        // Only clear posts if this is the initial load
+        if (showLoading) {
+          setPosts([]);
+        }
       }
     } catch (e) {
       console.error('SocialFeedPage - Feed loading error:', e);
       setError('Failed to load feed');
-      setPosts([]);
+      // Only clear posts if this is the initial load
+      if (showLoading) {
+        setPosts([]);
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
@@ -109,65 +130,62 @@ const SocialFeedPage: React.FC = () => {
     try {
       await socialApi.followUser(userId, currentUser.id);
       loadSuggestedUsers();
-      loadFeed();
+      loadFeed(false); // Refresh without showing loading state
     } catch (e) {
       console.error('Failed to follow user:', e);
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      // Call backend logout endpoint to properly clear server-side session
-      await fetch('http://localhost:5000/auth/logout', {
-        method: 'GET',
-        credentials: 'include',
-      });
-    } catch (error) {
-      console.warn('Backend logout failed, continuing with client-side logout:', error);
-    }
-    
-    // Clear client-side authentication state
-    localStorage.removeItem('authToken');
-    
-    // Force a page reload to ensure clean state
-    window.location.href = '/';
+
+  const handleGroupToggle = (groupId: number) => {
+    setSelectedGroupIds(prev => 
+      prev.includes(groupId) 
+        ? prev.filter(id => id !== groupId)
+        : [...prev, groupId]
+    );
   };
+
 
   const handleNavigateToDiscover = () => {
-    navigate('/discover');
+    navigate('/friends');
   };
 
-
-  const handleRecommendationPosted = () => {
-    // Refresh the feed to show new content
-    loadFeed();
-  };
-
-  // Debug current user
-  useEffect(() => {
-    if (currentUser) {
-      console.log('SocialFeedPage - currentUser:', currentUser);
-      console.log('SocialFeedPage - currentUser.id:', currentUser.id);
+  // Receive semantic search results and build maps for relevance sorting
+  const handleSearchResults = useCallback((res: SearchResponse | null) => {
+    if (!res || !res.results) {
+      clearSearch();
+      return;
     }
-  }, [currentUser]);
+    loadFromResponse(res);
+  }, [clearSearch, loadFromResponse]);
 
   // Render components
-  const renderLoadingState = () => (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <RefreshCw className="h-8 w-8 animate-spin" />
-        <p>Loading user...</p>
-      </div>
-    </div>
-  );
 
+  // Map navigation no longer used by inline sorting
+
+
+  // If we have search scores, sort posts by similarity desc.
+  // Priority: per-recommendation similarity, then place-based similarity, else original order
+  const getScore = (post: FeedPostType): number => {
+    const recScore = searchRecommendationScores?.[post.recommendation_id];
+    if (typeof recScore === 'number') return recScore;
+    const placeScore = post.place_id ? (searchScores?.[post.place_id] ?? 0) : 0;
+    return placeScore;
+  };
+
+  const orderedPosts = useMemo(() => (
+    (searchScores || searchRecommendationScores)
+      ? [...posts].sort((a, b) => getScore(b) - getScore(a))
+      : posts
+  ), [posts, searchScores, searchRecommendationScores]);
 
   const renderFeedContent = () => {
     if (loading) {
       return (
-        <div className="flex flex-col items-center justify-center py-12">
-          <RefreshCw className="h-8 w-8 animate-spin mb-4" />
-          <p>Loading posts...</p>
+        <div className="space-y-6">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <FeedPostSkeleton key={i} />
+          ))}
         </div>
       );
     }
@@ -176,7 +194,7 @@ const SocialFeedPage: React.FC = () => {
       return (
         <div className="flex flex-col items-center justify-center py-12">
           <p className="text-destructive mb-4">{error}</p>
-          <Button onClick={loadFeed} variant="outline" size="sm">
+          <Button onClick={() => loadFeed(true)} variant="outline" size="sm">
             Try Again
           </Button>
         </div>
@@ -193,23 +211,36 @@ const SocialFeedPage: React.FC = () => {
           </p>
           <Button onClick={handleNavigateToDiscover}>
             <Plus className="h-4 w-4 mr-2" />
-            Discover Users
+            Find Friends
           </Button>
         </div>
       );
     }
 
+    // Group consecutive results for the same place or service while a search is active
+    const shouldGroup = Boolean(searchScores || searchRecommendationScores);
+    if (!shouldGroup) {
+      return (
+        <div className="space-y-6">
+          {orderedPosts.map((post) => (
+            <FeedPost
+              key={post.recommendation_id}
+              post={post}
+              currentUserId={currentUser.id}
+              onPostUpdate={loadFeed}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    // Defer to reusable component for grouped rendering
     return (
-      <div className="space-y-6">
-        {posts.map((post) => (
-          <FeedPost
-            key={post.annotation_id}
-            post={post}
-            currentUserId={currentUser.id}
-            onPostUpdate={loadFeed}
-          />
-        ))}
-      </div>
+      <FeedGroups
+        posts={orderedPosts}
+        recIdToGroupKey={recIdToGroupKey}
+        groupKeyToMeta={groupKeyToMeta}
+      />
     );
   };
 
@@ -275,49 +306,190 @@ const SocialFeedPage: React.FC = () => {
     </Card>
   );
 
+  // Show loading while authentication is being checked
+  if (isChecking) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
+        <div className="container mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
+            <div className="lg:col-span-3">
+              {/* Search Section Skeleton */}
+              <div className="mb-6">
+                <Skeleton className="h-12 w-full rounded-lg" />
+              </div>
 
-  // Early return for loading state
-  if (!currentUser) {
-    return renderLoadingState();
-  }
+              {/* Group Filter Skeleton */}
+              <div className="mb-8">
+                <Skeleton className="h-16 w-full rounded-lg" />
+              </div>
+              
+              {/* Feed Content Skeleton */}
+              <div className="space-y-6">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
+                    <div className="flex items-start space-x-4">
+                      <Skeleton className="h-12 w-12 rounded-full" />
+                      <div className="flex-1 space-y-3">
+                        <Skeleton className="h-4 w-[200px]" />
+                        <Skeleton className="h-4 w-[150px]" />
+                        <Skeleton className="h-20 w-full" />
+                        <div className="flex space-x-4">
+                          <Skeleton className="h-8 w-16" />
+                          <Skeleton className="h-8 w-16" />
+                          <Skeleton className="h-8 w-16" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-  // Main render
-  return (
-    <div className="min-h-screen bg-background">
-      <Header 
-        currentUserId={currentUser?.id}
-        showMapButton={true}
-        showProfileButton={true}
-        showDiscoverButton={true}
-        showLogoutButton={true}
-        showShareButton={true}
-        title="RECCE"
-        variant="dark"
-        mapButtonText="Explore Places"
-        mapButtonLink="/"
-        onLogout={handleLogout}
-        onRecommendationPosted={handleRecommendationPosted}
-        profilePictureUrl={currentUser?.profilePictureUrl}
-        displayName={currentUser?.displayName}
-      />
-
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-3 space-y-6">
-            {renderFeedContent()}
-          </div>
-
-          <div className="lg:col-span-1">
-            <div className="sticky top-24 space-y-4">
-              {suggestedUsers.length > 0 && renderSuggestedUsersCard()}
+            <div className="lg:col-span-1">
+              <div className="sticky top-24 space-y-4">
+                {/* Suggested Users Card Skeleton */}
+                <div className="bg-white rounded-lg p-6 shadow-sm border">
+                  <div className="space-y-4">
+                    <Skeleton className="h-6 w-[150px]" />
+                    <Skeleton className="h-4 w-[200px]" />
+                    <div className="space-y-3">
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="flex items-center space-x-3">
+                          <Skeleton className="h-10 w-10 rounded-full" />
+                          <div className="flex-1 space-y-2">
+                            <Skeleton className="h-4 w-[120px]" />
+                            <Skeleton className="h-3 w-[80px]" />
+                          </div>
+                          <Skeleton className="h-8 w-16" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
+    );
+  }
 
+  // Early return for loading state
+  if (!currentUser) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
+        <div className="container mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
+            <div className="lg:col-span-3">
+              {/* Search Section Skeleton */}
+              <div className="mb-6">
+                <Skeleton className="h-12 w-full rounded-lg" />
+              </div>
 
+              {/* Group Filter Skeleton */}
+              <div className="mb-8">
+                <Skeleton className="h-16 w-full rounded-lg" />
+              </div>
+              
+              {/* Feed Content Skeleton */}
+              <div className="space-y-6">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
+                    <div className="flex items-start space-x-4">
+                      <Skeleton className="h-12 w-12 rounded-full" />
+                      <div className="flex-1 space-y-3">
+                        <Skeleton className="h-4 w-[200px]" />
+                        <Skeleton className="h-4 w-[150px]" />
+                        <Skeleton className="h-20 w-full" />
+                        <div className="flex space-x-4">
+                          <Skeleton className="h-8 w-16" />
+                          <Skeleton className="h-8 w-16" />
+                          <Skeleton className="h-8 w-16" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="lg:col-span-1">
+              <div className="sticky top-24 space-y-4">
+                {/* Suggested Users Card Skeleton */}
+                <div className="bg-white rounded-lg p-6 shadow-sm border">
+                  <div className="space-y-4">
+                    <Skeleton className="h-6 w-[150px]" />
+                    <Skeleton className="h-4 w-[200px]" />
+                    <div className="space-y-3">
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="flex items-center space-x-3">
+                          <Skeleton className="h-10 w-10 rounded-full" />
+                          <div className="flex-1 space-y-2">
+                            <Skeleton className="h-4 w-[120px]" />
+                            <Skeleton className="h-3 w-[80px]" />
+                          </div>
+                          <Skeleton className="h-8 w-16" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main render
+  return (
+    <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
+      <div className="container mx-auto px-4 py-8">
+        <div className={`grid grid-cols-1 gap-8 ${suggestedUsers.length > 0 ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
+          <div className={suggestedUsers.length > 0 ? 'lg:col-span-3' : 'lg:col-span-1'}>
+            {/* Search Section */}
+            <div className="mb-6">
+              <FeedAISearch isAuthenticated={!!currentUser} onResults={handleSearchResults} />
+            </div>
+
+            {/* Simple Group Filter */}
+            <div className="mb-8">
+              <SimpleGroupFilter
+                currentUserId={currentUser.id}
+                selectedGroupIds={selectedGroupIds}
+                onGroupToggle={handleGroupToggle}
+              />
+            </div>
+            
+            {/* AI Response Section */}
+            {(searchResponse || streamingText) && (
+              <div className="mb-12">
+                <AIResponseBanner
+                  text={streamingText}
+                  totals={searchResponse ? { places: searchResponse.total_places, recs: searchResponse.total_recommendations } : undefined}
+                />
+              </div>
+            )}
+            
+            {/* Feed Content Section */}
+            <div className="space-y-8">
+              {renderFeedContent()}
+            </div>
+          </div>
+
+          {suggestedUsers.length > 0 && (
+            <div className="lg:col-span-1">
+              <div className="sticky top-24 space-y-4">
+                {renderSuggestedUsersCard()}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      {/* Inline results are rendered by FeedAISearch; no modal */}
     </div>
   );
 };
 
-export default SocialFeedPage;
+export default React.memo(SocialFeedPage);

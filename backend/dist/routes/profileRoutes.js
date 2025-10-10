@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -20,7 +53,7 @@ const requireAuth = (req, res, next) => {
 router.get('/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const result = await db_1.default.query(`SELECT id, display_name, email, profile_picture_url, created_at, last_login_at
+        const result = await db_1.default.query(`SELECT id, display_name, email, profile_picture_url, username, created_at, last_login_at
        FROM users 
        WHERE id = $1`, [userId]);
         if (result.rows.length === 0) {
@@ -36,6 +69,7 @@ router.get('/:userId', async (req, res) => {
                 id: userData.id,
                 displayName: userData.display_name,
                 email: userData.email,
+                username: userData.username,
                 profilePictureUrl: userData.profile_picture_url,
                 created_at: userData.created_at,
                 last_login_at: userData.last_login_at
@@ -59,17 +93,17 @@ router.get('/:userId/stats', async (req, res) => {
     try {
         const { userId } = req.params;
         // Get total recommendations
-        const recommendationsResult = await db_1.default.query('SELECT COUNT(*) as count FROM annotations WHERE user_id = $1', [userId]);
+        const recommendationsResult = await db_1.default.query('SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1', [userId]);
         // Get total likes (placeholder - likes functionality not implemented yet)
         const likesResult = { rows: [{ count: '0' }] };
         // Get total saved places
         const savedCount = await (0, social_1.getSavedPlacesCount)(userId);
         // Get average rating
-        const avgRatingResult = await db_1.default.query('SELECT AVG(rating) as avg_rating FROM annotations WHERE user_id = $1 AND rating IS NOT NULL', [userId]);
+        const avgRatingResult = await db_1.default.query('SELECT AVG(rating) as avg_rating FROM recommendations WHERE user_id = $1 AND rating IS NOT NULL', [userId]);
         // Get total places visited
-        const placesVisitedResult = await db_1.default.query('SELECT COUNT(DISTINCT place_id) as count FROM annotations WHERE user_id = $1', [userId]);
+        const placesVisitedResult = await db_1.default.query('SELECT COUNT(DISTINCT place_id) as count FROM recommendations WHERE user_id = $1', [userId]);
         // Get total reviews
-        const reviewsResult = await db_1.default.query('SELECT COUNT(*) as count FROM annotations WHERE user_id = $1 AND notes IS NOT NULL AND notes != \'\'', [userId]);
+        const reviewsResult = await db_1.default.query('SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1 AND description IS NOT NULL AND description != \'\'', [userId]);
         res.json({
             success: true,
             data: {
@@ -93,148 +127,22 @@ router.get('/:userId/stats', async (req, res) => {
 });
 /**
  * GET /api/profile/:userId/recommendations
- * Get user recommendations with filtering and pagination
+ * Get user recommendations in feed post format
  */
 router.get('/:userId/recommendations', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { rating, visibility, category, search, date_from, date_to, sort_field = 'created_at', sort_direction = 'desc', limit = 20, offset = 0 } = req.query;
-        // Build the query with filters
-        let query = `
-      SELECT 
-        a.id,
-        a.notes,
-        a.rating,
-        a.visit_date,
-        a.visibility,
-        a.created_at,
-        a.labels,
-        a.metadata,
-        p.name as place_name,
-        p.address as place_address,
-        p.lat as place_lat,
-        p.lng as place_lng,
-        p.google_place_id,
-        u.display_name as user_name
-      FROM annotations a
-      JOIN places p ON a.place_id = p.id
-      JOIN users u ON a.user_id = u.id
-      WHERE a.user_id = $1
-    `;
-        const queryParams = [userId];
-        let paramCount = 1;
-        // Add filters
-        if (rating) {
-            paramCount++;
-            query += ` AND a.rating >= $${paramCount}`;
-            queryParams.push(rating);
-        }
-        if (visibility && visibility !== 'all') {
-            paramCount++;
-            query += ` AND a.visibility = $${paramCount}`;
-            queryParams.push(visibility);
-        }
-        if (category) {
-            paramCount++;
-            query += ` AND p.metadata->>'category' = $${paramCount}`;
-            queryParams.push(category);
-        }
-        if (search) {
-            paramCount++;
-            query += ` AND (p.name ILIKE $${paramCount} OR a.notes ILIKE $${paramCount})`;
-            queryParams.push(`%${search}%`);
-        }
-        if (date_from) {
-            paramCount++;
-            query += ` AND a.visit_date >= $${paramCount}`;
-            queryParams.push(date_from);
-        }
-        if (date_to) {
-            paramCount++;
-            query += ` AND a.visit_date <= $${paramCount}`;
-            queryParams.push(date_to);
-        }
-        // Add sorting
-        const validSortFields = ['created_at', 'rating', 'place_name', 'visit_date', 'category'];
-        const validSortDirections = ['asc', 'desc'];
-        const sortField = validSortFields.includes(sort_field) ? sort_field : 'created_at';
-        const sortDirection = validSortDirections.includes(sort_direction) ? sort_direction : 'desc';
-        query += ` ORDER BY ${sortField} ${sortDirection.toUpperCase()}`;
-        // Add pagination
-        paramCount++;
-        query += ` LIMIT $${paramCount}`;
-        queryParams.push(parseInt(limit));
-        paramCount++;
-        query += ` OFFSET $${paramCount}`;
-        queryParams.push(parseInt(offset));
-        const result = await db_1.default.query(query, queryParams);
-        // Get total count for pagination
-        let countQuery = `
-      SELECT COUNT(*) as total
-      FROM annotations a
-      JOIN places p ON a.place_id = p.id
-      WHERE a.user_id = $1
-    `;
-        const countParams = [userId];
-        let countParamCount = 1;
-        if (rating) {
-            countParamCount++;
-            countQuery += ` AND a.rating >= $${countParamCount}`;
-            countParams.push(rating);
-        }
-        if (visibility && visibility !== 'all') {
-            countParamCount++;
-            countQuery += ` AND a.visibility = $${countParamCount}`;
-            countParams.push(visibility);
-        }
-        if (category) {
-            countParamCount++;
-            countQuery += ` AND p.metadata->>'category' = $${countParamCount}`;
-            countParams.push(category);
-        }
-        if (search) {
-            countParamCount++;
-            countQuery += ` AND (p.name ILIKE $${countParamCount} OR a.notes ILIKE $${countParamCount})`;
-            countParams.push(`%${search}%`);
-        }
-        if (date_from) {
-            countParamCount++;
-            countQuery += ` AND a.visit_date >= $${countParamCount}`;
-            countParams.push(date_from);
-        }
-        if (date_to) {
-            countParamCount++;
-            countQuery += ` AND a.visit_date <= $${countParamCount}`;
-            countParams.push(date_to);
-        }
-        const countResult = await db_1.default.query(countQuery, countParams);
-        const total = parseInt(countResult.rows[0].total);
-        const recommendations = result.rows.map(row => ({
-            id: row.id.toString(),
-            place_name: row.place_name,
-            place_address: row.place_address,
-            category: row.metadata?.category || 'other',
-            rating: row.rating,
-            notes: row.notes,
-            visit_date: row.visit_date,
-            visibility: row.visibility,
-            created_at: row.created_at,
-            place_lat: row.place_lat,
-            place_lng: row.place_lng,
-            google_place_id: row.google_place_id,
-            user_name: row.user_name,
-            title: row.metadata?.title,
-            labels: row.labels || [],
-            metadata: row.metadata || {}
-        }));
+        const { sort_field = 'created_at', sort_direction = 'desc', limit = 20, offset = 0, content_type } = req.query;
+        const { getUserRecommendations } = await Promise.resolve().then(() => __importStar(require('../db/social')));
+        const recommendations = await getUserRecommendations(userId, parseInt(limit), parseInt(offset), content_type);
         res.json({
             success: true,
             data: recommendations,
             pagination: {
-                total,
+                total: recommendations.length,
                 page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
                 limit: parseInt(limit),
-                totalPages: Math.ceil(total / parseInt(limit))
+                totalPages: Math.ceil(recommendations.length / parseInt(limit))
             }
         });
     }
@@ -249,21 +157,22 @@ router.get('/:userId/recommendations', async (req, res) => {
 });
 /**
  * GET /api/profile/:userId/likes
- * Get user likes (placeholder - likes functionality not implemented yet)
+ * Get user liked posts
  */
 router.get('/:userId/likes', async (req, res) => {
     try {
         const { userId } = req.params;
         const { sort_field = 'created_at', sort_direction = 'desc', limit = 20, offset = 0 } = req.query;
-        // For now, return empty array since likes functionality needs to be implemented
+        const { getUserLikedPosts } = await Promise.resolve().then(() => __importStar(require('../db/social')));
+        const likedPosts = await getUserLikedPosts(userId, parseInt(limit), parseInt(offset));
         res.json({
             success: true,
-            data: [],
+            data: likedPosts,
             pagination: {
-                total: 0,
-                page: 1,
+                total: likedPosts.length,
+                page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
                 limit: parseInt(limit),
-                totalPages: 0
+                totalPages: Math.ceil(likedPosts.length / parseInt(limit))
             }
         });
     }

@@ -24,7 +24,8 @@ router.get('/profile-picture', async (req, res) => {
             responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
+            },
+            timeout: 5000, // fail fast on bad DNS or network
         });
         // Set appropriate headers
         res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
@@ -35,7 +36,15 @@ router.get('/profile-picture', async (req, res) => {
     }
     catch (error) {
         console.error('Error proxying profile picture:', error);
-        res.status(500).json({ error: 'Failed to load profile picture' });
+        // On DNS/network errors, send a graceful fallback to let the client fetch directly
+        const isDnsOrNetwork = error?.code === 'EAI_AGAIN' ||
+            error?.code === 'ENOTFOUND' ||
+            error?.code === 'ECONNABORTED';
+        if (isDnsOrNetwork && typeof url === 'string') {
+            // Let client try direct URL (may work outside container network)
+            return res.redirect(url);
+        }
+        res.status(502).json({ error: 'Failed to load profile picture' });
     }
 });
 // Development-only login endpoint (bypasses OAuth)
@@ -52,12 +61,14 @@ router.get('/dev-login', async (req, res) => {
             display_name: 'Development User',
             profile_picture_url: null,
         };
+        const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
         const token = jsonwebtoken_1.default.sign({
             id: mockUser.id,
             email: mockUser.email,
             displayName: mockUser.display_name,
             profilePictureUrl: mockUser.profile_picture_url,
-        }, process.env.JWT_SECRET || 'dev-secret-key', { expiresIn: '24h' });
+            username: null, // Will be set when user chooses username
+        }, jwtSecret, { expiresIn: '24h' });
         res.redirect(`http://localhost:5173/auth/success?token=${token}`);
     }
     catch (error) {
@@ -70,12 +81,14 @@ router.get('/google/callback', passport_1.default.authenticate('google', { failu
     const user = req.user;
     if (!user?.id)
         return res.redirect('/auth/failure');
+    const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
     const token = jsonwebtoken_1.default.sign({
         id: user.id,
         email: user.email,
         displayName: user.display_name,
         profilePictureUrl: user.profile_picture_url,
-    }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        username: user.username,
+    }, jwtSecret, { expiresIn: '1h' });
     res.redirect(`http://localhost:5173/auth/success?token=${token}`);
 });
 router.get('/success', (req, res) => {

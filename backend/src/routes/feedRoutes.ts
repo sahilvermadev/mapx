@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFeedPosts } from '../db/social';
+import { getFeedPostsFromRecommendations, getFeedPostsFromGroups } from '../db/recommendations';
 
 const router = express.Router();
 
@@ -30,14 +30,24 @@ router.get('/', requireAuth, async (req, res) => {
     const userId = (req as any).user.id;
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = parseInt(req.query.offset as string) || 0;
+    const groupIds = req.query.groupIds ? 
+      (req.query.groupIds as string).split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) : 
+      [];
     
     console.log('feedRoutes - userId:', userId);
     console.log('feedRoutes - limit:', limit);
     console.log('feedRoutes - offset:', offset);
+    console.log('feedRoutes - groupIds:', groupIds);
 
-    console.log('feedRoutes - Calling getFeedPosts');
-    const feedPosts = await getFeedPosts(userId, limit, offset);
-    console.log('feedRoutes - getFeedPosts result:', feedPosts);
+    let feedPosts;
+    if (groupIds.length > 0) {
+      console.log('feedRoutes - Calling getFeedPostsFromGroups');
+      feedPosts = await getFeedPostsFromGroups(userId, groupIds, limit, offset);
+    } else {
+      console.log('feedRoutes - Calling getFeedPostsFromRecommendations');
+      feedPosts = await getFeedPostsFromRecommendations(userId, limit, offset);
+    }
+    
     console.log('feedRoutes - feedPosts count:', feedPosts.length);
     
     res.json({
@@ -70,7 +80,7 @@ router.get('/friends', requireAuth, async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = parseInt(req.query.offset as string) || 0;
 
-    const feedPosts = await getFeedPosts(userId, limit, offset);
+    const feedPosts = await getFeedPostsFromRecommendations(userId, limit, offset);
     
     res.json({
       success: true,
@@ -105,11 +115,12 @@ router.get('/category/:category', requireAuth, async (req, res) => {
 
     // For now, we'll get all feed posts and filter by category on the backend
     // In production, this should be done in the database query
-    const feedPosts = await getFeedPosts(userId, limit * 2, offset); // Get more to filter
+    const feedPosts = await getFeedPostsFromRecommendations(userId, limit * 2, offset); // Get more to filter
     
     const filteredPosts = feedPosts.filter(post => 
-      post.metadata?.category === category || 
-      post.place_name?.toLowerCase().includes(category.toLowerCase())
+      post.content_data?.category === category || 
+      post.place_name?.toLowerCase().includes(category.toLowerCase()) ||
+      post.content_type === category.toLowerCase()
     ).slice(0, limit);
     
     res.json({

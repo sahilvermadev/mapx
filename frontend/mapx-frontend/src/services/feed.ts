@@ -4,13 +4,19 @@ import type { FeedPost } from './social';
 // Feed API service
 export const feedApi = {
   // Main social feed
-  async getFeed(currentUserId: string, limit: number = 20, offset: number = 0): Promise<ApiResponse<FeedPost[]>> {
+  async getFeed(currentUserId: string, limit: number = 20, offset: number = 0, groupIds?: number[]): Promise<ApiResponse<FeedPost[]>> {
     console.log('=== FEED API CALL ===');
     console.log('feedApi.getFeed - currentUserId:', currentUserId);
     console.log('feedApi.getFeed - limit:', limit);
     console.log('feedApi.getFeed - offset:', offset);
+    console.log('feedApi.getFeed - groupIds:', groupIds);
     
-    const response = await apiClient.get('/feed', { currentUserId, limit, offset });
+    const params: any = { currentUserId, limit, offset };
+    if (groupIds && groupIds.length > 0) {
+      params.groupIds = groupIds.join(',');
+    }
+    
+    const response = await apiClient.get('/feed', params);
     console.log('feedApi.getFeed - raw response:', response);
     
     // Transform the response to match expected structure

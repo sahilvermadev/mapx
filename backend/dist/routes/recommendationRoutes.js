@@ -4,247 +4,978 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const embeddings_1 = require("../utils/embeddings");
 const places_1 = require("../db/places");
-const annotations_1 = require("../db/annotations");
-const places_2 = require("../db/places");
-const db_1 = __importDefault(require("../db"));
+const recommendations_1 = require("../db/recommendations");
+const embeddings_1 = require("../utils/embeddings");
+const aiSummaries_1 = require("../utils/aiSummaries");
+const embeddingQueue_1 = require("../services/embeddingQueue");
+const db_1 = __importDefault(require("../db")); // Import pool directly from db.ts
+const mentions_1 = require("../db/mentions");
+const serviceDeduplication_1 = require("../services/serviceDeduplication");
+const nameSimilarity_1 = require("../utils/nameSimilarity");
 const router = express_1.default.Router();
-// Temporary auth middleware (replace with your actual auth)
-const requireAuth = (req, res, next) => {
-    const currentUserId = req.body.currentUserId || req.query.currentUserId;
-    if (!currentUserId) {
-        return res.status(401).json({ success: false, error: 'Authentication required' });
+// Helpers
+function normalizeContactInfo(raw, description) {
+    // Accept string or { phone, email }
+    let phone;
+    let email;
+    if (raw && typeof raw === 'object') {
+        if (raw.phone && typeof raw.phone === 'string') {
+            const digits = raw.phone.replace(/\D/g, '');
+            if (digits.length >= 10 && digits.length <= 15)
+                phone = digits;
+        }
+        if (raw.email && typeof raw.email === 'string' && /@/.test(raw.email)) {
+            email = raw.email.toLowerCase().trim();
+        }
     }
-    req.user = { id: currentUserId };
-    next();
-};
-// Get place information by Google Place ID
+    else if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        const digits = trimmed.replace(/\D/g, '');
+        if (digits.length >= 10 && digits.length <= 15)
+            phone = digits;
+        if (!phone && /@/.test(trimmed))
+            email = trimmed.toLowerCase();
+    }
+    // Fallback: try description for a phone-like number
+    if (!phone && typeof description === 'string') {
+        const m = description.replace(/\s+/g, '').match(/\+?\d{10,15}/);
+        if (m)
+            phone = m[0].replace(/\D/g, '');
+    }
+    return { phone, email };
+}
+// Helper to extract user id from Bearer JWT if session user is not set
+function getUserIdFromRequest(req) {
+    const sessionUser = req.user;
+    if (sessionUser && sessionUser.id)
+        return sessionUser.id;
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer '))
+        return null;
+    const token = auth.slice(7);
+    const parts = token.split('.');
+    if (parts.length !== 3)
+        return null;
+    try {
+        const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
+        const payload = JSON.parse(payloadJson);
+        return payload.id || payload.user_id || null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * GET /api/recommendations/place/google/:googlePlaceId
+ * Get place information by Google Place ID
+ */
 router.get('/place/google/:googlePlaceId', async (req, res) => {
     try {
         const { googlePlaceId } = req.params;
-        const result = await db_1.default.query('SELECT * FROM places WHERE google_place_id = $1', [googlePlaceId]);
-        if (result.rows.length === 0) {
-            return res.json({ success: true, data: null });
+        if (!googlePlaceId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Google Place ID is required'
+            });
         }
-        res.json({ success: true, data: result.rows[0] });
-    }
-    catch (error) {
-        console.error('Error fetching place by Google ID:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch place' });
-    }
-});
-// Save a new recommendation
-router.post('/save', requireAuth, async (req, res) => {
-    try {
-        const { google_place_id, place_name, place_address, place_lat, place_lng, place_metadata, place_category, title, went_with, labels, notes, metadata, visit_date, rating, visibility = 'public' } = req.body;
-        const userId = req.user.id;
-        // First, upsert the place
-        const placeId = await (0, places_1.upsertPlace)({
-            google_place_id,
-            name: place_name,
-            address: place_address,
-            lat: place_lat,
-            lng: place_lng,
-            category_name: place_category,
-            metadata: place_metadata
-        });
-        // Then create the annotation
-        const annotationId = await (0, annotations_1.insertAnnotation)({
-            place_id: placeId,
-            user_id: userId,
-            went_with,
-            labels,
-            notes,
-            metadata,
-            visit_date,
-            rating,
-            visibility,
-            auto_generate_embedding: true
-        });
+        const place = await (0, places_1.getPlaceByGoogleId)(googlePlaceId);
+        if (!place) {
+            return res.status(404).json({
+                success: false,
+                message: 'Place not found'
+            });
+        }
         res.json({
             success: true,
             data: {
-                place_id: placeId,
-                annotation_id: annotationId,
-                message: 'Recommendation saved successfully!'
+                id: place.id,
+                google_place_id: place.google_place_id,
+                name: place.name,
+                address: place.address,
+                lat: place.lat,
+                lng: place.lng,
+                metadata: place.metadata
+            },
+            message: 'Place found successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error fetching place by Google ID:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch place',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * POST /api/recommendations/save
+ * Save a recommendation using the new unified recommendations table
+ */
+router.post('/save', async (req, res) => {
+    try {
+        console.log('[recommendations/save] incoming payload keys:', Object.keys(req.body || {}));
+        const { content_type, google_place_id, place_name, place_address, place_lat, place_lng, place_metadata, place_category, service_name, service_phone, service_email, service_type, service_business_name, service_address, service_website, service_metadata, title, description, content_data, labels, metadata, rating, visibility, user_id } = req.body;
+        // Validate required fields
+        if (!user_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is required'
+            });
+        }
+        if (!description) {
+            return res.status(400).json({
+                success: false,
+                message: 'Description is required'
+            });
+        }
+        // Validate rating if provided
+        if (rating && (rating < 1 || rating > 5)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rating must be between 1 and 5'
+            });
+        }
+        // Validate visibility if provided
+        if (visibility && !['friends', 'public'].includes(visibility)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Visibility must be either "friends" or "public"'
+            });
+        }
+        // Determine content type using client hint or inferred from provided fields
+        let finalContentType = content_type || 'unclear';
+        if (finalContentType === 'unclear' || !finalContentType) {
+            // Infer from payload: if service identifiers exist, treat as service
+            if (service_name || service_phone || service_email || service_type || service_business_name) {
+                finalContentType = 'service';
             }
+            else if (google_place_id || place_name || (typeof place_lat === 'number' && typeof place_lng === 'number')) {
+                finalContentType = 'place';
+            }
+            else {
+                finalContentType = 'place'; // default
+            }
+        }
+        console.log('[recommendations/save] inferred content_type:', finalContentType);
+        let placeId;
+        let serviceId;
+        let serviceDeduplication = undefined;
+        // Step 1: Handle place data (only for place-type recommendations)
+        if (finalContentType === 'place' && (place_name || google_place_id)) {
+            console.log('Upserting place:', place_name || 'Unnamed Place');
+            placeId = await (0, places_1.upsertPlace)({
+                google_place_id,
+                name: place_name || 'Unnamed Place',
+                address: place_address,
+                category_name: place_category,
+                lat: place_lat,
+                lng: place_lng,
+                metadata: place_metadata
+            });
+        }
+        // Step 1.5: Handle service data (only for service-type recommendations)
+        if (finalContentType === 'service') {
+            const cd = content_data || {};
+            const derivedServiceName = service_name || title || cd.service_name || cd.place_name || 'Unnamed Service';
+            const { phone: normPhone, email: normEmail } = normalizeContactInfo(cd.contact_info, description);
+            const derivedPhone = service_phone || cd.service_phone || normPhone;
+            const derivedEmail = service_email || cd.service_email || normEmail;
+            const derivedBusinessName = service_business_name || cd.business_name;
+            const derivedAddress = service_address || place_address || cd.service_address || cd.address;
+            const derivedWebsite = service_website || cd.service_website || cd.website;
+            const derivedServiceType = service_type || cd.service_type || cd.category;
+            const combinedMetadata = { ...(service_metadata || {}), ...cd };
+            console.log('[recommendations/save] service derived fields:', {
+                derivedServiceName,
+                derivedPhone,
+                derivedEmail,
+                derivedBusinessName,
+                derivedAddress,
+                derivedWebsite,
+                derivedServiceType
+            });
+            // Services table requires at least one identifier (phone or email)
+            if (derivedPhone || derivedEmail) {
+                console.log('Upserting service:', derivedServiceName);
+                // Helper: attempt type from specialities/description text if name/business didn't yield one
+                const inferTypeFromFreeText = (...texts) => {
+                    const flattened = texts
+                        .flatMap(t => Array.isArray(t) ? t : [t])
+                        .filter(Boolean)
+                        .map(t => String(t));
+                    if (flattened.length === 0)
+                        return null;
+                    const joined = flattened.join(' ');
+                    return (0, nameSimilarity_1.extractServiceType)(joined, '');
+                };
+                let extractedServiceType = derivedServiceType || (0, nameSimilarity_1.extractServiceType)(derivedServiceName || '', derivedBusinessName);
+                if (!extractedServiceType) {
+                    extractedServiceType = inferTypeFromFreeText(cd?.specialities, cd?.category, description, derivedServiceName);
+                }
+                console.log('[recommendations/save] service type resolution:', {
+                    inputName: derivedServiceName,
+                    inputBusinessName: derivedBusinessName,
+                    payloadServiceType: derivedServiceType,
+                    extractedServiceType,
+                    inferredFrom: (!derivedServiceType && !(0, nameSimilarity_1.extractServiceType)(derivedServiceName || '', derivedBusinessName)) ? 'free_text' : 'name_business'
+                });
+                const serviceData = {
+                    name: derivedServiceName || 'Unnamed Service',
+                    phone_number: derivedPhone,
+                    email: derivedEmail,
+                    service_type: extractedServiceType || undefined,
+                    business_name: derivedBusinessName,
+                    address: derivedAddress,
+                    website: derivedWebsite,
+                    metadata: combinedMetadata
+                };
+                console.log('[recommendations/save] final serviceData to upsert:', serviceData);
+                let upsertResult;
+                try {
+                    upsertResult = await (0, serviceDeduplication_1.upsertService)(serviceData);
+                }
+                catch (e) {
+                    console.error('[recommendations/save] upsertService threw error:', e);
+                    throw e;
+                }
+                serviceId = upsertResult.serviceId;
+                serviceDeduplication = {
+                    action: upsertResult.action,
+                    confidence: upsertResult.confidence,
+                    reasoning: upsertResult.reasoning
+                };
+                console.log('Service deduplication result:', upsertResult);
+            }
+            else {
+                console.log('[recommendations/save] Skipping service upsert: no phone/email identifier present. Raw input:', {
+                    service_name,
+                    service_phone,
+                    service_email,
+                    content_data_contact: cd?.contact_info,
+                    content_data_phone: cd?.service_phone,
+                    content_data_email: cd?.service_email
+                });
+            }
+        }
+        // Step 2: Prepare content data based on type
+        let finalContentData = content_data || {};
+        if (finalContentType === 'place' && placeId) {
+            // For place recommendations, store place-specific data
+            finalContentData = {
+                ...finalContentData,
+                place_name: place_name || 'Unnamed Place',
+                address: place_address,
+                coordinates: place_lat && place_lng ? { lat: place_lat, lng: place_lng } : undefined,
+                category: place_category,
+                ...place_metadata
+            };
+        }
+        else if (finalContentType === 'service' && serviceId) {
+            // For service recommendations, store service-specific data
+            finalContentData = {
+                ...finalContentData,
+                service_name: service_name || 'Unnamed Service',
+                service_phone: service_phone,
+                service_email: service_email,
+                service_type: service_type,
+                service_business_name: service_business_name,
+                service_address: service_address,
+                service_website: service_website,
+                ...service_metadata
+            };
+        }
+        // Step 3: Insert the recommendation with auto-generated embedding
+        console.log('Inserting recommendation:', {
+            content_type: finalContentType,
+            place_id: placeId,
+            service_id: serviceId,
+            user_id
+        });
+        console.log('[recommendations/save] inserting recommendation with:', {
+            user_id,
+            content_type: finalContentType,
+            place_id: placeId,
+            service_id: serviceId,
+            title: title || place_name || service_name
+        });
+        const recommendationId = await (0, recommendations_1.insertRecommendation)({
+            user_id,
+            content_type: finalContentType,
+            place_id: placeId,
+            service_id: serviceId,
+            title: title || place_name || service_name,
+            description,
+            content_data: finalContentData,
+            rating,
+            visibility: visibility || 'friends',
+            labels,
+            metadata,
+            auto_generate_embedding: true // Enable embedding generation for semantic search
+        });
+        // Step 4: Save mentions referenced in the description, if any
+        try {
+            const mentionedUserIds = (0, mentions_1.extractMentionUserIds)(description);
+            if (mentionedUserIds.length > 0) {
+                await (0, mentions_1.savePostMentions)(recommendationId, mentionedUserIds, user_id, description);
+            }
+        }
+        catch (e) {
+            console.error('Failed to process/save post mentions', e);
+            // Do not fail the request if mentions saving fails
+        }
+        const response = {
+            success: true,
+            place_id: placeId,
+            service_id: serviceId,
+            recommendation_id: recommendationId,
+            message: 'Recommendation saved successfully',
+            service_deduplication: serviceDeduplication
+        };
+        console.log('Recommendation saved successfully:', {
+            recommendation_id: recommendationId,
+            place_id: placeId,
+            service_id: serviceId,
+            content_type: finalContentType,
+            user_id,
+            service_deduplication: serviceDeduplication
+        });
+        // Return response in the format expected by the frontend API client
+        res.status(201).json({
+            success: true,
+            data: response,
+            message: 'Recommendation saved successfully'
         });
     }
     catch (error) {
         console.error('Error saving recommendation:', error);
-        res.status(500).json({ success: false, error: 'Failed to save recommendation' });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to save recommendation',
+            message: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 });
-// Get recommendations for a specific user
+/**
+ * GET /api/recommendations/user/:userId
+ * Get all recommendations for a specific user
+ */
 router.get('/user/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { limit = 50, offset = 0 } = req.query;
-        const recommendations = await (0, annotations_1.getAnnotationsByUserId)(userId, parseInt(limit));
-        res.json({ success: true, data: recommendations });
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = parseInt(req.query.offset) || 0;
+        // Validate user ID format (should be UUID)
+        if (!userId || typeof userId !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid user ID is required'
+            });
+        }
+        // Get user's recommendations with pagination
+        const recommendations = await (0, recommendations_1.getRecommendationsByUserId)(userId, limit, offset);
+        // Transform recommendations to include place information where applicable
+        const transformedRecommendations = await Promise.all(recommendations.map(async (recommendation) => {
+            let placeInfo = {};
+            // Get place information if this is a place-type recommendation
+            if (recommendation.place_id) {
+                const placeQuery = await db_1.default.query('SELECT name, address, lat, lng FROM places WHERE id = $1', [recommendation.place_id]);
+                const place = placeQuery.rows[0] || {};
+                placeInfo = {
+                    place_name: place.name || 'Unknown Place',
+                    place_address: place.address,
+                    place_lat: place.lat,
+                    place_lng: place.lng
+                };
+            }
+            return {
+                id: recommendation.id,
+                content_type: recommendation.content_type,
+                title: recommendation.title,
+                description: recommendation.description,
+                content_data: recommendation.content_data,
+                rating: recommendation.rating,
+                visibility: recommendation.visibility,
+                labels: recommendation.labels,
+                metadata: recommendation.metadata,
+                created_at: recommendation.created_at,
+                updated_at: recommendation.updated_at,
+                ...placeInfo
+            };
+        }));
+        res.json({
+            success: true,
+            data: transformedRecommendations,
+            pagination: {
+                limit,
+                offset,
+                total: transformedRecommendations.length,
+                hasMore: transformedRecommendations.length === limit
+            },
+            message: 'User recommendations retrieved successfully'
+        });
     }
     catch (error) {
         console.error('Error fetching user recommendations:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch recommendations' });
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch recommendations',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 });
-// Get recommendations for a specific place
+/**
+ * GET /api/recommendations/place/:placeId
+ * Get all recommendations for a specific place
+ */
 router.get('/place/:placeId', async (req, res) => {
     try {
         const { placeId } = req.params;
-        const { visibility = 'all', limit = 50 } = req.query;
-        const recommendations = await (0, annotations_1.getAnnotationsByPlaceId)(parseInt(placeId), visibility, parseInt(limit));
-        res.json({ success: true, data: recommendations });
+        const visibility = req.query.visibility || 'all';
+        const limit = parseInt(req.query.limit) || 50;
+        // Validate place ID
+        const placeIdNum = parseInt(placeId);
+        if (isNaN(placeIdNum)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid place ID is required'
+            });
+        }
+        // Validate visibility parameter
+        if (!['friends', 'public', 'all'].includes(visibility)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Visibility must be "friends", "public", or "all"'
+            });
+        }
+        // Get place recommendations
+        const recommendations = await (0, recommendations_1.getRecommendationsByPlaceId)(placeIdNum, visibility, limit);
+        // Transform recommendations to include user information
+        const transformedRecommendations = await Promise.all(recommendations.map(async (recommendation) => {
+            // Get user information (you might want to add a join query for better performance)
+            const userQuery = await db_1.default.query('SELECT display_name, email FROM users WHERE id = $1', [recommendation.user_id]);
+            const user = userQuery.rows[0] || {};
+            return {
+                id: recommendation.id,
+                content_type: recommendation.content_type,
+                title: recommendation.title,
+                description: recommendation.description,
+                content_data: recommendation.content_data,
+                user_id: recommendation.user_id,
+                user_name: user.display_name || 'Anonymous',
+                user_email: user.email,
+                rating: recommendation.rating,
+                visibility: recommendation.visibility,
+                labels: recommendation.labels,
+                metadata: recommendation.metadata,
+                created_at: recommendation.created_at,
+                updated_at: recommendation.updated_at
+            };
+        }));
+        res.json({
+            success: true,
+            data: transformedRecommendations,
+            place_id: placeIdNum,
+            visibility,
+            total: transformedRecommendations.length,
+            message: 'Place recommendations retrieved successfully'
+        });
     }
     catch (error) {
         console.error('Error fetching place recommendations:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch recommendations' });
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch recommendations',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 });
-// Update an existing recommendation
-router.put('/:annotationId', requireAuth, async (req, res) => {
+/**
+ * GET /api/recommendations/place/:placeId/network-rating
+ * Returns consolidated rating using only ratings from the current user's network
+ */
+router.get('/place/:placeId/network-rating', async (req, res) => {
     try {
-        const { annotationId } = req.params;
+        const { placeId } = req.params;
+        const placeIdNum = parseInt(placeId);
+        if (isNaN(placeIdNum)) {
+            return res.status(400).json({ success: false, message: 'Valid place ID is required' });
+        }
+        // Get current user from session or JWT
+        const userId = getUserIdFromRequest(req);
+        // If unauthenticated, return empty rating rather than 401 to avoid disrupting UX
+        if (!userId) {
+            return res.json({ success: true, data: { average_rating: null, rating_count: 0 } });
+        }
+        const stats = await (0, recommendations_1.getNetworkAverageRatingForPlace)(placeIdNum, userId);
+        return res.json({ success: true, data: stats });
+    }
+    catch (error) {
+        console.error('Error fetching network rating:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch network rating' });
+    }
+});
+/**
+ * GET /api/recommendations/:recommendationId
+ * Get a specific recommendation by ID with all social data
+ */
+router.get('/:recommendationId', async (req, res) => {
+    try {
+        const { recommendationId } = req.params;
+        const recommendationIdNum = parseInt(recommendationId);
+        if (isNaN(recommendationIdNum)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid recommendation ID is required'
+            });
+        }
+        // Get current user ID for social data (likes, saves, etc.)
+        const currentUserId = getUserIdFromRequest(req);
+        if (!currentUserId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+        // Fetch recommendation with all social data
+        const recommendation = await (0, recommendations_1.getRecommendationWithSocialData)(recommendationIdNum, currentUserId);
+        if (!recommendation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Recommendation not found'
+            });
+        }
+        res.json({
+            success: true,
+            data: recommendation,
+            message: 'Recommendation retrieved successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error fetching recommendation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch recommendation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * PUT /api/recommendations/:recommendationId
+ * Update a specific recommendation
+ */
+router.put('/:recommendationId', async (req, res) => {
+    try {
+        const { recommendationId } = req.params;
+        const recommendationIdNum = parseInt(recommendationId);
         const updates = req.body;
-        const userId = req.user.id;
-        const success = await (0, annotations_1.updateAnnotation)(parseInt(annotationId), updates);
-        res.json({ success, message: success ? 'Recommendation updated successfully' : 'Failed to update recommendation' });
+        if (isNaN(recommendationIdNum)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid recommendation ID is required'
+            });
+        }
+        // Validate rating if provided
+        if (updates.rating && (updates.rating < 1 || updates.rating > 5)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rating must be between 1 and 5'
+            });
+        }
+        // Validate visibility if provided
+        if (updates.visibility && !['friends', 'public'].includes(updates.visibility)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Visibility must be either "friends" or "public"'
+            });
+        }
+        // Validate content type if provided
+        if (updates.content_type && !['place', 'service', 'tip', 'contact', 'unclear'].includes(updates.content_type)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Content type must be one of: place, service, tip, contact, unclear'
+            });
+        }
+        const success = await (0, recommendations_1.updateRecommendation)(recommendationIdNum, updates);
+        if (!success) {
+            return res.status(404).json({
+                success: false,
+                message: 'Recommendation not found or no changes made'
+            });
+        }
+        res.json({
+            success: true,
+            message: 'Recommendation updated successfully'
+        });
     }
     catch (error) {
         console.error('Error updating recommendation:', error);
-        res.status(500).json({ success: false, error: 'Failed to update recommendation' });
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update recommendation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 });
-// Delete a recommendation
-router.delete('/:annotationId', requireAuth, async (req, res) => {
+/**
+ * DELETE /api/recommendations/:recommendationId
+ * Delete a specific recommendation
+ */
+router.delete('/:recommendationId', async (req, res) => {
     try {
-        const { annotationId } = req.params;
-        const userId = req.user.id;
-        const success = await (0, annotations_1.deleteAnnotation)(parseInt(annotationId), userId);
-        res.json({ success, message: success ? 'Recommendation deleted successfully' : 'Failed to delete recommendation' });
+        const { recommendationId } = req.params;
+        const recommendationIdNum = parseInt(recommendationId);
+        const { user_id } = req.body; // User ID should be provided in request body for authorization
+        if (isNaN(recommendationIdNum)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid recommendation ID is required'
+            });
+        }
+        if (!user_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is required for authorization'
+            });
+        }
+        const success = await (0, recommendations_1.deleteRecommendation)(recommendationIdNum, user_id);
+        if (!success) {
+            return res.status(404).json({
+                success: false,
+                message: 'Recommendation not found or unauthorized'
+            });
+        }
+        res.json({
+            success: true,
+            message: 'Recommendation deleted successfully'
+        });
     }
     catch (error) {
         console.error('Error deleting recommendation:', error);
-        res.status(500).json({ success: false, error: 'Failed to delete recommendation' });
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete recommendation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 });
-// Get all places that have reviews/annotations
-router.get('/places/reviewed', async (req, res) => {
+/**
+ * POST /api/recommendations/regenerate-embeddings
+ * Regenerate embeddings for all existing recommendations with enhanced data
+ */
+router.post('/regenerate-embeddings', async (req, res) => {
     try {
-        const { visibility = 'all', limit = 100, offset = 0 } = req.query;
-        const places = await (0, places_2.getPlacesWithReviews)(visibility, parseInt(limit), parseInt(offset));
-        res.json({ success: true, data: places });
+        console.log('Starting embedding regeneration...');
+        const result = await (0, recommendations_1.regenerateAllRecommendationEmbeddings)();
+        res.json({
+            success: true,
+            data: result,
+            message: `Embedding regeneration complete. Success: ${result.success}, Failed: ${result.failed}`
+        });
     }
     catch (error) {
-        console.error('Error fetching reviewed places:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch places' });
+        console.error('Error regenerating embeddings:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to regenerate embeddings',
+            message: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 });
-// Semantic search for places and recommendations
+/**
+ * POST /api/recommendations/search
+ * Semantic search for places and recommendations using embeddings
+ */
 router.post('/search', async (req, res) => {
     try {
-        const { query, limit = 10, threshold = 0.7 } = req.body;
-        if (!query || typeof query !== 'string') {
-            return res.status(400).json({
+        // Get current user ID for follow filtering
+        const currentUserId = getUserIdFromRequest(req);
+        if (!currentUserId) {
+            return res.status(401).json({
                 success: false,
-                error: 'Query is required and must be a string'
+                message: 'Authentication required'
             });
         }
+        const { query, limit = 10, threshold = 0.7, groupIds, content_type } = req.body;
+        if (!query || typeof query !== 'string' || query.trim().length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Search query is required'
+            });
+        }
+        console.log('Semantic search query:', query);
         // Generate embedding for the search query
-        const queryEmbedding = await (0, embeddings_1.generateEmbedding)(query);
-        // Search for similar annotations using vector similarity
-        const searchQuery = `
-      WITH similar_annotations AS (
-        SELECT 
-          a.id as annotation_id,
-          a.place_id,
-          a.notes,
-          a.rating,
-          a.visit_date,
-          a.labels,
-          a.went_with,
-          a.metadata,
-          a.created_at,
-          u.display_name as user_name,
-          1 - (a.embedding <=> $1::vector) as similarity
-        FROM annotations a
-        JOIN users u ON a.user_id = u.id
-        WHERE a.visibility = 'public'
-          AND a.embedding IS NOT NULL
-          AND 1 - (a.embedding <=> $1::vector) > $2
-        ORDER BY similarity DESC
-        LIMIT $3
-      ),
-      place_aggregates AS (
-        SELECT 
-          p.id as place_id,
-          p.name as place_name,
-          p.address as place_address,
-          p.lat as place_lat,
-          p.lng as place_lng,
-          p.google_place_id,
-          array_agg(
-            json_build_object(
-              'annotation_id', sa.annotation_id,
-              'user_name', sa.user_name,
-              'notes', sa.notes,
-              'rating', sa.rating,
-              'visit_date', sa.visit_date,
-              'labels', sa.labels,
-              'went_with', sa.went_with,
-              'metadata', sa.metadata,
-              'similarity', sa.similarity,
-              'created_at', sa.created_at
-            ) ORDER BY sa.similarity DESC
-          ) as recommendations,
-          AVG(sa.similarity) as average_similarity,
-          COUNT(*) as total_recommendations
-        FROM similar_annotations sa
-        JOIN places p ON sa.place_id = p.id
-        GROUP BY p.id, p.name, p.address, p.lat, p.lng, p.google_place_id
-        ORDER BY average_similarity DESC
-      )
-      SELECT 
-        place_id,
-        place_name,
-        place_address,
-        place_lat,
-        place_lng,
-        google_place_id,
-        recommendations,
-        average_similarity,
-        total_recommendations
-      FROM place_aggregates
-      ORDER BY average_similarity DESC
-      LIMIT $3;
-    `;
-        const result = await db_1.default.query(searchQuery, [queryEmbedding, threshold, limit]);
-        // Generate a summary of the search results
-        const totalPlaces = result.rows.length;
-        const totalRecommendations = result.rows.reduce((sum, row) => sum + row.total_recommendations, 0);
-        const summary = totalPlaces > 0
-            ? `Found ${totalPlaces} places with ${totalRecommendations} relevant recommendations`
-            : 'No relevant recommendations found';
-        const response = {
-            query,
-            summary,
-            results: result.rows,
-            total_places: totalPlaces,
-            total_recommendations: totalRecommendations,
-            search_metadata: {
-                threshold,
-                limit,
-                query_processed: true
+        let searchEmbedding;
+        try {
+            searchEmbedding = await (0, embeddings_1.generateSearchEmbedding)(query.trim());
+            console.log('Generated search embedding');
+        }
+        catch (error) {
+            console.error('Failed to generate search embedding:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to process search query',
+                error: 'Embedding generation failed'
+            });
+        }
+        // Search for similar recommendations
+        const similarRecommendations = await (0, recommendations_1.searchRecommendationsBySimilarity)(searchEmbedding, limit, threshold, groupIds, currentUserId, content_type);
+        console.log(`Found ${similarRecommendations.length} similar recommendations`);
+        // Get detailed information for each recommendation
+        const searchResults = await Promise.all(similarRecommendations.map(async (recommendation) => {
+            // Get place information (if applicable)
+            let placeInfo = {};
+            if (recommendation.place_id) {
+                const placeQuery = await db_1.default.query('SELECT name, address, lat, lng, google_place_id FROM places WHERE id = $1', [recommendation.place_id]);
+                const place = placeQuery.rows[0] || {};
+                placeInfo = {
+                    place_id: recommendation.place_id,
+                    place_name: place.name || 'Unknown Place',
+                    place_address: place.address,
+                    place_lat: place.lat,
+                    place_lng: place.lng,
+                    google_place_id: place.google_place_id
+                };
             }
-        };
-        res.json({ success: true, data: response });
+            // Get service information (if applicable)
+            let serviceInfo = {};
+            if (recommendation.service_id) {
+                const serviceQuery = await db_1.default.query('SELECT id, name, service_type, business_name, address FROM services WHERE id = $1', [recommendation.service_id]);
+                const service = serviceQuery.rows[0] || {};
+                serviceInfo = {
+                    service_id: service.id,
+                    service_name: service.name || 'Unknown Service',
+                    service_type: service.service_type || null,
+                    service_business_name: service.business_name || null,
+                    service_address: service.address || null
+                };
+            }
+            // Get user information
+            const userQuery = await db_1.default.query('SELECT display_name FROM users WHERE id = $1', [recommendation.user_id]);
+            const user = userQuery.rows[0] || {};
+            return {
+                recommendation_id: recommendation.id,
+                content_type: recommendation.content_type,
+                title: recommendation.title,
+                description: recommendation.description,
+                content_data: recommendation.content_data,
+                user_name: user.display_name || 'Anonymous',
+                rating: recommendation.rating,
+                labels: recommendation.labels,
+                metadata: recommendation.metadata,
+                similarity: recommendation.similarity,
+                created_at: recommendation.created_at,
+                ...placeInfo,
+                ...serviceInfo
+            };
+        }));
+        // Group results by place (for place-type recommendations) or by content type
+        const groupedResults = new Map();
+        searchResults.forEach(result => {
+            let groupKey;
+            let groupInfo;
+            const r = result;
+            if (result.content_type === 'place' && r.place_id) {
+                // Group place recommendations by place
+                groupKey = `place_${r.place_id}`;
+                groupInfo = {
+                    type: 'place',
+                    place_id: r.place_id,
+                    place_name: r.place_name,
+                    place_address: r.place_address,
+                    place_lat: r.place_lat,
+                    place_lng: r.place_lng,
+                    google_place_id: r.google_place_id,
+                    recommendations: [],
+                    average_similarity: 0,
+                    total_recommendations: 0
+                };
+            }
+            else if (result.content_type === 'service' && r.service_id) {
+                // Group service recommendations by service
+                groupKey = `service_${r.service_id}`;
+                groupInfo = {
+                    type: 'service',
+                    service_id: r.service_id,
+                    service_name: r.service_name,
+                    service_type: r.service_type,
+                    service_business_name: r.service_business_name,
+                    service_address: r.service_address,
+                    recommendations: [],
+                    average_similarity: 0,
+                    total_recommendations: 0
+                };
+            }
+            else {
+                // Fallback grouping by content type
+                groupKey = `type_${result.content_type}`;
+                groupInfo = {
+                    type: 'content_type',
+                    content_type: result.content_type,
+                    recommendations: [],
+                    average_similarity: 0,
+                    total_recommendations: 0
+                };
+            }
+            if (!groupedResults.has(groupKey)) {
+                groupedResults.set(groupKey, groupInfo);
+            }
+            const group = groupedResults.get(groupKey);
+            group.recommendations.push({
+                recommendation_id: result.recommendation_id,
+                content_type: result.content_type,
+                title: result.title,
+                description: result.description,
+                content_data: result.content_data,
+                user_name: result.user_name,
+                rating: result.rating,
+                labels: result.labels,
+                metadata: result.metadata,
+                similarity: result.similarity,
+                created_at: result.created_at
+            });
+            group.total_recommendations += 1;
+            group.average_similarity = ((group.average_similarity * (group.total_recommendations - 1) + result.similarity) /
+                group.total_recommendations);
+        });
+        // Convert to array and sort by average similarity
+        const finalResults = Array.from(groupedResults.values())
+            .sort((a, b) => b.average_similarity - a.average_similarity)
+            .slice(0, limit);
+        // Generate AI-powered summary based on the search results
+        let summary = '';
+        try {
+            const searchContext = {
+                query: query.trim(),
+                results: finalResults,
+                total_places: finalResults.filter(r => r.type === 'place').length,
+                total_recommendations: searchResults.length
+            };
+            summary = await (0, aiSummaries_1.generateAISummary)(searchContext);
+            console.log('🤖 AI Summary generated successfully');
+        }
+        catch (error) {
+            console.error('❌ Failed to generate AI summary, using fallback:', error);
+            // Fallback to simple summary
+            if (finalResults.length === 0) {
+                summary = `No relevant recommendations found for your search query. Try using different keywords or being more specific about what you're looking for.`;
+            }
+            else {
+                const topResult = finalResults[0];
+                const topRecommendation = topResult.recommendations[0];
+                if (topResult.average_similarity > 0.8) {
+                    const locationInfo = topResult.type === 'place' ? `"${topResult.place_name}"` : `this ${topResult.content_type}`;
+                    summary = `Based on ${topResult.total_recommendations} recommendation(s), ${locationInfo} seems to match your search. ${topRecommendation.description ? `Users say: "${topRecommendation.description.substring(0, 100)}..."` : ''}`;
+                }
+                else if (topResult.average_similarity > 0.6) {
+                    const locationInfo = topResult.type === 'place' ? `"${topResult.place_name}"` : `this ${topResult.content_type}`;
+                    summary = `I found some potentially relevant recommendations. ${locationInfo} has ${topResult.total_recommendations} recommendation(s) that might be related to your search.`;
+                }
+                else {
+                    summary = `I found some recommendations that might be related to your search, though the match isn't very strong. Consider refining your query for better results.`;
+                }
+            }
+        }
+        res.json({
+            success: true,
+            data: {
+                query: query.trim(),
+                summary,
+                results: finalResults,
+                total_groups: finalResults.length,
+                total_recommendations: searchResults.length,
+                search_metadata: {
+                    threshold,
+                    limit,
+                    query_processed: true
+                }
+            },
+            message: 'Search completed successfully'
+        });
     }
     catch (error) {
         console.error('Error performing semantic search:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to perform semantic search'
+            message: 'Failed to perform search',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * GET /api/recommendations/places/reviewed
+ * Get all places that have reviews/annotations
+ */
+router.get('/places/reviewed', async (req, res) => {
+    try {
+        const visibility = req.query.visibility || 'all';
+        const limit = parseInt(req.query.limit) || 100;
+        const offset = parseInt(req.query.offset) || 0;
+        const groupIds = req.query.groupIds ?
+            req.query.groupIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) :
+            undefined;
+        // Validate visibility parameter
+        if (!['friends', 'public', 'all'].includes(visibility)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Visibility must be "friends", "public", or "all"'
+            });
+        }
+        // Get places with reviews
+        const placesWithReviews = await (0, places_1.getPlacesWithReviews)(visibility, limit, offset, groupIds);
+        // Transform the data to include review statistics
+        const transformedPlaces = placesWithReviews.map(place => ({
+            id: place.id,
+            google_place_id: place.google_place_id,
+            name: place.name,
+            address: place.address,
+            lat: place.lat,
+            lng: place.lng,
+            metadata: place.metadata,
+            category_name: place.category_name,
+            review_count: place.review_count,
+            average_rating: place.average_rating,
+            latest_review_date: place.latest_review_date,
+            created_at: place.created_at,
+            updated_at: place.updated_at
+        }));
+        res.json({
+            success: true,
+            data: transformedPlaces,
+            total: transformedPlaces.length,
+            visibility,
+            message: 'Reviewed places retrieved successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error fetching reviewed places:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch reviewed places',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+// Get embedding queue status
+router.get('/embedding-queue/status', async (req, res) => {
+    try {
+        const status = embeddingQueue_1.embeddingQueue.getStatus();
+        res.json({
+            success: true,
+            data: {
+                queueLength: status.queueLength,
+                processing: status.processing,
+                isProcessing: status.isProcessing
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error getting embedding queue status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get embedding queue status',
+            error: error instanceof Error ? error.message : 'Unknown error'
         });
     }
 });

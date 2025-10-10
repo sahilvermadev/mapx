@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { User, Map, Users, Newspaper, LogOut, Plus } from 'lucide-react';
+import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { User, Map, Users, Newspaper, LogOut, Plus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { 
@@ -10,33 +10,26 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import RecommendationComposer from './RecommendationComposer';
+import NotificationsBell from '@/components/NotificationsBell';
 
 // Types
 interface HeaderProps {
   currentUserId?: string;
-  showMapButton?: boolean;
   showProfileButton?: boolean;
-  showDiscoverButton?: boolean;
   showLogoutButton?: boolean;
-  showShareButton?: boolean;
   title?: string;
   variant?: 'default' | 'dark';
-  mapButtonText?: string;
-  mapButtonLink?: string;
   onLogout?: () => void;
-  onRecommendationPosted?: () => void;
   profilePictureUrl?: string;
   displayName?: string;
+  isLoggingOut?: boolean;
 }
 
 type HeaderVariant = 'default' | 'dark';
 
 // Constants
 const DEFAULT_TITLE = 'RECCE';
-const DEFAULT_MAP_BUTTON_TEXT = 'Explore places';
-const DEFAULT_MAP_BUTTON_LINK = '/';
-const DISCOVER_LINK = '/discover';
+const DISCOVER_LINK = '/friends';
 
 // Helper functions
 const getHeaderClasses = (variant: HeaderVariant): string => {
@@ -61,13 +54,7 @@ const getButtonClasses = (variant: HeaderVariant): string => {
     : '';
 };
 
-const getMapButtonIcon = (buttonText: string): React.ReactNode => {
-  return buttonText === 'Feed' ? (
-    <Newspaper className="h-4 w-4" />
-  ) : (
-    <Map className="h-4 w-4" />
-  );
-};
+// No dynamic icon helper needed; we always render explicit icons for each nav item.
 
 const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
@@ -82,25 +69,19 @@ const getProxiedProfilePicture = (originalUrl?: string): string => {
 // Component
 const Header: React.FC<HeaderProps> = ({
   currentUserId,
-  showMapButton = true,
   showProfileButton = true,
-  showDiscoverButton = true,
   showLogoutButton = false,
-  showShareButton = true,
   title = DEFAULT_TITLE,
   variant = 'default',
-  mapButtonText = DEFAULT_MAP_BUTTON_TEXT,
-  mapButtonLink = DEFAULT_MAP_BUTTON_LINK,
   onLogout,
-  onRecommendationPosted,
   profilePictureUrl,
   displayName,
+  isLoggingOut = false,
 }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const buttonClasses = getButtonClasses(variant);
-  const [showRecommendationComposer, setShowRecommendationComposer] = useState(false);
 
-  const handleMapButtonClick = () => navigate(mapButtonLink);
   const handleDiscoverButtonClick = () => navigate(DISCOVER_LINK);
   const handleProfileButtonClick = () => navigate(`/profile/${currentUserId}`);
   const handleLogoutClick = () => {
@@ -109,15 +90,17 @@ const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const handleRecommendationPosted = () => {
-    setShowRecommendationComposer(false);
-    if (onRecommendationPosted) {
-      onRecommendationPosted();
-    }
-  };
-
   const proxiedAvatarSrc = getProxiedProfilePicture(profilePictureUrl);
 
+  const getNavClasses = (path: string) => {
+    const isActive = path === '/map' ? location.pathname === '/map' : location.pathname.startsWith(path);
+    // Ensure active color persists even on hover in dark variant where hover:text-white is applied
+    return isActive
+      ? `${buttonClasses} !text-yellow-200 hover:!text-yellow-200 focus:!text-yellow-200`
+      : `${buttonClasses}`;
+  };
+
+  
   return (
     <header className={getHeaderClasses(variant)}>
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -126,44 +109,56 @@ const Header: React.FC<HeaderProps> = ({
         </h1>
         
         <div className="flex items-center gap-2">
-          {showMapButton && (
-            <Button 
-              variant="ghost"
-              size="sm" 
-              onClick={handleMapButtonClick}
-              className={`relative group ${buttonClasses}`}
-            >
-              {getMapButtonIcon(mapButtonText)}
-              <span className="text-sm">{mapButtonText}</span>
-            </Button>
-          )}
-          
-          {showDiscoverButton && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleDiscoverButtonClick}
-              className={buttonClasses}
-            >
-              <Users className="h-4 w-4" />
-              <span className="text-sm">Friends</span>
-            </Button>
-          )}
+          {isLoggingOut ? (
+            // Show loading state during logout
+            <div className="flex items-center gap-2 text-yellow-200">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Logging out...</span>
+            </div>
+          ) : (
+            <>
+              {/* Recommend */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => navigate('/compose')}
+                className={getNavClasses('/compose')}
+              >
+                <Plus className="h-4 w-4" />
+                <span className="text-sm">Rec</span>
+              </Button>
 
-          {showShareButton && currentUserId && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => navigate('/compose')}
-              className={buttonClasses}
-            >
-              <Plus className="h-4 w-4" />
-              <span className="text-sm">Share</span>
-            </Button>
+              {/* Feed */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => navigate('/feed')}
+                className={getNavClasses('/feed')}
+              >
+                <Newspaper className="h-4 w-4" />
+                <span className="text-sm">Feed</span>
+              </Button>
+
+              {/* Map */}
+              <Button 
+                variant="ghost"
+                size="sm" 
+                onClick={() => navigate('/map')}
+                className={`relative group ${getNavClasses('/map')}`}
+              >
+                <Map className="h-4 w-4" />
+                <span className="text-sm">Map</span>
+              </Button>
+
+              {/* Notifications */}
+              {currentUserId && (
+                <NotificationsBell currentUserId={currentUserId} variant={variant} />
+              )}
+            </>
           )}
           
-          {/* Prefer avatar menu when we have a profile image */}
-          {currentUserId && profilePictureUrl ? (
+          {/* User menu - only show when not logging out */}
+          {!isLoggingOut && currentUserId && profilePictureUrl ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ml-3 mr-0 ${buttonClasses}`} aria-label="Profile menu">
@@ -178,6 +173,10 @@ const Header: React.FC<HeaderProps> = ({
                   <User className="h-4 w-4 mr-2" />
                   My Profile
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDiscoverButtonClick}>
+                  <Users className="h-4 w-4 mr-2" />
+                  Friends
+                </DropdownMenuItem>
                 {onLogout && (
                   <>
                     <DropdownMenuSeparator />
@@ -191,30 +190,41 @@ const Header: React.FC<HeaderProps> = ({
             </DropdownMenu>
           ) : (
             // Fallback to simple buttons if avatar is not available
-            <>
-              {showProfileButton && currentUserId && (
+            !isLoggingOut && (
+              <>
+                {showProfileButton && currentUserId && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleProfileButtonClick}
+                    className={buttonClasses}
+                  >
+                    <User className="h-4 w-4" />
+                    <span className="text-sm">Profile</span>
+                  </Button>
+                )}
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  onClick={handleProfileButtonClick}
-                  className={buttonClasses}
+                  onClick={handleDiscoverButtonClick}
+                  className={getNavClasses('/friends')}
                 >
-                  <User className="h-4 w-4" />
-                  <span className="text-sm">Profile</span>
+                  <Users className="h-4 w-4" />
+                  <span className="text-sm">Friends</span>
                 </Button>
-              )}
-              {showLogoutButton && onLogout && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={handleLogoutClick}
-                  className={`${buttonClasses} text-red-500 hover:text-red-400 hover:bg-red-500/10`}
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span className="text-sm">Logout</span>
-                </Button>
-              )}
-            </>
+                {showLogoutButton && onLogout && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleLogoutClick}
+                    className={`${buttonClasses} text-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10`}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span className="text-sm">Logout</span>
+                  </Button>
+                )}
+              </>
+            )
           )}
         </div>
       </div>

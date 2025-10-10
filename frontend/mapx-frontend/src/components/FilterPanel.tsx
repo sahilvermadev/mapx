@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FaStar, FaEye, FaEyeSlash, FaTimes } from 'react-icons/fa';
 import type { FilterOptions } from '../services/profile';
 import { COMMON_GOOGLE_PLACES_TYPES } from '../utils/placeTypes';
+import GroupFilter from './GroupFilter';
 import './FilterPanel.css';
 
 type TabType = 'recommendations' | 'likes' | 'saved';
@@ -10,12 +11,20 @@ interface FilterPanelProps {
   filters: FilterOptions;
   onFilterChange: (filters: FilterOptions) => void;
   activeTab: TabType;
+  currentUserId?: string;
+  selectedGroupIds?: number[];
+  onGroupToggle?: (groupId: number) => void;
+  onClearGroups?: () => void;
 }
 
 const FilterPanel: React.FC<FilterPanelProps> = ({
   filters,
   onFilterChange,
-  activeTab
+  activeTab,
+  currentUserId,
+  selectedGroupIds = [],
+  onGroupToggle,
+  onClearGroups
 }) => {
   const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
 
@@ -70,6 +79,33 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
           </div>
         )}
 
+        {/* Type Filter - Only for recommendations */}
+        {activeTab === 'recommendations' && (
+          <div className="filter-group">
+            <label className="filter-label">Type</label>
+            <div className="visibility-filter">
+              <button
+                className={`visibility-btn ${!filters.content_type || filters.content_type === 'all' ? 'active' : ''}`}
+                onClick={() => handleFilterChange('content_type', 'all')}
+              >
+                All
+              </button>
+              <button
+                className={`visibility-btn ${filters.content_type === 'place' ? 'active' : ''}`}
+                onClick={() => handleFilterChange('content_type', 'place')}
+              >
+                Places
+              </button>
+              <button
+                className={`visibility-btn ${filters.content_type === 'service' ? 'active' : ''}`}
+                onClick={() => handleFilterChange('content_type', 'service')}
+              >
+                Services
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Visibility Filter - Only for recommendations */}
         {activeTab === 'recommendations' && (
           <div className="filter-group">
@@ -100,6 +136,17 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Friend Groups Filter - Only for recommendations */}
+        {activeTab === 'recommendations' && currentUserId && onGroupToggle && (
+          <GroupFilter
+            currentUserId={currentUserId}
+            selectedGroupIds={selectedGroupIds}
+            onGroupToggle={onGroupToggle}
+            onClearAll={onClearGroups || (() => {})}
+            className="filter-group"
+          />
         )}
 
         {/* Category Filter */}

@@ -22,8 +22,7 @@ export interface RecommendationAnalysis {
       phone?: string;
       email?: string;
     };
-    rating?: number;
-    specialties?: string[];
+    specialities?: string[];
     pricing?: string;
     experience?: string;
     best_times?: string;
@@ -35,6 +34,7 @@ export interface RecommendationAnalysis {
     question: string;
     required: boolean;
     reasoning: string;
+    needsLocationPicker?: boolean; // New field to indicate if this needs Google Maps picker
   }>;
   confidence: number;
   reasoning: string;
@@ -73,8 +73,7 @@ Analyze this text and respond with a JSON object containing:
       "phone": "phone number if mentioned",
       "email": "email if mentioned"
     },
-    "rating": number if mentioned,
-    "specialties": ["array of specialties if mentioned"],
+    "specialities": ["array of specialities if mentioned"],
     "pricing": "pricing info if mentioned",
     "experience": "experience info if mentioned",
     "best_times": "best times if mentioned",
@@ -85,7 +84,8 @@ Analyze this text and respond with a JSON object containing:
       "field": "field_name",
       "question": "intelligent, contextual question to ask",
       "required": boolean,
-      "reasoning": "why this information is important"
+      "reasoning": "why this information is important",
+      "needsLocationPicker": boolean (true for location/address/place fields)
     }
   ],
   "confidence": 0.0-1.0,
@@ -101,6 +101,7 @@ Guidelines:
 - Consider what information would be most valuable to other users
 - Be specific and contextual in your questions
 - If the text is gibberish or irrelevant, set isValid to false and isGibberish to true
+- IMPORTANT: For location-related fields (location, address, place), set "needsLocationPicker": true to enable Google Maps location selection
 
 Respond with valid JSON only.`;
 
@@ -129,12 +130,20 @@ Respond with valid JSON only.`;
       const cleanedResponse = this.cleanJsonResponse(response);
       const parsed = JSON.parse(cleanedResponse);
 
+      // Normalize
+      const contentType: RecommendationAnalysis['contentType'] = parsed.contentType || 'unclear';
+      const extractedData = parsed.extractedData || {};
+      let missingFields: RecommendationAnalysis['missingFields'] = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
+
+      // Post-process: enforce category-specific required fields
+      missingFields = this.ensureCategoryRequirements(contentType, extractedData, missingFields);
+
       return {
         isValid: parsed.isValid || false,
         isGibberish: parsed.isGibberish || false,
-        contentType: parsed.contentType || 'unclear',
-        extractedData: parsed.extractedData || {},
-        missingFields: parsed.missingFields || [],
+        contentType,
+        extractedData,
+        missingFields,
         confidence: parsed.confidence || 0.5,
         reasoning: parsed.reasoning || 'Analysis completed'
       };
@@ -322,17 +331,73 @@ Respond with JSON:
       contentType = 'contact';
     }
 
+    const extractedData: any = { description: text };
+    const enforcedMissing = this.ensureCategoryRequirements(contentType, extractedData, []);
+
     return {
       isValid: !isGibberish,
       isGibberish,
       contentType,
-      extractedData: {
-        description: text
-      },
-      missingFields: [],
+      extractedData,
+      missingFields: enforcedMissing,
       confidence: 0.3,
       reasoning: 'Fallback analysis used due to AI error'
     };
+  }
+
+  /**
+   * Ensure per-category required fields are represented in missingFields with correct UI hints.
+   * - place: require location/address selection via Maps picker
+   * - service: require at least one identifier (phone or email)
+   * - future categories: add here; UI can render dynamically
+   */
+  private ensureCategoryRequirements(
+    contentType: RecommendationAnalysis['contentType'],
+    extractedData: Record<string, any>,
+    existingMissing: RecommendationAnalysis['missingFields']
+  ): RecommendationAnalysis['missingFields'] {
+    const missing: RecommendationAnalysis['missingFields'] = [...existingMissing];
+
+    const hasField = (key: string) => {
+      const v = extractedData?.[key];
+      return v !== undefined && v !== null && String(v).trim().length > 0;
+    };
+
+    // Helper to add missing item if not already present
+    const addMissing = (field: string, question: string, required = true, reasoning = 'Required for this recommendation', needsLocationPicker = false) => {
+      const already = missing.some(m => m.field === field);
+      if (!already) {
+        missing.push({ field, question, required, reasoning, ...(needsLocationPicker ? { needsLocationPicker: true } : {}) });
+      }
+    };
+
+    if (contentType === 'place') {
+      // Require location; support multiple possible keys from frontend mapping
+      const hasLocation = hasField('location') || hasField('location_address') || hasField('address') || hasField('location_name');
+      if (!hasLocation) {
+        addMissing(
+          'location',
+          'Where is this place? Please select it on the map.',
+          true,
+          'Place recommendations must include a concrete location to save in Places.',
+          true
+        );
+      }
+    } else if (contentType === 'service') {
+      // Require at least one of phone/email
+      const phone = extractedData?.contact_info?.phone || extractedData?.phone || extractedData?.service_phone;
+      const email = extractedData?.contact_info?.email || extractedData?.email || extractedData?.service_email;
+      if (!phone && !email) {
+        addMissing(
+          'contact_info',
+          'What is the best contact for this service (phone or email)?',
+          true,
+          'Services must have a phone or email to deduplicate and save in Services.'
+        );
+      }
+    }
+
+    return missing;
   }
 
   async formatRecommendationPost(data: any, originalText?: string): Promise<string> {
@@ -341,49 +406,43 @@ Respond with JSON:
       console.log('recommendationAI.formatRecommendationPost - data:', data);
       console.log('recommendationAI.formatRecommendationPost - originalText:', originalText);
       
-      const prompt = `You are a formatting assistant that produces concise, well-structured recommendation posts.
-
-STYLE & RULES:
-- Output MUST be short, to-the-point, and highly scannable.
-- Use a single short intro sentence (optional). Avoid verbosity or storytelling.
-- Use labeled lines for key details. Preferred labels (use only if data exists):
-  Name, Category, Location, Timings, Contact Information, Rating, Specialties, Best Times, Tips
-- Keep labels capitalized and followed by a colon, e.g. "Timings: 10am–6pm".
-- Use basic markdown for emphasis only where helpful: **bold** for labels and important values; _italics_ sparingly.
-- No bullet points unless there are 3+ items; otherwise comma‑separate.
-- Never invent data. Only include fields that exist in the provided input.
-- NEVER add explanatory notes, disclaimers, or comments about missing information.
-- NEVER mention what information is missing or unavailable.
-- Prefer the following order if available: Name, Category, Location, Timings, Contact Information, Rating, Specialties, Best Times, Tips, Summary.
-
-INPUT DATA:
-${JSON.stringify(data, null, 2)}
-
-ORIGINAL (optional):
-${originalText || ''}
-
-TASK:
-Return a compact post using the format below. Only include lines for fields that exist. Do NOT add any notes or explanations about missing data.
-
-Example format:
-**Name:** Cafe Bloom
-**Category:** Cafe
-**Location:** 123 Main St
-**Timings:** 10am–6pm
-**Contact Information:** (555) 123‑4567
-**Rating:** 4/5
-**Specialties:** sourdough, flat whites
-**Tips:** _Ask for the seasonal pastry._
-
-Now produce the final post:`;
-
+      const prompt = `You are a formatting assistant creating short, utilitarian recommendation posts in a third-person perspective.
+  
+  STYLE:
+  - Write 3–8 concise sentences in third-person, focusing on key details to inform and engage readers.
+  - Use a natural, straightforward tone that feels authentic and avoids overly personal or fake enthusiasm.
+  - Include only the following fields if explicitly provided in data: name/category, address, pricing, contact (phone/email), best time, tips, specialities.
+  - Order: name/category; address; pricing; contact; best time; tips; specialities.
+  - Completely skip any field not provided in the data; do not mention missing fields or say they are unavailable.
+  - Never invent or assume details; use only the provided data.
+  - Ensure readability with line breaks between sentences.
+  - Craft the post to pique interest with practical details, avoiding fluff or emojis.
+  - If originalText is provided, use it as inspiration for tone but prioritize data accuracy.
+  
+  DATA (includes additional_details from Q&A):
+  ${JSON.stringify(data, null, 2)}
+  
+  ORIGINAL (optional):
+  ${originalText || ''}
+  
+  TASK:
+  Produce a recommendation post in 3–8 lines, each a simple sentence in third-person.
+  Example:
+  Cafe Bloom offers a cozy cafe experience.
+  It's located at 123 Main St, Springfield.
+  Pricing is mid-range.
+  Mornings are the best time to visit.
+  Try the seasonal pastry for a treat.
+  
+  Return only the final text:`;
+  
       const response = await groq.chat.completions.create({
         messages: [{ role: 'user', content: prompt }],
         model: 'llama-3.3-70b-versatile',
-        temperature: 0.7,
-        max_tokens: 500
+        temperature: 0.6, // Consistent, controlled output
+        max_tokens: 300 // Enforces brevity
       });
-
+  
       const formattedText = response.choices[0]?.message?.content?.trim();
       
       console.log('recommendationAI.formatRecommendationPost - LLM response:', formattedText);
@@ -393,10 +452,40 @@ Now produce the final post:`;
       }
 
       return formattedText;
-
+  
     } catch (error) {
       console.error('Error formatting recommendation post:', error);
-      throw error;
+      // Fallback: construct a simple formatted post locally to keep UX flowing
+      const lines: string[] = [];
+      const nameOrCategory = (data?.name || data?.category || data?.type || data?.contentType || 'This recommendation').toString();
+      lines.push(`${nameOrCategory} is recommended.`);
+      if (data?.address || data?.location) {
+        lines.push(`Located at ${data.address || data.location}.`);
+      }
+      if (data?.pricing) {
+        lines.push(`Pricing: ${data.pricing}.`);
+      }
+      const contactParts: string[] = [];
+      const contact = data?.contact || data?.contact_info;
+      if (contact?.phone) contactParts.push(`Phone: ${contact.phone}`);
+      if (contact?.email) contactParts.push(`Email: ${contact.email}`);
+      if (contactParts.length) {
+        lines.push(contactParts.join(' | '));
+      }
+      if (data?.best_times) {
+        lines.push(`Best time: ${data.best_times}.`);
+      }
+      if (data?.tips) {
+        lines.push(`${data.tips}.`);
+      }
+      if (Array.isArray(data?.specialities) && data.specialities.length) {
+        lines.push(`specialities: ${data.specialities.join(', ')}.`);
+      }
+      if (lines.length === 1 && originalText) {
+        // Ensure minimum content
+        lines.push(originalText);
+      }
+      return lines.join('\n');
     }
   }
 }

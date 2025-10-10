@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateEmbedding = generateEmbedding;
 exports.generateAnnotationEmbedding = generateAnnotationEmbedding;
 exports.generateSearchEmbedding = generateSearchEmbedding;
+exports.generateRecommendationEmbedding = generateRecommendationEmbedding;
 exports.generatePlaceEmbedding = generatePlaceEmbedding;
 exports.generateBatchEmbeddings = generateBatchEmbeddings;
 exports.calculateCosineSimilarity = calculateCosineSimilarity;
@@ -13,6 +14,7 @@ exports.validateEmbedding = validateEmbedding;
 const openai_1 = __importDefault(require("openai"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+// NOTE: Avoid importing deprecated annotation types. Accept a flexible shape instead.
 // Load .env file from the root directory (two levels up from backend/src)
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../../.env') });
 // Initialize OpenAI client
@@ -96,6 +98,69 @@ async function generateAnnotationEmbedding(annotationData) {
  */
 async function generateSearchEmbedding(searchText) {
     return generateEmbedding(searchText);
+}
+/**
+ * Generate embedding for recommendations, capturing rich context like title, description,
+ * content type, labels, rating, place/service info, and arbitrary content_data/metadata.
+ */
+async function generateRecommendationEmbedding(recommendationData) {
+    const textParts = [];
+    if (recommendationData.content_type) {
+        textParts.push(`Type: ${recommendationData.content_type}`);
+    }
+    if (recommendationData.title) {
+        textParts.push(`Title: ${recommendationData.title}`);
+    }
+    if (recommendationData.description) {
+        textParts.push(`Description: ${recommendationData.description}`);
+    }
+    if (recommendationData.labels && recommendationData.labels.length > 0) {
+        textParts.push(`Tags: ${recommendationData.labels.join(', ')}`);
+    }
+    if (typeof recommendationData.rating === 'number') {
+        textParts.push(`Rating: ${recommendationData.rating}/5`);
+    }
+    // Place context
+    if (recommendationData.place_name) {
+        textParts.push(`Place: ${recommendationData.place_name}`);
+    }
+    if (recommendationData.place_address) {
+        textParts.push(`Address: ${recommendationData.place_address}`);
+    }
+    // Service context
+    if (recommendationData.service_name) {
+        textParts.push(`Service: ${recommendationData.service_name}`);
+    }
+    if (recommendationData.service_type) {
+        textParts.push(`Service Type: ${recommendationData.service_type}`);
+    }
+    if (recommendationData.business_name) {
+        textParts.push(`Business: ${recommendationData.business_name}`);
+    }
+    if (recommendationData.address) {
+        textParts.push(`Service Address: ${recommendationData.address}`);
+    }
+    if (recommendationData.user_name) {
+        textParts.push(`By: ${recommendationData.user_name}`);
+    }
+    // Flatten JSON structures in a stable way
+    const flattenRecord = (obj, label) => {
+        if (!obj)
+            return;
+        const entries = Object.entries(obj)
+            .filter(([_, v]) => v !== undefined && v !== null && `${v}`.trim().length > 0)
+            .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+        if (entries.length > 0) {
+            textParts.push(`${label || 'Data'}: ${entries.join(', ')}`);
+        }
+    };
+    flattenRecord(recommendationData.content_data, 'Details');
+    flattenRecord(recommendationData.metadata, 'Metadata');
+    const combinedText = textParts.join('. ');
+    if (!combinedText.trim()) {
+        throw new Error('No meaningful text content found in recommendation data');
+    }
+    return generateEmbedding(combinedText);
 }
 /**
  * Generate embedding from place data for semantic search
