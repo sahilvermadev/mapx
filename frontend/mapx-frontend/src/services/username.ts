@@ -62,59 +62,39 @@ export const usernameService = {
     }
   },
 
-  // Get current user's username status
+  // Get current user's username status with fast fallback
   async getStatus(): Promise<UsernameStatus> {
     try {
       const token = apiClient.getToken();
-      // Basic client-side diagnostics
-      try {
-        if (token) {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          const exp = payload?.exp ? new Date(payload.exp * 1000).toISOString() : 'none';
-          console.log('Username.getStatus token present:', {
-            preview: `${token.substring(0, 12)}...`,
-            hasExp: Boolean(payload?.exp),
-            expIso: exp,
-          });
-        } else {
-          console.warn('Username.getStatus: no auth token present');
-        }
-      } catch (e) {
-        console.warn('Username.getStatus: failed to decode token', e);
-      }
-
-      const response = await fetch('http://localhost:5000/api/username/status', {
+      
+      // Use Promise.race to timeout quickly if backend is slow
+      const timeoutPromise = new Promise<UsernameStatus>((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 2000) // 2 second timeout
+      );
+      
+      const fetchPromise = fetch('http://localhost:5000/api/username/status', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
+      }).then(async (response) => {
+        if (response.status === 401) {
+          try { window.dispatchEvent(new CustomEvent('api:unauthorized')); } catch {}
+        }
+
+        if (!response.ok) {
+          throw new Error('Failed to get username status');
+        }
+
+        return await response.json();
       });
 
-      if (response.status === 401) {
-        try { window.dispatchEvent(new CustomEvent('api:unauthorized')); } catch {}
-      }
-
-      if (!response.ok) {
-        let errorDetail: any = undefined;
-        try {
-          errorDetail = await response.json();
-        } catch {
-          try { errorDetail = await response.text(); } catch {}
-        }
-        console.error('Username.getStatus non-OK:', {
-          status: response.status,
-          statusText: response.statusText,
-          body: errorDetail,
-        });
-        throw new Error('Failed to get username status');
-      }
-
-      return await response.json();
+      return await Promise.race([fetchPromise, timeoutPromise]);
     } catch (error) {
-      console.error('Get username status error:', error);
-      // Return a default status if backend is not available
+      console.warn('Username status check failed, using fallback:', error);
+      // Fast fallback - assume user has username
       return {
-        hasUsername: true, // Assume user has username if backend is down
-        username: 'unknown',
+        hasUsername: true,
+        username: 'user',
         usernameSetAt: new Date().toISOString()
       };
     }

@@ -72,7 +72,8 @@ router.get('/dev-login', async (req, res) => {
     );
 
     // Redirect back to frontend with token param
-    res.redirect(`http://localhost:5173/auth/success?token=${token}`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/?token=${token}`);
   } catch (error) {
     console.error('Dev login error:', error);
     res.status(500).json({ message: 'Development login failed' });
@@ -107,7 +108,8 @@ router.get(
       { expiresIn: '1h' }
     );
 
-    res.redirect(`http://localhost:5173/auth/success?token=${token}`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/?token=${token}`);
   }
 );
 
@@ -129,5 +131,3 @@ router.get('/failure', (_req, res) => {
 });
 
 export default router;
-
-

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auth Test</title>
+</head>
+<body>
+    <h1>Authentication Test</h1>
+    <button onclick="testAuth()">Test Dev Login</button>
+    <div id="result"></div>
+    
+    <script>
+        async function testAuth() {
+            try {
+                const response = await fetch('http://localhost:5000/auth/dev-login', {
+                    method: 'GET',
+                    redirect: 'manual'
+                });
+                
+                console.log('Response:', response);
+                console.log('Status:', response.status);
+                console.log('Headers:', response.headers);
+                
+                if (response.status === 302) {
+                    const location = response.headers.get('location');
+                    console.log('Redirect to:', location);
+                    document.getElementById('result').innerHTML = `
+                        <p>✅ Redirect successful!</p>
+                        <p>Location: ${location}</p>
+                        <p>Token in URL: ${location.includes('token=') ? 'Yes' : 'No'}</p>
+                    `;
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <p>❌ Unexpected response: ${response.status}</p>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = `
+                    <p>❌ Error: ${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
+
+

@@ -1,34 +1,33 @@
 import React from 'react';
-import './LoadingSpinner.css';
 
 interface LoadingSpinnerProps {
-  size?: 'small' | 'medium' | 'large';
-  color?: 'primary' | 'white' | 'gray';
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+  text?: string;
 }
 
 const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ 
-  size = 'medium', 
-  color = 'primary' 
+  size = 'md', 
+  className = '', 
+  text 
 }) => {
   const sizeClasses = {
-    small: 'spinner--small',
-    medium: 'spinner--medium',
-    large: 'spinner--large'
-  };
-
-  const colorClasses = {
-    primary: 'spinner--primary',
-    white: 'spinner--white',
-    gray: 'spinner--gray'
+    sm: 'h-4 w-4',
+    md: 'h-8 w-8',
+    lg: 'h-12 w-12'
   };
 
   return (
-    <div className={`spinner ${sizeClasses[size]} ${colorClasses[color]}`}>
-      <div className="spinner__ring"></div>
-      <div className="spinner__ring"></div>
-      <div className="spinner__ring"></div>
+    <div className={`flex flex-col items-center gap-3 ${className}`}>
+      <div className="relative">
+        <div className={`animate-spin rounded-full border-2 border-gray-200 border-t-primary ${sizeClasses[size]}`}></div>
+        <div className={`absolute inset-0 rounded-full border-2 border-transparent border-t-primary/20 animate-pulse ${sizeClasses[size]}`}></div>
+      </div>
+      {text && (
+        <p className="text-sm text-gray-600 animate-pulse">{text}</p>
+      )}
     </div>
   );
 };
 
-export default LoadingSpinner; 
+export default LoadingSpinner;

@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Sparkles, Users } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,20 +9,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 import FeedPost from '@/components/FeedPost';
 import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
 import SimpleGroupFilter from '@/components/SimpleGroupFilter';
-import { feedApi } from '@/services/feed';
-import { socialApi, type User, type FeedPost as FeedPostType } from '@/services/social';
 import FeedAISearch from '@/components/FeedAISearch';
-import type { SearchResponse } from '@/services/recommendationsApi';
-import { useAuth } from '@/contexts/AuthContext';
 import AIResponseBanner from '@/components/SocialFeed/AIResponseBanner';
 import FeedGroups from '@/components/SocialFeed/FeedGroups';
+
+import { useAuth } from '@/contexts/AuthContext';
 import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
+import { useFeedQuery } from '@/hooks/useFeedQuery';
+import { useSuggestedUsersQuery } from '@/hooks/useSuggestedUsersQuery';
+import { useFollowMutation } from '@/hooks/useFollowMutation';
 
-
-// Constants
-const FEED_LIMIT = 20;
-const FEED_OFFSET = 0;
-const SUGGESTED_USERS_LIMIT = 5;
+import { type User, type FeedPost as FeedPostType } from '@/services/social';
+import type { SearchResponse } from '@/services/recommendationsApi';
 
 // Helper functions
 const getInitials = (name: string): string => 
@@ -38,17 +37,15 @@ const getProxiedImageUrl = (url?: string): string => {
     : url;
 };
 
-// Component
 const SocialFeedPage: React.FC = () => {
   const navigate = useNavigate();
   const { user: currentUser, isAuthenticated, isChecking } = useAuth();
   
-  // State
-  const [posts, setPosts] = useState<FeedPostType[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [suggestedUsers, setSuggestedUsers] = useState<User[]>([]);
-  // Search state handled by hook
+  // Local state
+  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  
+  // Search functionality
   const {
     searchScores,
     searchRecommendationScores,
@@ -59,98 +56,82 @@ const SocialFeedPage: React.FC = () => {
     clearSearch,
     loadFromResponse,
   } = useFeedSearchResults();
-  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   
+  // Data fetching with React Query
+  const {
+    data: feedData,
+    isLoading: loading,
+    error: feedError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useFeedQuery(currentUser?.id || '', selectedGroupIds);
+  
+  const {
+    data: suggestedUsers = [],
+    isLoading: suggestedUsersLoading,
+    error: suggestedUsersError,
+  } = useSuggestedUsersQuery(currentUser?.id || '');
+  
+  const followMutation = useFollowMutation(currentUser?.id || '');
+  
+  // Derived state
+  const error = feedError?.message || suggestedUsersError?.message || null;
+  const posts = feedData?.pages.flatMap(page => (page as { data: FeedPostType[] }).data) || [];
+  const typedPosts = posts as FeedPostType[];
+  const typedSuggestedUsers = suggestedUsers as User[];
 
   // Effects
   useEffect(() => {
-    // Only redirect if auth check is complete and user is not authenticated
     if (!isChecking && !isAuthenticated) {
       navigate('/');
-      return;
     }
   }, [isChecking, isAuthenticated, navigate]);
 
   useEffect(() => {
-    if (!currentUser) return;
-    loadFeed();
-    loadSuggestedUsers();
-  }, [currentUser, selectedGroupIds]);
+    if (!loading && !suggestedUsersLoading && typedPosts.length > 0) {
+      console.log('🎉 [REACT-QUERY] SocialFeedPage fully loaded!');
+      console.log(`📊 [REACT-QUERY] Stats: ${typedPosts.length} posts, ${typedSuggestedUsers.length} suggested users`);
+    }
+  }, [loading, suggestedUsersLoading, typedPosts.length, typedSuggestedUsers.length]);
+
+  // Infinite scroll effect
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          console.log('🔄 [INFINITE-SCROLL] Loading more posts...');
+          fetchNextPage();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Event handlers
-  const loadFeed = async (showLoading = true) => {
-    if (showLoading) {
-      setLoading(true);
-    }
-    setError(null);
-    
-    try {
-      let response;
-      if (selectedGroupIds.length > 0) {
-        response = await feedApi.getFeed(currentUser.id, FEED_LIMIT, FEED_OFFSET, selectedGroupIds);
-      } else {
-        response = await feedApi.getFeed(currentUser.id, FEED_LIMIT, FEED_OFFSET);
-      }
-      
-      if (response.success && response.data) {
-        setPosts(response.data);
-      } else {
-        setError(response.error || 'Failed to load feed');
-        // Only clear posts if this is the initial load
-        if (showLoading) {
-          setPosts([]);
-        }
-      }
-    } catch (e) {
-      console.error('SocialFeedPage - Feed loading error:', e);
-      setError('Failed to load feed');
-      // Only clear posts if this is the initial load
-      if (showLoading) {
-        setPosts([]);
-      }
-    } finally {
-      if (showLoading) {
-        setLoading(false);
-      }
-    }
-  };
+  const handleFollow = useCallback((userId: string) => {
+    if (!currentUser) return;
+    followMutation.mutate(userId);
+  }, [currentUser, followMutation]);
 
-  const loadSuggestedUsers = async () => {
-    try {
-      const res = await socialApi.getSuggestedUsers(currentUser.id, SUGGESTED_USERS_LIMIT);
-      if (res.success && res.data) {
-        setSuggestedUsers(res.data);
-      }
-    } catch (e) {
-      console.error('Failed to load suggested users:', e);
-    }
-  };
-
-  const handleFollow = async (userId: string) => {
-    try {
-      await socialApi.followUser(userId, currentUser.id);
-      loadSuggestedUsers();
-      loadFeed(false); // Refresh without showing loading state
-    } catch (e) {
-      console.error('Failed to follow user:', e);
-    }
-  };
-
-
-  const handleGroupToggle = (groupId: number) => {
+  const handleGroupToggle = useCallback((groupId: number) => {
     setSelectedGroupIds(prev => 
       prev.includes(groupId) 
         ? prev.filter(id => id !== groupId)
         : [...prev, groupId]
     );
-  };
+  }, []);
 
-
-  const handleNavigateToDiscover = () => {
+  const handleNavigateToDiscover = useCallback(() => {
     navigate('/friends');
-  };
+  }, [navigate]);
 
-  // Receive semantic search results and build maps for relevance sorting
   const handleSearchResults = useCallback((res: SearchResponse | null) => {
     if (!res || !res.results) {
       clearSearch();
@@ -159,26 +140,21 @@ const SocialFeedPage: React.FC = () => {
     loadFromResponse(res);
   }, [clearSearch, loadFromResponse]);
 
-  // Render components
-
-  // Map navigation no longer used by inline sorting
-
-
-  // If we have search scores, sort posts by similarity desc.
-  // Priority: per-recommendation similarity, then place-based similarity, else original order
-  const getScore = (post: FeedPostType): number => {
+  // Computed values
+  const getScore = useCallback((post: FeedPostType): number => {
     const recScore = searchRecommendationScores?.[post.recommendation_id];
     if (typeof recScore === 'number') return recScore;
     const placeScore = post.place_id ? (searchScores?.[post.place_id] ?? 0) : 0;
     return placeScore;
-  };
+  }, [searchScores, searchRecommendationScores]);
 
   const orderedPosts = useMemo(() => (
     (searchScores || searchRecommendationScores)
-      ? [...posts].sort((a, b) => getScore(b) - getScore(a))
-      : posts
-  ), [posts, searchScores, searchRecommendationScores]);
+      ? [...typedPosts].sort((a, b) => getScore(b) - getScore(a))
+      : typedPosts
+  ), [typedPosts, searchScores, searchRecommendationScores, getScore]);
 
+  // Render functions
   const renderFeedContent = () => {
     if (loading) {
       return (
@@ -194,14 +170,14 @@ const SocialFeedPage: React.FC = () => {
       return (
         <div className="flex flex-col items-center justify-center py-12">
           <p className="text-destructive mb-4">{error}</p>
-          <Button onClick={() => loadFeed(true)} variant="outline" size="sm">
+          <Button onClick={() => window.location.reload()} variant="outline" size="sm">
             Try Again
           </Button>
         </div>
       );
     }
 
-    if (posts.length === 0) {
+    if (typedPosts.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-12">
           <Users className="h-12 w-12 mb-4 text-muted-foreground" />
@@ -217,7 +193,6 @@ const SocialFeedPage: React.FC = () => {
       );
     }
 
-    // Group consecutive results for the same place or service while a search is active
     const shouldGroup = Boolean(searchScores || searchRecommendationScores);
     if (!shouldGroup) {
       return (
@@ -226,21 +201,52 @@ const SocialFeedPage: React.FC = () => {
             <FeedPost
               key={post.recommendation_id}
               post={post}
-              currentUserId={currentUser.id}
-              onPostUpdate={loadFeed}
+              currentUserId={currentUser?.id || ''}
+              onPostUpdate={() => window.location.reload()}
             />
           ))}
+          
+          {/* Load more trigger */}
+          <div ref={loadMoreRef} className="flex justify-center py-4">
+            {isFetchingNextPage && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-primary"></div>
+                <span className="text-sm">Loading more posts...</span>
+              </div>
+            )}
+            {!hasNextPage && typedPosts.length > 0 && (
+              <div className="text-center text-muted-foreground text-sm py-4">
+                You've reached the end of your feed
+              </div>
+            )}
+          </div>
         </div>
       );
     }
 
-    // Defer to reusable component for grouped rendering
     return (
-      <FeedGroups
-        posts={orderedPosts}
-        recIdToGroupKey={recIdToGroupKey}
-        groupKeyToMeta={groupKeyToMeta}
-      />
+      <div>
+        <FeedGroups
+          posts={orderedPosts as FeedPostType[]}
+          recIdToGroupKey={recIdToGroupKey}
+          groupKeyToMeta={groupKeyToMeta}
+        />
+        
+        {/* Load more trigger for grouped posts */}
+        <div ref={loadMoreRef} className="flex justify-center py-4">
+          {isFetchingNextPage && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-primary"></div>
+              <span className="text-sm">Loading more posts...</span>
+            </div>
+          )}
+          {!hasNextPage && typedPosts.length > 0 && (
+            <div className="text-center text-muted-foreground text-sm py-4">
+              You've reached the end of your feed
+            </div>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -248,9 +254,7 @@ const SocialFeedPage: React.FC = () => {
     <div key={user.id} className="flex items-center gap-3">
       <Avatar className="h-10 w-10">
         <AvatarImage src={getProxiedImageUrl(user.profile_picture_url)} alt={user.display_name} />
-        <AvatarFallback>
-          {getInitials(user.display_name)}
-        </AvatarFallback>
+        <AvatarFallback>{getInitials(user.display_name)}</AvatarFallback>
       </Avatar>
       
       <div className="flex-1 min-w-0">
@@ -278,14 +282,12 @@ const SocialFeedPage: React.FC = () => {
           <Sparkles className="h-4 w-4" />
           Suggested Users
         </CardTitle>
-        <CardDescription>
-          People you might want to follow
-        </CardDescription>
+        <CardDescription>People you might want to follow</CardDescription>
       </CardHeader>
       
       <CardContent className="space-y-4">
-        {suggestedUsers.length > 0 ? (
-          suggestedUsers.map(renderSuggestedUser)
+        {typedSuggestedUsers.length > 0 ? (
+          typedSuggestedUsers.map(renderSuggestedUser)
         ) : (
           <p className="text-sm text-muted-foreground text-center py-4">
             No suggestions available
@@ -306,64 +308,54 @@ const SocialFeedPage: React.FC = () => {
     </Card>
   );
 
-  // Show loading while authentication is being checked
-  if (isChecking) {
-    return (
-      <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
-        <div className="container mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
-            <div className="lg:col-span-3">
-              {/* Search Section Skeleton */}
-              <div className="mb-6">
-                <Skeleton className="h-12 w-full rounded-lg" />
-              </div>
-
-              {/* Group Filter Skeleton */}
-              <div className="mb-8">
-                <Skeleton className="h-16 w-full rounded-lg" />
-              </div>
-              
-              {/* Feed Content Skeleton */}
-              <div className="space-y-6">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
-                    <div className="flex items-start space-x-4">
-                      <Skeleton className="h-12 w-12 rounded-full" />
-                      <div className="flex-1 space-y-3">
-                        <Skeleton className="h-4 w-[200px]" />
-                        <Skeleton className="h-4 w-[150px]" />
-                        <Skeleton className="h-20 w-full" />
-                        <div className="flex space-x-4">
-                          <Skeleton className="h-8 w-16" />
-                          <Skeleton className="h-8 w-16" />
-                          <Skeleton className="h-8 w-16" />
-                        </div>
+  const renderPageSkeleton = () => (
+    <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
+          <div className="lg:col-span-3">
+            <div className="mb-6">
+              <Skeleton className="h-12 w-full rounded-lg" />
+            </div>
+            <div className="mb-8">
+              <Skeleton className="h-16 w-full rounded-lg" />
+            </div>
+            <div className="space-y-6">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
+                  <div className="flex items-start space-x-4">
+                    <Skeleton className="h-12 w-12 rounded-full" />
+                    <div className="flex-1 space-y-3">
+                      <Skeleton className="h-4 w-[200px]" />
+                      <Skeleton className="h-4 w-[150px]" />
+                      <Skeleton className="h-20 w-full" />
+                      <div className="flex space-x-4">
+                        <Skeleton className="h-8 w-16" />
+                        <Skeleton className="h-8 w-16" />
+                        <Skeleton className="h-8 w-16" />
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-
-            <div className="lg:col-span-1">
-              <div className="sticky top-24 space-y-4">
-                {/* Suggested Users Card Skeleton */}
-                <div className="bg-white rounded-lg p-6 shadow-sm border">
-                  <div className="space-y-4">
-                    <Skeleton className="h-6 w-[150px]" />
-                    <Skeleton className="h-4 w-[200px]" />
-                    <div className="space-y-3">
-                      {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="flex items-center space-x-3">
-                          <Skeleton className="h-10 w-10 rounded-full" />
-                          <div className="flex-1 space-y-2">
-                            <Skeleton className="h-4 w-[120px]" />
-                            <Skeleton className="h-3 w-[80px]" />
-                          </div>
-                          <Skeleton className="h-8 w-16" />
+          </div>
+          <div className="lg:col-span-1">
+            <div className="sticky top-24 space-y-4">
+              <div className="bg-white rounded-lg p-6 shadow-sm border">
+                <div className="space-y-4">
+                  <Skeleton className="h-6 w-[150px]" />
+                  <Skeleton className="h-4 w-[200px]" />
+                  <div className="space-y-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="flex items-center space-x-3">
+                        <Skeleton className="h-10 w-10 rounded-full" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-[120px]" />
+                          <Skeleton className="h-3 w-[80px]" />
                         </div>
-                      ))}
-                    </div>
+                        <Skeleton className="h-8 w-16" />
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -371,89 +363,24 @@ const SocialFeedPage: React.FC = () => {
           </div>
         </div>
       </div>
-    );
+    </div>
+  );
+
+  // Early returns for loading states
+  if (isChecking || !currentUser) {
+    return renderPageSkeleton();
   }
 
-  // Early return for loading state
-  if (!currentUser) {
-    return (
-      <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
-        <div className="container mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
-            <div className="lg:col-span-3">
-              {/* Search Section Skeleton */}
-              <div className="mb-6">
-                <Skeleton className="h-12 w-full rounded-lg" />
-              </div>
 
-              {/* Group Filter Skeleton */}
-              <div className="mb-8">
-                <Skeleton className="h-16 w-full rounded-lg" />
-              </div>
-              
-              {/* Feed Content Skeleton */}
-              <div className="space-y-6">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
-                    <div className="flex items-start space-x-4">
-                      <Skeleton className="h-12 w-12 rounded-full" />
-                      <div className="flex-1 space-y-3">
-                        <Skeleton className="h-4 w-[200px]" />
-                        <Skeleton className="h-4 w-[150px]" />
-                        <Skeleton className="h-20 w-full" />
-                        <div className="flex space-x-4">
-                          <Skeleton className="h-8 w-16" />
-                          <Skeleton className="h-8 w-16" />
-                          <Skeleton className="h-8 w-16" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="lg:col-span-1">
-              <div className="sticky top-24 space-y-4">
-                {/* Suggested Users Card Skeleton */}
-                <div className="bg-white rounded-lg p-6 shadow-sm border">
-                  <div className="space-y-4">
-                    <Skeleton className="h-6 w-[150px]" />
-                    <Skeleton className="h-4 w-[200px]" />
-                    <div className="space-y-3">
-                      {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="flex items-center space-x-3">
-                          <Skeleton className="h-10 w-10 rounded-full" />
-                          <div className="flex-1 space-y-2">
-                            <Skeleton className="h-4 w-[120px]" />
-                            <Skeleton className="h-3 w-[80px]" />
-                          </div>
-                          <Skeleton className="h-8 w-16" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Main render
   return (
     <div className="min-h-[calc(100vh-64px)] bg-background overflow-x-hidden">
       <div className="container mx-auto px-4 py-8">
-        <div className={`grid grid-cols-1 gap-8 ${suggestedUsers.length > 0 ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
-          <div className={suggestedUsers.length > 0 ? 'lg:col-span-3' : 'lg:col-span-1'}>
-            {/* Search Section */}
+        <div className={`grid grid-cols-1 gap-8 ${(suggestedUsersLoading || typedSuggestedUsers.length > 0) ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
+          <div className={(suggestedUsersLoading || typedSuggestedUsers.length > 0) ? 'lg:col-span-3' : 'lg:col-span-1'}>
             <div className="mb-6">
               <FeedAISearch isAuthenticated={!!currentUser} onResults={handleSearchResults} />
             </div>
 
-            {/* Simple Group Filter */}
             <div className="mb-8">
               <SimpleGroupFilter
                 currentUserId={currentUser.id}
@@ -462,23 +389,52 @@ const SocialFeedPage: React.FC = () => {
               />
             </div>
             
-            {/* AI Response Section */}
             {(searchResponse || streamingText) && (
               <div className="mb-12">
                 <AIResponseBanner
                   text={streamingText}
-                  totals={searchResponse ? { places: searchResponse.total_places, recs: searchResponse.total_recommendations } : undefined}
+                  totals={searchResponse ? { 
+                    places: searchResponse.total_places, 
+                    recs: searchResponse.total_recommendations 
+                  } : undefined}
                 />
               </div>
             )}
             
-            {/* Feed Content Section */}
             <div className="space-y-8">
               {renderFeedContent()}
             </div>
           </div>
 
-          {suggestedUsers.length > 0 && (
+          {suggestedUsersLoading && (
+            <div className="lg:col-span-1">
+              <div className="sticky top-24 space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      Suggested Users
+                    </CardTitle>
+                    <CardDescription>Loading suggestions...</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="flex items-center space-x-3">
+                        <Skeleton className="h-10 w-10 rounded-full" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-[120px]" />
+                          <Skeleton className="h-3 w-[80px]" />
+                        </div>
+                        <Skeleton className="h-8 w-16" />
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+          
+          {!suggestedUsersLoading && typedSuggestedUsers.length > 0 && (
             <div className="lg:col-span-1">
               <div className="sticky top-24 space-y-4">
                 {renderSuggestedUsersCard()}
@@ -487,7 +443,6 @@ const SocialFeedPage: React.FC = () => {
           )}
         </div>
       </div>
-      {/* Inline results are rendered by FeedAISearch; no modal */}
     </div>
   );
 };

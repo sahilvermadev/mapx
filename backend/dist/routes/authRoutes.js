@@ -24,8 +24,7 @@ router.get('/profile-picture', async (req, res) => {
             responseType: 'arraybuffer',
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            },
-            timeout: 5000, // fail fast on bad DNS or network
+            }
         });
         // Set appropriate headers
         res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
@@ -36,30 +35,24 @@ router.get('/profile-picture', async (req, res) => {
     }
     catch (error) {
         console.error('Error proxying profile picture:', error);
-        // On DNS/network errors, send a graceful fallback to let the client fetch directly
-        const isDnsOrNetwork = error?.code === 'EAI_AGAIN' ||
-            error?.code === 'ENOTFOUND' ||
-            error?.code === 'ECONNABORTED';
-        if (isDnsOrNetwork && typeof url === 'string') {
-            // Let client try direct URL (may work outside container network)
-            return res.redirect(url);
-        }
-        res.status(502).json({ error: 'Failed to load profile picture' });
+        res.status(500).json({ error: 'Failed to load profile picture' });
     }
 });
 // Development-only login endpoint (bypasses OAuth)
 router.get('/dev-login', async (req, res) => {
     if (process.env.NODE_ENV === 'production') {
-        return res.status(403).json({ message: 'Development login not available in production' });
+        return res
+            .status(403)
+            .json({ message: 'Development login not available in production' });
     }
     try {
-        // Create a mock user for development
         const mockUser = {
             id: 'dev-user-123',
             google_id: 'dev-google-123',
             email: 'dev@example.com',
             display_name: 'Development User',
             profile_picture_url: null,
+            username: null,
         };
         const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
         const token = jsonwebtoken_1.default.sign({
@@ -67,17 +60,29 @@ router.get('/dev-login', async (req, res) => {
             email: mockUser.email,
             displayName: mockUser.display_name,
             profilePictureUrl: mockUser.profile_picture_url,
-            username: null, // Will be set when user chooses username
+            username: mockUser.username,
         }, jwtSecret, { expiresIn: '24h' });
-        res.redirect(`http://localhost:5173/auth/success?token=${token}`);
+        // Set secure HTTP-only cookie and redirect
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
+        res.cookie('authToken', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 24 * 60 * 60 * 1000, // 24 hours
+            path: '/'
+        });
+        res.redirect(`${frontendUrl}/`);
     }
     catch (error) {
         console.error('Dev login error:', error);
         res.status(500).json({ message: 'Development login failed' });
     }
 });
+// GET /auth/google
 router.get('/google', passport_1.default.authenticate('google', { scope: ['profile', 'email'] }));
+// GET /auth/google/callback
 router.get('/google/callback', passport_1.default.authenticate('google', { failureRedirect: '/auth/failure' }), (req, res) => {
+    // user was set by passport strategy
     const user = req.user;
     if (!user?.id)
         return res.redirect('/auth/failure');
@@ -89,24 +94,63 @@ router.get('/google/callback', passport_1.default.authenticate('google', { failu
         profilePictureUrl: user.profile_picture_url,
         username: user.username,
     }, jwtSecret, { expiresIn: '1h' });
-    res.redirect(`http://localhost:5173/auth/success?token=${token}`);
+    // Set secure HTTP-only cookie and redirect
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
+    res.cookie('authToken', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 60 * 60 * 1000, // 1 hour
+        path: '/'
+    });
+    res.redirect(`${frontendUrl}/`);
 });
-router.get('/success', (req, res) => {
-    if (req.user)
-        return res.status(200).json({ message: 'Login successful!', user: req.user });
-    res.status(401).json({ message: 'Not authenticated.' });
-});
-router.get('/failure', (_req, res) => res.status(401).json({ message: 'Authentication failed!' }));
+// GET /auth/logout
 router.get('/logout', (req, res, next) => {
+    // Clear the auth token cookie
+    res.clearCookie('authToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/'
+    });
+    // Passport 0.6 requires callback
     req.logout((err) => {
         if (err)
             return next(err);
-        req.session.destroy((destroyErr) => {
-            if (destroyErr)
-                return res.status(500).json({ message: 'Logout failed.' });
+        req.session?.destroy(() => {
             res.clearCookie('connect.sid');
-            res.status(200).json({ message: 'Logged out successfully.' });
+            res.status(200).json({ message: 'Logged out' });
         });
     });
+});
+// GET /auth/me - Get current user from cookie
+router.get('/me', (req, res) => {
+    const token = req.cookies.authToken;
+    if (!token) {
+        return res.status(401).json({ message: 'No authentication token' });
+    }
+    try {
+        const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
+        const decoded = jsonwebtoken_1.default.verify(token, jwtSecret);
+        res.json({
+            success: true,
+            user: {
+                id: decoded.id,
+                email: decoded.email,
+                displayName: decoded.displayName,
+                profilePictureUrl: decoded.profilePictureUrl,
+                username: decoded.username
+            }
+        });
+    }
+    catch (error) {
+        res.clearCookie('authToken');
+        res.status(401).json({ message: 'Invalid or expired token' });
+    }
+});
+// GET /auth/failure
+router.get('/failure', (_req, res) => {
+    res.status(401).json({ message: 'Authentication failed' });
 });
 exports.default = router;

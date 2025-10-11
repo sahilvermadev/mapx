@@ -143,6 +143,22 @@ async function generateRecommendationEmbedding(recommendationData) {
     if (recommendationData.user_name) {
         textParts.push(`By: ${recommendationData.user_name}`);
     }
+    // Extract price information from content_data in a consistent way
+    const cd = recommendationData.content_data || {};
+    const price_level = cd.price_level || cd.priceLevel;
+    const price_label = cd.price_label;
+    const price_text = cd.price_text;
+    if (typeof price_level === 'number' || price_label || price_text) {
+        const label = price_label || (price_level === 1 ? 'budget' : price_level === 2 ? 'moderate' : price_level === 3 ? 'higher-end' : price_level === 4 ? 'luxury' : undefined);
+        const symbol = price_text || (price_level === 1 ? '₹' : price_level === 2 ? '₹₹' : price_level === 3 ? '₹₹₹' : price_level === 4 ? '₹₹₹₹' : undefined);
+        const priceParts = [];
+        if (symbol)
+            priceParts.push(`Price ${symbol}`);
+        if (label)
+            priceParts.push(`Pricing ${label}`);
+        if (priceParts.length > 0)
+            textParts.push(priceParts.join(' '));
+    }
     // Flatten JSON structures in a stable way
     const flattenRecord = (obj, label) => {
         if (!obj)

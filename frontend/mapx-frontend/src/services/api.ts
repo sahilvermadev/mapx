@@ -15,7 +15,7 @@ export interface ApiResponse<T = any> {
   };
 }
 
-// JWT token handling (matching your existing implementation)
+// JWT token handling
 interface UserClaims {
   id: string;
   email?: string;
@@ -55,7 +55,7 @@ class ApiClient {
     
     this.client = axios.create({
       baseURL: this.baseURL,
-      timeout: 30000, // Increased timeout to 30 seconds for AI operations
+      timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -78,49 +78,31 @@ class ApiClient {
       (response: AxiosResponse) => response,
       (error: AxiosError) => {
         if (error.response?.status === 401) {
-          // Notify app to show login modal without forcibly redirecting or clearing token
           try {
             window.dispatchEvent(new CustomEvent('api:unauthorized'));
           } catch {}
         }
-        // Don't reject the error here - let the individual methods handle it
         return Promise.reject(error);
       }
     );
   }
 
-  // Authentication helpers (matching your existing localStorage usage)
+  // Authentication helpers
   private getAuthToken(): string | null {
-    return localStorage.getItem('authToken'); // Same key as AuthSuccessPage.tsx
+    return localStorage.getItem('authToken');
   }
-
 
   // Get current user from JWT (without making API call)
   getCurrentUser(): UserClaims | null {
     const token = this.getAuthToken();
     if (!token || isTokenExpired(token)) return null;
-    const user = decodeJwt(token);
-    // Only log in development mode
-    if (import.meta.env.DEV) {
-      console.log('Current user from JWT:', user);
-    }
-    return user;
+    return decodeJwt(token);
   }
 
   // Check if user is authenticated
   isAuthenticated(): boolean {
     const token = this.getAuthToken();
-    const isAuth = !!token && !isTokenExpired(token);
-    // Only log in development mode and reduce frequency
-    if (import.meta.env.DEV && Math.random() < 0.1) { // Only log 10% of the time
-      console.log('🔐 isAuthenticated check:', { 
-        hasToken: !!token,
-        isExpired: token ? isTokenExpired(token) : true,
-        tokenLength: token?.length,
-        tokenPreview: token ? `${token.substring(0, 20)}...` : 'none'
-      });
-    }
-    return isAuth;
+    return !!token && !isTokenExpired(token);
   }
 
   // Get auth token (public method for external use)
@@ -181,4 +163,4 @@ class ApiClient {
 }
 
 // Export singleton instance
-export const apiClient = new ApiClient(); 
+export const apiClient = new ApiClient();

@@ -171,7 +171,7 @@ async function getUserById(userId) {
 /**
  * Get all places that have reviews/annotations
  */
-async function getPlacesWithReviews(visibility = 'all', limit = 100, offset = 0, groupIds) {
+async function getPlacesWithReviews(visibility = 'all', limit = 100, offset = 0, groupIds, currentUserId) {
     try {
         let query = `
       SELECT 
@@ -191,6 +191,14 @@ async function getPlacesWithReviews(visibility = 'all', limit = 100, offset = 0,
             paramCount++;
             whereConditions.push(`a.visibility = $${paramCount}`);
             params.push(visibility);
+        }
+        // Add friends filtering - only show places reviewed by users the current user follows
+        if (visibility === 'friends' && currentUserId) {
+            paramCount++;
+            whereConditions.push(`a.user_id IN (
+        SELECT following_id FROM user_follows WHERE follower_id = $${paramCount}
+      )`);
+            params.push(currentUserId);
         }
         // Add group filtering if groupIds are provided
         if (groupIds && groupIds.length > 0) {

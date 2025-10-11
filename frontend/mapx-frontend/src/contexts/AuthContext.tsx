@@ -8,32 +8,40 @@ interface UsernameStatus {
   usernameSetAt?: string;
 }
 
+interface User {
+  id: string;
+  email?: string;
+  displayName?: string;
+  profilePictureUrl?: string;
+  username?: string;
+}
+
 interface AuthState {
   isAuthenticated: boolean;
   isChecking: boolean;
-  isLoggingOut: boolean;
-  user: any | null;
-  showLoginModal: boolean;
+  isInitialized: boolean;
+  user: User | null;
   showUsernameModal: boolean;
   usernameStatus: UsernameStatus | null;
+  isLoggingOut: boolean;
 }
 
 type AuthAction = 
   | { type: 'SET_CHECKING'; payload: boolean }
-  | { type: 'SET_AUTHENTICATED'; payload: { isAuth: boolean; user: any } }
-  | { type: 'SET_LOGOUT_START' }
-  | { type: 'SET_MODAL_STATE'; payload: { showLogin: boolean; showUsername: boolean } }
+  | { type: 'SET_AUTHENTICATED'; payload: { isAuth: boolean; user: User | null } }
   | { type: 'SET_USERNAME_STATUS'; payload: UsernameStatus }
+  | { type: 'SET_INITIALIZED'; payload: boolean }
+  | { type: 'SET_LOGGING_OUT'; payload: boolean }
   | { type: 'RESET_AUTH' };
 
 const initialState: AuthState = {
   isAuthenticated: false,
   isChecking: true,
-  isLoggingOut: false,
+  isInitialized: false,
   user: null,
-  showLoginModal: false,
   showUsernameModal: false,
   usernameStatus: null,
+  isLoggingOut: false,
 };
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
@@ -45,15 +53,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         ...state, 
         isAuthenticated: action.payload.isAuth, 
         user: action.payload.user,
-        isChecking: false 
-      };
-    case 'SET_LOGOUT_START':
-      return { ...state, isLoggingOut: true };
-    case 'SET_MODAL_STATE':
-      return { 
-        ...state, 
-        showLoginModal: action.payload.showLogin,
-        showUsernameModal: action.payload.showUsername 
+        isChecking: false,
+        isInitialized: true
       };
     case 'SET_USERNAME_STATUS':
       return { 
@@ -61,11 +62,15 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         usernameStatus: action.payload,
         showUsernameModal: !action.payload.hasUsername 
       };
+    case 'SET_INITIALIZED':
+      return { ...state, isInitialized: action.payload };
+    case 'SET_LOGGING_OUT':
+      return { ...state, isLoggingOut: action.payload };
     case 'RESET_AUTH':
       return {
         ...initialState,
-        isChecking: false,
-        showLoginModal: true
+        isInitialized: true,
+        isLoggingOut: false,
       };
     default:
       return state;
@@ -73,10 +78,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  login: (token: string) => void;
   logout: () => Promise<void>;
-  closeLoginModal: () => void;
-  openLoginModal: () => void;
   closeUsernameModal: () => void;
   checkUsernameStatus: () => Promise<void>;
 }
@@ -97,18 +99,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         payload: { isAuth, user }
       });
 
-      if (isAuth) {
-        // Check username status
-        try {
-          const usernameStatus = await usernameService.getStatus();
-          dispatch({ type: 'SET_USERNAME_STATUS', payload: usernameStatus });
-        } catch (error) {
-          console.error('Failed to check username status:', error);
-          dispatch({ 
-            type: 'SET_USERNAME_STATUS', 
-            payload: { hasUsername: true } 
+      // Check username status in background (non-blocking)
+      if (isAuth && user) {
+        usernameService.getStatus()
+          .then(usernameStatus => {
+            dispatch({ type: 'SET_USERNAME_STATUS', payload: usernameStatus });
+          })
+          .catch(() => {
+            dispatch({ 
+              type: 'SET_USERNAME_STATUS', 
+              payload: { hasUsername: true } 
+            });
           });
-        }
       }
     } catch (error) {
       console.error('Auth check failed:', error);
@@ -119,58 +121,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const login = useCallback((token: string) => {
-    localStorage.setItem('authToken', token);
-    checkAuth();
-  }, [checkAuth]);
-
   const logout = useCallback(async () => {
-    console.log('🔄 Logout initiated');
+    dispatch({ type: 'SET_LOGGING_OUT', payload: true });
     
-    // Set logout state
-    dispatch({ type: 'SET_LOGOUT_START' });
-    
-    try {
-      // Call backend logout
-      await fetch('http://localhost:5000/auth/logout', {
-        method: 'GET',
-        credentials: 'include',
-      });
-      console.log('✅ Backend logout successful');
-    } catch (error) {
-      console.warn('⚠️ Backend logout failed, continuing with client-side logout:', error);
-    }
-    
-    // Clear client state
+    // Clear client state immediately
     localStorage.removeItem('authToken');
-    
-    // Reset auth state
     dispatch({ type: 'RESET_AUTH' });
     
-    console.log('✅ Logout completed');
-    
-    // Navigate to landing
+    // Navigate immediately - no delays
     window.location.href = '/';
-  }, []);
-
-  const closeLoginModal = useCallback(() => {
-    dispatch({ 
-      type: 'SET_MODAL_STATE', 
-      payload: { showLogin: false, showUsername: false } 
-    });
-  }, []);
-
-  const openLoginModal = useCallback(() => {
-    dispatch({ 
-      type: 'SET_MODAL_STATE', 
-      payload: { showLogin: true, showUsername: false } 
+    
+    // Call backend logout in background (non-blocking)
+    fetch('http://localhost:5000/auth/logout', {
+      method: 'GET',
+      credentials: 'include',
+    }).catch(() => {
+      // Ignore errors - user is already logged out locally
     });
   }, []);
 
   const closeUsernameModal = useCallback(() => {
     dispatch({ 
-      type: 'SET_MODAL_STATE', 
-      payload: { showLogin: false, showUsername: false } 
+      type: 'SET_USERNAME_STATUS', 
+      payload: { hasUsername: true } 
     });
   }, []);
 
@@ -185,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Initialize auth
+  // Initialize auth immediately - no delays
   useEffect(() => {
     if (isInitialized.current) return;
     
@@ -193,44 +166,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isInitialized.current = true;
       dispatch({ type: 'SET_CHECKING', payload: true });
       
-      // Check for token in URL (OAuth callback) - only if not already handled
+      // Check for OAuth callback token
       const urlParams = new URLSearchParams(window.location.search);
       const token = urlParams.get('token');
       
-      if (token && !localStorage.getItem('authToken')) {
+      if (token) {
+        // Process OAuth token immediately
         localStorage.setItem('authToken', token);
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, '', newUrl);
+        const user = apiClient.getCurrentUser();
+        dispatch({ type: 'SET_AUTHENTICATED', payload: { isAuth: true, user } });
+        window.history.replaceState({}, '', window.location.pathname);
+        
+        // Redirect immediately - no delays
+        window.location.href = '/feed';
+        return;
       }
       
       await checkAuth();
     };
     
-    // Add a small delay to prevent race conditions
-    const timeoutId = setTimeout(initAuth, 50);
+    // Initialize immediately - no timeout
+    initAuth();
     
-    // Listen for API unauthorized events
     const onUnauthorized = () => {
       dispatch({ 
-        type: 'SET_MODAL_STATE', 
-        payload: { showLogin: true, showUsername: false } 
+        type: 'SET_AUTHENTICATED',
+        payload: { isAuth: false, user: null }
       });
     };
     
     window.addEventListener('api:unauthorized', onUnauthorized as EventListener);
     
     return () => {
-      clearTimeout(timeoutId);
       window.removeEventListener('api:unauthorized', onUnauthorized as EventListener);
     };
   }, [checkAuth]);
 
   const value: AuthContextType = {
     ...state,
-    login,
     logout,
-    closeLoginModal,
-    openLoginModal,
     closeUsernameModal,
     checkUsernameStatus,
   };

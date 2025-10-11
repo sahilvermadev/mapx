@@ -8,6 +8,7 @@ const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const express_session_1 = __importDefault(require("express-session"));
 const passport_1 = __importDefault(require("passport"));
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const path_1 = __importDefault(require("path"));
 const passport_2 = __importDefault(require("./config/passport"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
@@ -36,8 +37,29 @@ if (!process.env.DATABASE_URL) {
 }
 const app = (0, express_1.default)();
 const port = process.env.PORT || 5000;
-app.use((0, cors_1.default)({ origin: 'http://localhost:5173', credentials: true }));
+// CORS configuration to allow multiple frontend ports
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://localhost:5176',
+    'http://localhost:5177',
+    'http://localhost:5178'
+];
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, etc.)
+        if (!origin)
+            return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+}));
 app.use(express_1.default.json());
+app.use((0, cookie_parser_1.default)());
 app.use((0, express_session_1.default)({
     secret: process.env.SESSION_SECRET || 'session-secret',
     resave: false,

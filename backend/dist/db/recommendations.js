@@ -155,14 +155,24 @@ async function getRecommendationWithSocialData(recommendationId, currentUserId) 
 /**
  * Get recommendations for a specific place
  */
-async function getRecommendationsByPlaceId(placeId, visibility = 'all', limit = 50) {
+async function getRecommendationsByPlaceId(placeId, visibility = 'all', limit = 50, currentUserId) {
     let query = 'SELECT * FROM recommendations WHERE place_id = $1';
     const params = [placeId];
+    let paramCount = 1;
     if (visibility !== 'all') {
-        query += ' AND visibility = $2';
+        paramCount++;
+        query += ` AND visibility = $${paramCount}`;
         params.push(visibility);
     }
-    const limitParam = params.length + 1;
+    // Add friends filtering - only show recommendations from users the current user follows
+    if (visibility === 'friends' && currentUserId) {
+        paramCount++;
+        query += ` AND user_id IN (
+      SELECT following_id FROM user_follows WHERE follower_id = $${paramCount}
+    )`;
+        params.push(currentUserId);
+    }
+    const limitParam = paramCount + 1;
     query += ` ORDER BY created_at DESC LIMIT $${limitParam}`;
     params.push(limit);
     const result = await db_1.default.query(query, params);

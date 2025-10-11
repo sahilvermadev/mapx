@@ -644,7 +644,15 @@ const MapPage: React.FC = () => {
           center: DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
           clickableIcons: true,
-          mapId: '95079f4fa5e07d01680ea67e'
+          mapId: '95079f4fa5e07d01680ea67e',
+          streetViewControl: false,
+          fullscreenControl: false,
+          zoomControl: false,
+          mapTypeControl: false,
+          scaleControl: false,
+          rotateControl: false,
+          gestureHandling: 'greedy',
+          disableDefaultUI: true
         });
 
         // Wait for map to be fully loaded before initializing places service
@@ -840,14 +848,14 @@ const MapPage: React.FC = () => {
         <Button
           onClick={toggleReviewedPlaces}
           size="icon"
-          className={`h-14 w-14 rounded-full shadow-lg ${
+          className={`h-11 w-11 rounded-lg border-0 transition-all duration-200 ${
             showReviewedPlaces 
-              ? 'bg-green-600 hover:bg-green-700' 
-              : 'bg-gray-600 hover:bg-gray-700'
+              ? 'bg-green-600 hover:bg-green-700 shadow-lg' 
+              : 'bg-gray-800 hover:bg-gray-700 shadow-md'
           } text-white`}
           title={showReviewedPlaces ? 'Hide reviewed places' : 'Show reviewed places'}
         >
-          <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+          <svg viewBox="0 0 24 24" className="h-4 w-4">
             <path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
           </svg>
         </Button>
@@ -856,13 +864,13 @@ const MapPage: React.FC = () => {
           onClick={handleLocateMe}
           disabled={isLocating}
           size="icon"
-          className="h-14 w-14 rounded-full shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
+          className="h-11 w-11 rounded-lg bg-gray-800 hover:bg-gray-700 border-0 shadow-md text-white transition-all duration-200 disabled:opacity-50"
           title="Locate me"
         >
           {isLocating ? (
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-white"></div>
           ) : (
-            <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="h-4 w-4">
               <path fill="currentColor" d="M12 8a4 4 0 1 0 .001 8.001A4 4 0 0 0 12 8m8.94 3h-2.02A6.99 6.99 0 0 0 13 5.08V3h-2v2.08A6.99 6.99 0 0 0 5.08 11H3v2h2.08A6.99 6.99 0 0 0 11 18.92V21h2v-2.08A6.99 6.99 0 0 0 18.92 13H21v-2z"/>
             </svg>
           )}

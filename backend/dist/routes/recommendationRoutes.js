@@ -11,6 +11,39 @@ const aiSummaries_1 = require("../utils/aiSummaries");
 const embeddingQueue_1 = require("../services/embeddingQueue");
 const db_1 = __importDefault(require("../db")); // Import pool directly from db.ts
 const mentions_1 = require("../db/mentions");
+// Helper to extract user id from Bearer JWT if session user is not set
+function getUserIdFromRequest(req) {
+    const sessionUser = req.user;
+    if (sessionUser && sessionUser.id)
+        return sessionUser.id;
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer '))
+        return null;
+    const token = auth.slice(7);
+    const parts = token.split('.');
+    if (parts.length !== 3)
+        return null;
+    try {
+        const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
+        const payload = JSON.parse(payloadJson);
+        return payload.id || payload.user_id || null;
+    }
+    catch {
+        return null;
+    }
+}
+// Authentication middleware
+const requireAuth = (req, res, next) => {
+    const userId = getUserIdFromRequest(req);
+    if (!userId) {
+        return res.status(401).json({
+            success: false,
+            message: 'Authentication required'
+        });
+    }
+    req.user = { id: userId };
+    next();
+};
 const serviceDeduplication_1 = require("../services/serviceDeduplication");
 const nameSimilarity_1 = require("../utils/nameSimilarity");
 const router = express_1.default.Router();
@@ -45,27 +78,6 @@ function normalizeContactInfo(raw, description) {
     }
     return { phone, email };
 }
-// Helper to extract user id from Bearer JWT if session user is not set
-function getUserIdFromRequest(req) {
-    const sessionUser = req.user;
-    if (sessionUser && sessionUser.id)
-        return sessionUser.id;
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer '))
-        return null;
-    const token = auth.slice(7);
-    const parts = token.split('.');
-    if (parts.length !== 3)
-        return null;
-    try {
-        const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
-        const payload = JSON.parse(payloadJson);
-        return payload.id || payload.user_id || null;
-    }
-    catch {
-        return null;
-    }
-}
 /**
  * GET /api/recommendations/place/google/:googlePlaceId
  * Get place information by Google Place ID
@@ -81,9 +93,11 @@ router.get('/place/google/:googlePlaceId', async (req, res) => {
         }
         const place = await (0, places_1.getPlaceByGoogleId)(googlePlaceId);
         if (!place) {
-            return res.status(404).json({
-                success: false,
-                message: 'Place not found'
+            // Graceful not-found: return 200 with null data to avoid 404 noise in console
+            return res.status(200).json({
+                success: true,
+                data: null,
+                message: 'Place not found in database'
             });
         }
         res.json({
@@ -261,6 +275,23 @@ router.post('/save', async (req, res) => {
         }
         // Step 2: Prepare content data based on type
         let finalContentData = content_data || {};
+        // Normalize price info coming from clients (frontend uses priceLevel: 1..3)
+        // We persist both numeric and human-friendly variants for easier querying and embedding
+        const normalizePrice = (raw) => {
+            const level = typeof raw === 'number' ? raw : (raw && typeof raw.level === 'number' ? raw.level : finalContentData.priceLevel);
+            const priceLevel = Number(level) >= 1 && Number(level) <= 4 ? Number(level) : undefined;
+            // Support 1..4 for future expansion; current UI uses 1..3
+            const labels = { 1: 'budget', 2: 'moderate', 3: 'higher-end', 4: 'luxury' };
+            const symbols = { 1: '₹', 2: '₹₹', 3: '₹₹₹', 4: '₹₹₹₹' };
+            if (!priceLevel)
+                return undefined;
+            return {
+                price_level: priceLevel,
+                price_label: labels[priceLevel] || 'unknown',
+                price_text: symbols[priceLevel] || ''
+            };
+        };
+        const priceInfo = normalizePrice(content_data?.priceLevel);
         if (finalContentType === 'place' && placeId) {
             // For place recommendations, store place-specific data
             finalContentData = {
@@ -269,7 +300,8 @@ router.post('/save', async (req, res) => {
                 address: place_address,
                 coordinates: place_lat && place_lng ? { lat: place_lat, lng: place_lng } : undefined,
                 category: place_category,
-                ...place_metadata
+                ...place_metadata,
+                ...(priceInfo ? priceInfo : {})
             };
         }
         else if (finalContentType === 'service' && serviceId) {
@@ -283,7 +315,8 @@ router.post('/save', async (req, res) => {
                 service_business_name: service_business_name,
                 service_address: service_address,
                 service_website: service_website,
-                ...service_metadata
+                ...service_metadata,
+                ...(priceInfo ? priceInfo : {})
             };
         }
         // Step 3: Insert the recommendation with auto-generated embedding
@@ -429,8 +462,9 @@ router.get('/user/:userId', async (req, res) => {
  * GET /api/recommendations/place/:placeId
  * Get all recommendations for a specific place
  */
-router.get('/place/:placeId', async (req, res) => {
+router.get('/place/:placeId', requireAuth, async (req, res) => {
     try {
+        const currentUserId = req.user.id;
         const { placeId } = req.params;
         const visibility = req.query.visibility || 'all';
         const limit = parseInt(req.query.limit) || 50;
@@ -450,11 +484,11 @@ router.get('/place/:placeId', async (req, res) => {
             });
         }
         // Get place recommendations
-        const recommendations = await (0, recommendations_1.getRecommendationsByPlaceId)(placeIdNum, visibility, limit);
+        const recommendations = await (0, recommendations_1.getRecommendationsByPlaceId)(placeIdNum, visibility, limit, currentUserId);
         // Transform recommendations to include user information
         const transformedRecommendations = await Promise.all(recommendations.map(async (recommendation) => {
             // Get user information (you might want to add a join query for better performance)
-            const userQuery = await db_1.default.query('SELECT display_name, email FROM users WHERE id = $1', [recommendation.user_id]);
+            const userQuery = await db_1.default.query('SELECT display_name, email, profile_picture_url FROM users WHERE id = $1', [recommendation.user_id]);
             const user = userQuery.rows[0] || {};
             return {
                 id: recommendation.id,
@@ -465,6 +499,7 @@ router.get('/place/:placeId', async (req, res) => {
                 user_id: recommendation.user_id,
                 user_name: user.display_name || 'Anonymous',
                 user_email: user.email,
+                user_picture: user.profile_picture_url || null,
                 rating: recommendation.rating,
                 visibility: recommendation.visibility,
                 labels: recommendation.labels,
@@ -907,8 +942,9 @@ router.post('/search', async (req, res) => {
  * GET /api/recommendations/places/reviewed
  * Get all places that have reviews/annotations
  */
-router.get('/places/reviewed', async (req, res) => {
+router.get('/places/reviewed', requireAuth, async (req, res) => {
     try {
+        const currentUserId = req.user.id;
         const visibility = req.query.visibility || 'all';
         const limit = parseInt(req.query.limit) || 100;
         const offset = parseInt(req.query.offset) || 0;
@@ -923,7 +959,7 @@ router.get('/places/reviewed', async (req, res) => {
             });
         }
         // Get places with reviews
-        const placesWithReviews = await (0, places_1.getPlacesWithReviews)(visibility, limit, offset, groupIds);
+        const placesWithReviews = await (0, places_1.getPlacesWithReviews)(visibility, limit, offset, groupIds, currentUserId);
         // Transform the data to include review statistics
         const transformedPlaces = placesWithReviews.map(place => ({
             id: place.id,
