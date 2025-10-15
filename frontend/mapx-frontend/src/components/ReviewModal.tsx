@@ -5,8 +5,8 @@ import { FaMapMarkerAlt, FaExclamationTriangle, FaPlus } from 'react-icons/fa';
 import { Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-import { recommendationsApi, type SaveRecommendationRequest } from '../services/recommendationsApi';
-import { useAuth } from '../contexts/AuthContext';
+import { recommendationsApi, type SaveRecommendationRequest } from '../services/recommendationsApiService';
+import { useAuth } from '../auth';
 import { useMentions } from '@/hooks/useMentions';
 import { insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
 

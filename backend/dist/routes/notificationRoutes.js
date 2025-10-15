@@ -5,35 +5,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const notifications_1 = require("../db/notifications");
+const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
-// Helper to extract user id from Bearer JWT if session user is not set
-function getUserIdFromRequest(req) {
-    const sessionUser = req.user;
-    if (sessionUser && sessionUser.id)
-        return sessionUser.id;
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer '))
-        return null;
-    const token = auth.slice(7);
-    const parts = token.split('.');
-    if (parts.length !== 3)
-        return null;
-    try {
-        const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
-        const payload = JSON.parse(payloadJson);
-        return payload.id || payload.user_id || null;
-    }
-    catch {
-        return null;
-    }
-}
+// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * GET /api/notifications
  * Get notifications for the current user
  */
 router.get('/', async (req, res) => {
     try {
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         if (!userId) {
             return res.status(401).json({
                 success: false,
@@ -68,7 +49,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/unread-count', async (req, res) => {
     try {
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         if (!userId) {
             return res.status(401).json({
                 success: false,
@@ -96,7 +77,7 @@ router.get('/unread-count', async (req, res) => {
  */
 router.put('/:id/read', async (req, res) => {
     try {
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         console.log('Notification mark as read - userId:', userId);
         if (!userId) {
             return res.status(401).json({
@@ -138,7 +119,7 @@ router.put('/:id/read', async (req, res) => {
  */
 router.put('/mark-all-read', async (req, res) => {
     try {
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         console.log('Notification mark all read - userId:', userId);
         if (!userId) {
             return res.status(401).json({
@@ -168,7 +149,7 @@ router.put('/mark-all-read', async (req, res) => {
  */
 router.delete('/:id', async (req, res) => {
     try {
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         if (!userId) {
             return res.status(401).json({
                 success: false,

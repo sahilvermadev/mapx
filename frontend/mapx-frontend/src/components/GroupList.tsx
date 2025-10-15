@@ -6,7 +6,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { friendGroupsApi, type FriendGroup } from '@/services/friendGroups';
+import { friendGroupsApi, type FriendGroup } from '@/services/friendGroupsService';
 
 interface GroupListProps {
   currentUserId: string;

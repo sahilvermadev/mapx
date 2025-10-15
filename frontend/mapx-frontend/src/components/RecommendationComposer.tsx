@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth';
 import { insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
 import { aiClient } from '@/services/aiClient';
 import { buildSaveRecommendationDto } from '@/mappers/formToSaveDto';
+import { recommendationsApi } from '@/services/recommendationsApi';
 import { useMentions } from '@/hooks/useMentions';
 import AnalyzingStep from '@/components/composer/steps/AnalyzingStep';
 import CompletingStep from '@/components/composer/steps/CompletingStep';
@@ -100,6 +101,7 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
   const [fieldResponses, setFieldResponses] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
+  const [labels, setLabels] = useState<string[]>([]);
   // Mentions state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]);
@@ -191,7 +193,7 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
       const processedText = ensureRecommendationPrefix(text);
       
       // Call the AI analyze via client
-      const analysis = await aiClient.analyze(processedText, currentUserId);
+      const analysis = await aiClient.analyze(processedText);
         
         // Check if the text is gibberish or invalid
         if (analysis.isGibberish || !analysis.isValid) {
@@ -205,6 +207,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           ...analysis.extractedData,
           // Map AI contentType -> local "type" field used by submit flow
           type: analysis.contentType,
+          // Keep a canonical contentType field as well for downstream consumers (e.g., formatter)
+          contentType: analysis.contentType,
           description: ensureRecommendationPrefix(analysis.extractedData.description || processedText)
         };
 
@@ -252,8 +256,7 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
       const validation = await aiClient.validate(
         missingFields[currentFieldIndex]?.question || '',
         String(response),
-        field,
-        currentUserId
+        field
       );
       
       if (!validation.isValid) {
@@ -361,7 +364,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         originalText: textWithTokens,
         formattedText: formattedRecommendation,
         // Ensure we have the content type from the AI analysis
-        type: extractedData.type || 'place'
+        type: extractedData.type || 'place',
+        contentType: (extractedData as any).contentType || extractedData.type || 'place'
       };
       
       // Map extracted data to the format expected by the backend (new recommendations API)
@@ -375,26 +379,17 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         fieldResponses,
         formattedRecommendation,
         rating,
-        currentUserId
+        currentUserId,
+        labels
       });
       
-      const response = await fetch('http://localhost:5000/api/recommendations/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-      const result = await response.json();
+      const result = await recommendationsApi.saveRecommendation(requestBody as any);
       
-      if (result.success) {
-        onPostCreated();
-        onClose();
-      } else if (result.data && result.data.success) {
+      if (result && (result as any).recommendation_id) {
         onPostCreated();
         onClose();
       } else {
-        throw new Error(result.error || result.message || 'Failed to save recommendation');
+        throw new Error('Failed to save recommendation');
       }
     } catch (error) {
       alert('Sorry, there was an error saving your recommendation. Please try again.');
@@ -585,9 +580,10 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
 
   const generateLLMFormattedPost = async (consolidated: any) => {
     try {
-      const formatted = await aiClient.format(consolidated, text, currentUserId);
+      const formatted = await aiClient.format(consolidated, text);
       return formatted;
     } catch (error) {
+      console.warn('LLM formatting failed, using fallback:', error);
       return null;
     }
   };
@@ -717,13 +713,26 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           setFormattedPreview(formatRecommendationTextSync(extractedData, fieldResponses));
           setIsFormattingPreview(false);
         }
-      }, 10000); // 10 second timeout
+      }, 25000); // 25 second timeout (longer than AI client timeout)
       
       generatePreview();
       
       return () => clearTimeout(timeoutId);
     }
   }, [currentStep]); // Only depend on currentStep to avoid infinite loop
+
+  // Update labels when consolidated data changes
+  useEffect(() => {
+    if (currentStep === 'preview') {
+      const consolidated = { ...extractedData, ...fieldResponses };
+      const newLabels = Array.isArray(consolidated.specialities)
+        ? consolidated.specialities
+        : consolidated.specialities
+        ? [consolidated.specialities]
+        : [];
+      setLabels(newLabels);
+    }
+  }, [currentStep, extractedData, fieldResponses]);
 
   const renderPreviewStep = () => {
     const consolidated = { ...extractedData, ...fieldResponses };
@@ -732,7 +741,15 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     const placeName = consolidated.name || consolidated.location_name || consolidated.title;
     const placeAddress = consolidated.location || consolidated.location_address;
     const description = formattedPreview || formatRecommendationTextSync(extractedData, fieldResponses);
-    // labels are rendered inside PreviewStep if needed
+    const contentType = (consolidated.contentType || consolidated.type) as any;
+    const contact = consolidated.contact_info || consolidated.contact || null;
+    
+    // Generate labels from specialities (same logic as in formToSaveDto.ts)
+    const currentLabels = Array.isArray(consolidated.specialities)
+      ? consolidated.specialities
+      : consolidated.specialities
+      ? [consolidated.specialities]
+      : [];
     const previewMentionMenu = (isEditingDescription && showMentionMenu && mentionSuggestions.length > 0) ? (
           <div className="fixed z-50 w-64 rounded-md border bg-popover text-popover-foreground shadow-md" style={{ top: mentionPosition?.top || 0, left: mentionPosition?.left || 0 }}>
             {mentionSuggestions.map((u) => (
@@ -778,6 +795,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         placeName={placeName}
         placeAddress={placeAddress}
         description={description}
+        contentType={contentType}
+        contact={contact}
         isEditingDescription={isEditingDescription}
         editedPreview={editedPreview}
         onEditedPreviewChange={setEditedPreview}
@@ -789,6 +808,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         onCancelEdit={handleCancelEdit}
         onSaveEdit={handleSaveEdit}
         onApprove={handleApprovePreview}
+        labels={labels}
+        onLabelsChange={setLabels}
       />
     );
   };

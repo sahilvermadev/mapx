@@ -22,10 +22,8 @@ A queue-based system that:
 
 ### 2. Updated Database Operations
 
-#### Annotations (`backend/src/db/annotations.ts`)
-- **`insertAnnotation()`**: Now queues embedding generation instead of blocking
-- **`regenerateAllEmbeddings()`**: Uses async queue for better performance
-- **Backward Compatibility**: Maintains all existing functionality
+#### (Deprecated) Annotations
+- The legacy annotations module has been removed in favor of `recommendations`.
 
 #### Recommendations (`backend/src/db/recommendations.ts`)
 - **`insertRecommendation()`**: Now queues embedding generation instead of blocking
@@ -69,7 +67,7 @@ User Request → Save to DB → Queue Embedding → Return Response
 
 ### 2. Search Functionality
 
-- **Semantic Search**: Still works with available embeddings
+- **Semantic Search**: Works with `recommendations.embedding`
 - **Graceful Degradation**: If embeddings aren't ready, search uses available data
 - **No Breaking Changes**: All existing search functionality preserved
 

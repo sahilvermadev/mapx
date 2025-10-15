@@ -6,23 +6,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const friendGroups_1 = require("../db/friendGroups");
 const router = express_1.default.Router();
-// Temporary authentication middleware (will be replaced with proper auth)
-const requireAuth = (req, res, next) => {
-    const userId = req.query.currentUserId || req.body.currentUserId;
-    if (!userId) {
-        return res.status(401).json({
-            success: false,
-            message: 'Authentication required'
-        });
-    }
-    req.user = { id: userId };
-    next();
-};
+// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * POST /api/friend-groups
  * Create a new friend group
  */
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', async (req, res) => {
     try {
         const { name, description, icon, visibility, memberIds } = req.body;
         const userId = req.user.id;
@@ -57,7 +46,7 @@ router.post('/', requireAuth, async (req, res) => {
  * GET /api/friend-groups
  * Get all friend groups for a user
  */
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const userId = req.user.id;
         const groups = await (0, friendGroups_1.getUserFriendGroups)(userId);
@@ -78,7 +67,7 @@ router.get('/', requireAuth, async (req, res) => {
  * GET /api/friend-groups/:id
  * Get friend group details with members
  */
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
         const groupId = parseInt(req.params.id);
         const userId = req.user.id;
@@ -106,7 +95,7 @@ router.get('/:id', requireAuth, async (req, res) => {
  * PUT /api/friend-groups/:id
  * Update a friend group
  */
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', async (req, res) => {
     try {
         const groupId = parseInt(req.params.id);
         const userId = req.user.id;
@@ -141,7 +130,7 @@ router.put('/:id', requireAuth, async (req, res) => {
  * DELETE /api/friend-groups/:id
  * Delete a friend group
  */
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
         const groupId = parseInt(req.params.id);
         const userId = req.user.id;
@@ -177,7 +166,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
  * POST /api/friend-groups/:id/members
  * Add members to a group
  */
-router.post('/:id/members', requireAuth, async (req, res) => {
+router.post('/:id/members', async (req, res) => {
     try {
         const groupId = parseInt(req.params.id);
         const userId = req.user.id;
@@ -212,7 +201,7 @@ router.post('/:id/members', requireAuth, async (req, res) => {
  * DELETE /api/friend-groups/:id/members/:memberId
  * Remove member from group
  */
-router.delete('/:id/members/:memberId', requireAuth, async (req, res) => {
+router.delete('/:id/members/:memberId', async (req, res) => {
     try {
         const groupId = parseInt(req.params.id);
         const memberId = req.params.memberId;

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
+import { authService } from '../auth/services/authService';
 
 // Types for API responses
 export interface ApiResponse<T = any> {
@@ -15,35 +16,6 @@ export interface ApiResponse<T = any> {
   };
 }
 
-// JWT token handling
-interface UserClaims {
-  id: string;
-  email?: string;
-  displayName?: string;
-  profilePictureUrl?: string;
-  exp?: number; // JWT expiration (seconds since epoch)
-}
-
-function decodeJwt(token: string): UserClaims | null {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload;
-  } catch (error) {
-    return null;
-  }
-}
-
-function isTokenExpired(token: string | null): boolean {
-  if (!token) return true;
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1])) as { exp?: number };
-    if (!payload.exp) return false; // if no exp, assume not expired
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    return payload.exp <= nowSeconds;
-  } catch {
-    return true;
-  }
-}
 
 // Base API client configuration
 class ApiClient {
@@ -51,7 +23,7 @@ class ApiClient {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+    this.baseURL = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:5000/api';
     
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -61,10 +33,10 @@ class ApiClient {
       },
     });
 
-    // Add request interceptor for JWT authentication
+    // Add request interceptor for JWT authentication and auto-refresh
     this.client.interceptors.request.use(
-      (config: any) => {
-        const token = this.getAuthToken();
+      async (config: any) => {
+        const token = await authService.getTokenForRequest();
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
@@ -76,38 +48,49 @@ class ApiClient {
     // Add response interceptor for authentication errors
     this.client.interceptors.response.use(
       (response: AxiosResponse) => response,
-      (error: AxiosError) => {
-        if (error.response?.status === 401) {
-          try {
-            window.dispatchEvent(new CustomEvent('api:unauthorized'));
-          } catch {}
+      async (error: AxiosError) => {
+        const originalRequest = error.config as any;
+        
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+          
+          // Try to refresh token
+          const newToken = await authService.getTokenForRequest();
+          if (newToken) {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return this.client(originalRequest);
+          } else {
+            // Refresh failed, dispatch unauthorized event
+            try {
+              window.dispatchEvent(new CustomEvent('api:unauthorized'));
+            } catch {}
+          }
         }
+        
         return Promise.reject(error);
       }
     );
   }
 
-  // Authentication helpers
-  private getAuthToken(): string | null {
-    return localStorage.getItem('authToken');
+  // Authentication helpers - delegate to authService
+  getCurrentUser() {
+    return authService.getCurrentUser();
   }
 
-  // Get current user from JWT (without making API call)
-  getCurrentUser(): UserClaims | null {
-    const token = this.getAuthToken();
-    if (!token || isTokenExpired(token)) return null;
-    return decodeJwt(token);
-  }
-
-  // Check if user is authenticated
   isAuthenticated(): boolean {
-    const token = this.getAuthToken();
-    return !!token && !isTokenExpired(token);
+    return authService.isAuthenticated();
   }
 
-  // Get auth token (public method for external use)
   getToken(): string | null {
-    return this.getAuthToken();
+    return authService.getAccessToken();
+  }
+
+  storeTokens(accessToken: string, refreshToken: string): void {
+    authService.storeTokens(accessToken, refreshToken);
+  }
+
+  logout(): void {
+    authService.clearTokens();
   }
 
   // Generic HTTP methods

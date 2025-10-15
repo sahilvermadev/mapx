@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { friendGroupsApi, type FriendGroup } from '@/services/friendGroups';
+import { friendGroupsApi, type FriendGroup } from '@/services/friendGroupsService';
 
 interface GroupFilterProps {
   currentUserId: string;

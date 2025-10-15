@@ -321,8 +321,8 @@ Respond with JSON:
   STYLE:
   - Write 3–8 concise sentences in third-person, focusing on key details to inform and engage readers.
   - Use a natural, straightforward tone that feels authentic and avoids overly personal or fake enthusiasm.
-  - Include only the following fields if explicitly provided in data: name/category, address, pricing, contact (phone/email), best time, tips, specialities.
-  - Order: name/category; address; pricing; contact; best time; tips; specialities.
+  - Include only the following fields if explicitly provided in data: name/category, pricing, contact (phone/email), best time, tips, specialities.
+  - Order: name/category; pricing; contact; best time; tips; specialities.
   - Completely skip any field not provided in the data; do not mention missing fields or say they are unavailable.
   - Never invent or assume details; use only the provided data.
   - Ensure readability with line breaks between sentences.
@@ -339,7 +339,6 @@ Respond with JSON:
   Produce a recommendation post in 3–8 lines, each a simple sentence in third-person.
   Example:
   Cafe Bloom offers a cozy cafe experience.
-  It's located at 123 Main St, Springfield.
   Pricing is mid-range.
   Mornings are the best time to visit.
   Try the seasonal pastry for a treat.
@@ -364,9 +363,6 @@ Respond with JSON:
             const lines = [];
             const nameOrCategory = (data?.name || data?.category || data?.type || data?.contentType || 'This recommendation').toString();
             lines.push(`${nameOrCategory} is recommended.`);
-            if (data?.address || data?.location) {
-                lines.push(`Located at ${data.address || data.location}.`);
-            }
             if (data?.pricing) {
                 lines.push(`Pricing: ${data.pricing}.`);
             }

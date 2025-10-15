@@ -6,21 +6,12 @@ const router = express.Router();
 // Initialize Google Maps client
 const googleMapsClient = new Client({});
 
-// Temporary auth middleware (replace with your actual auth)
-const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const currentUserId = req.body.currentUserId || req.query.currentUserId;
-  if (!currentUserId) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-  req.user = { id: currentUserId };
-  next();
-};
 
 /**
  * POST /api/location/search
  * Search for places using Google Places API
  */
-router.post('/search', requireAuth, async (req: express.Request, res: express.Response) => {
+router.post('/search', async (req: express.Request, res: express.Response) => {
   try {
     const { query, types = ['establishment', 'geocode'] } = req.body;
     
@@ -118,7 +109,7 @@ router.post('/search', requireAuth, async (req: express.Request, res: express.Re
  * GET /api/location/place/:placeId
  * Get detailed information for a specific place
  */
-router.get('/place/:placeId', requireAuth, async (req: express.Request, res: express.Response) => {
+router.get('/place/:placeId', async (req: express.Request, res: express.Response) => {
   try {
     const { placeId } = req.params;
     

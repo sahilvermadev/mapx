@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import type { SearchResponse } from '@/services/recommendationsApi';
+import type { SearchResponse } from '@/services/recommendationsApiService';
 
 export function useFeedSearchResults() {
   const [searchScores, setSearchScores] = useState<Record<number, number> | null>(null);

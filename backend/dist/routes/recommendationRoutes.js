@@ -11,39 +11,9 @@ const aiSummaries_1 = require("../utils/aiSummaries");
 const embeddingQueue_1 = require("../services/embeddingQueue");
 const db_1 = __importDefault(require("../db")); // Import pool directly from db.ts
 const mentions_1 = require("../db/mentions");
-// Helper to extract user id from Bearer JWT if session user is not set
-function getUserIdFromRequest(req) {
-    const sessionUser = req.user;
-    if (sessionUser && sessionUser.id)
-        return sessionUser.id;
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer '))
-        return null;
-    const token = auth.slice(7);
-    const parts = token.split('.');
-    if (parts.length !== 3)
-        return null;
-    try {
-        const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
-        const payload = JSON.parse(payloadJson);
-        return payload.id || payload.user_id || null;
-    }
-    catch {
-        return null;
-    }
-}
-// Authentication middleware
-const requireAuth = (req, res, next) => {
-    const userId = getUserIdFromRequest(req);
-    if (!userId) {
-        return res.status(401).json({
-            success: false,
-            message: 'Authentication required'
-        });
-    }
-    req.user = { id: userId };
-    next();
-};
+const auth_1 = require("../middleware/auth");
+// Note: Authentication is now handled by the JWT middleware in index.ts
+// The getUserIdFromRequest helper is still available for backward compatibility
 const serviceDeduplication_1 = require("../services/serviceDeduplication");
 const nameSimilarity_1 = require("../utils/nameSimilarity");
 const router = express_1.default.Router();
@@ -538,7 +508,7 @@ router.get('/place/:placeId/network-rating', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Valid place ID is required' });
         }
         // Get current user from session or JWT
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         // If unauthenticated, return empty rating rather than 401 to avoid disrupting UX
         if (!userId) {
             return res.json({ success: true, data: { average_rating: null, rating_count: 0 } });
@@ -566,7 +536,7 @@ router.get('/:recommendationId', async (req, res) => {
             });
         }
         // Get current user ID for social data (likes, saves, etc.)
-        const currentUserId = getUserIdFromRequest(req);
+        const currentUserId = (0, auth_1.getUserIdFromRequest)(req);
         if (!currentUserId) {
             return res.status(401).json({
                 success: false,
@@ -725,7 +695,7 @@ router.post('/regenerate-embeddings', async (req, res) => {
 router.post('/search', async (req, res) => {
     try {
         // Get current user ID for follow filtering
-        const currentUserId = getUserIdFromRequest(req);
+        const currentUserId = (0, auth_1.getUserIdFromRequest)(req);
         if (!currentUserId) {
             return res.status(401).json({
                 success: false,

@@ -6,8 +6,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { socialApi, type User } from '@/services/social';
-import { useAuth } from '@/contexts/AuthContext';
+import { socialApi, type User } from '@/services/socialService';
+import { useAuth } from '@/auth';
 import GroupCreator from '@/components/GroupCreator';
 import GroupList from '@/components/GroupList';
 

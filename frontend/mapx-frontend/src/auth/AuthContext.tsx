@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
-import { apiClient } from '../services/api';
-import { usernameService } from '../services/username';
+import { authService } from './services/authService';
+import { usernameService } from './services/usernameService';
 
 interface UsernameStatus {
   hasUsername: boolean;
@@ -91,8 +91,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const checkAuth = useCallback(async () => {
     try {
-      const isAuth = apiClient.isAuthenticated();
-      const user = apiClient.getCurrentUser();
+      // Ensure tokens are valid and refresh if needed
+      await authService.ensureValidTokens();
+      
+      const isAuth = authService.isAuthenticated();
+      const user = authService.getCurrentUser();
       
       dispatch({
         type: 'SET_AUTHENTICATED',
@@ -124,20 +127,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(async () => {
     dispatch({ type: 'SET_LOGGING_OUT', payload: true });
     
-    // Clear client state immediately
-    localStorage.removeItem('authToken');
+    try {
+      // Use auth service for proper logout
+      await authService.logout();
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Continue with logout even if API call fails
+    }
+    
+    // Clear client state
     dispatch({ type: 'RESET_AUTH' });
     
     // Navigate immediately - no delays
     window.location.href = '/';
-    
-    // Call backend logout in background (non-blocking)
-    fetch('http://localhost:5000/auth/logout', {
-      method: 'GET',
-      credentials: 'include',
-    }).catch(() => {
-      // Ignore errors - user is already logged out locally
-    });
   }, []);
 
   const closeUsernameModal = useCallback(() => {
@@ -148,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const checkUsernameStatus = useCallback(async () => {
-    if (!apiClient.isAuthenticated()) return;
+    if (!authService.isAuthenticated()) return;
     
     try {
       const usernameStatus = await usernameService.getStatus();
@@ -166,14 +168,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isInitialized.current = true;
       dispatch({ type: 'SET_CHECKING', payload: true });
       
-      // Check for OAuth callback token
+      // Check for OAuth callback tokens
       const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token');
+      const accessToken = urlParams.get('accessToken');
+      const refreshToken = urlParams.get('refreshToken');
+      const legacyToken = urlParams.get('token'); // Backward compatibility
       
-      if (token) {
-        // Process OAuth token immediately
-        localStorage.setItem('authToken', token);
-        const user = apiClient.getCurrentUser();
+      if (accessToken && refreshToken) {
+        // Process new dual-token OAuth response
+        authService.storeTokens(accessToken, refreshToken);
+        const user = authService.getCurrentUser();
+        dispatch({ type: 'SET_AUTHENTICATED', payload: { isAuth: true, user } });
+        window.history.replaceState({}, '', window.location.pathname);
+        
+        // Redirect immediately - no delays
+        window.location.href = '/feed';
+        return;
+      } else if (legacyToken) {
+        // Handle legacy single-token format (backward compatibility)
+        localStorage.setItem('authToken', legacyToken);
+        const user = authService.getCurrentUser();
         dispatch({ type: 'SET_AUTHENTICATED', payload: { isAuth: true, user } });
         window.history.replaceState({}, '', window.location.pathname);
         

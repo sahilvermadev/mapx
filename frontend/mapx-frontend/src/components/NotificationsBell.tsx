@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { notificationsApi, type Notification } from '@/services/notifications';
+import { notificationsApi, type Notification } from '@/services/notificationsService';
 
 interface NotificationsBellProps {
   currentUserId?: string;

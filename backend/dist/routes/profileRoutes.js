@@ -37,15 +37,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const annotations_1 = require("../db/annotations");
+const recommendations_1 = require("../db/recommendations");
 const social_1 = require("../db/social");
 const db_1 = __importDefault(require("../db"));
 const router = express_1.default.Router();
-// Temporarily disable authentication for testing
-const requireAuth = (req, res, next) => {
-    // Skip authentication for now
-    next();
-};
+// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * GET /api/profile/:userId
  * Get user profile data
@@ -224,7 +220,7 @@ router.get('/:userId/saved', async (req, res) => {
 router.delete('/recommendations/:annotationId', async (req, res) => {
     try {
         const { annotationId } = req.params;
-        const success = await (0, annotations_1.deleteAnnotation)(parseInt(annotationId), 'test-user-id');
+        const success = await (0, recommendations_1.deleteRecommendation)(parseInt(annotationId), 'test-user-id');
         if (!success) {
             return res.status(404).json({
                 success: false,

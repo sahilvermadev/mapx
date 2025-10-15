@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './api';
+import { apiClient, type ApiResponse } from './apiClient';
 import type { FeedPost } from './social';
 
 // Feed API service

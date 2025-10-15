@@ -7,7 +7,19 @@ import {
   calculateCosineSimilarity,
   validateEmbedding
 } from './embeddings';
-import { AnnotationData } from '../db/annotations';
+// Use a local test type to avoid importing deprecated annotations module
+type TestAnnotation = {
+  place_id: number;
+  user_id: string;
+  title?: string;
+  went_with?: string[];
+  labels?: string[];
+  notes?: string;
+  metadata?: Record<string, any>;
+  visit_date?: string;
+  rating?: number;
+  visibility?: 'friends' | 'public';
+};
 
 // Example usage of embedding functions
 async function exampleUsage() {
@@ -21,7 +33,7 @@ async function exampleUsage() {
     console.log('Embedding validation:', validateEmbedding(simpleEmbedding));
 
     // Example 2: Generate embedding from annotation data
-    const annotationData: AnnotationData = {
+    const annotationData: TestAnnotation = {
       place_id: 1,
       user_id: '550e8400-e29b-41d4-a716-446655440000',
       title: 'Amazing Coffee Experience',
@@ -81,7 +93,7 @@ async function exampleUsage() {
     console.log('Similarity between annotation and search query:', annotationSearchSimilarity.toFixed(4));
 
     // Example 8: Test with different annotation data
-    const differentAnnotation: AnnotationData = {
+    const differentAnnotation: TestAnnotation = {
       place_id: 2,
       user_id: '550e8400-e29b-41d4-a716-446655440000',
       title: 'Quick Lunch Spot',

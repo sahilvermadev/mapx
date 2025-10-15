@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 import { X, Check, AlertCircle, User } from 'lucide-react';
-import { apiClient } from '../services/api';
+import { apiClient } from '../../services/apiClient';
 
 interface UsernameSetupModalProps {
   onClose: () => void;

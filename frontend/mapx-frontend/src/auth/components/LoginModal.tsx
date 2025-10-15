@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Button } from './ui/button';
+import { Button } from '../../components/ui/button';
 import { X } from 'lucide-react';
 
 interface LoginModalProps {

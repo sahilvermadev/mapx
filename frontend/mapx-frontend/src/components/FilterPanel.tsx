@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FaStar, FaEye, FaEyeSlash, FaTimes } from 'react-icons/fa';
-import type { FilterOptions } from '../services/profile';
+import type { FilterOptions } from '../services/profileService';
 import { COMMON_GOOGLE_PLACES_TYPES } from '../utils/placeTypes';
 import GroupFilter from './GroupFilter';
 import './FilterPanel.css';

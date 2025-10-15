@@ -13,8 +13,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { profileApi, type UserData, type FilterOptions, type SortOptions } from '@/services/profile';
-import { useAuth } from '@/contexts/AuthContext';
+import { profileApi, type UserData, type FilterOptions, type SortOptions } from '@/services/profileService';
+import { useAuth } from '@/auth';
 
 import FeedPost from '@/components/FeedPost';
 import FilterPanel from '@/components/FilterPanel';

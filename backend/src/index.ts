@@ -1,10 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import session from 'express-session';
 import passport from 'passport';
 import path from 'path';
 import configurePassport from './config/passport';
+import { authenticateJWT } from './middleware/auth';
 import authRoutes from './routes/authRoutes';
 import recommendationRoutes from './routes/recommendationRoutes';
 import aiRecommendationRoutes from './routes/aiRecommendationRoutes';
@@ -36,49 +36,35 @@ if (!process.env.DATABASE_URL) {
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+// CORS configuration with environment-driven origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:5173']; // Default for development
+
+app.use(cors({ 
+  origin: allowedOrigins, 
+  credentials: true 
+}));
 app.use(express.json());
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'session-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000,
-    sameSite: 'lax',
-  },
-}));
-
+// JWT-only authentication (no sessions)
 app.use(passport.initialize());
-app.use(passport.session());
 configurePassport();
 
-passport.serializeUser((user: any, done) => done(null, user.id));
-passport.deserializeUser(async (id: string, done) => {
-  try {
-    const result = await pool.query(
-      'SELECT id, google_id, email, display_name, profile_picture_url FROM users WHERE id = $1',
-      [id]
-    );
-    done(null, result.rows[0] || false);
-  } catch (err) {
-    done(err as Error, false);
-  }
-});
-
+// OAuth routes (no JWT required)
 app.use('/auth', authRoutes);
-app.use('/api/recommendations', recommendationRoutes);
-app.use('/api/ai-recommendation', aiRecommendationRoutes);
-app.use('/api/location', locationRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/social', socialRoutes);
-app.use('/api/feed', feedRoutes);
-app.use('/api/friend-groups', friendGroupRoutes);
-app.use('/api/username', usernameRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/db', dbViewerRoutes);
+
+// All API routes require JWT authentication
+app.use('/api/recommendations', authenticateJWT, recommendationRoutes);
+app.use('/api/ai-recommendation', authenticateJWT, aiRecommendationRoutes);
+app.use('/api/location', authenticateJWT, locationRoutes);
+app.use('/api/profile', authenticateJWT, profileRoutes);
+app.use('/api/social', authenticateJWT, socialRoutes);
+app.use('/api/feed', authenticateJWT, feedRoutes);
+app.use('/api/friend-groups', authenticateJWT, friendGroupRoutes);
+app.use('/api/username', authenticateJWT, usernameRoutes);
+app.use('/api/notifications', authenticateJWT, notificationRoutes);
+app.use('/api/db', authenticateJWT, dbViewerRoutes);
 
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);

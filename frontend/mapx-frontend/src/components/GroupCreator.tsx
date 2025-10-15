@@ -5,8 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { friendGroupsApi, type CreateGroupData } from '@/services/friendGroups';
-import { socialApi, type User } from '@/services/social';
+import { friendGroupsApi, type CreateGroupData } from '@/services/friendGroupsService';
+import { socialApi, type User } from '@/services/socialService';
 
 interface GroupCreatorProps {
   isOpen: boolean;

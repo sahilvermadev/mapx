@@ -62,16 +62,9 @@ router.get('/dev-login', async (req, res) => {
             profilePictureUrl: mockUser.profile_picture_url,
             username: mockUser.username,
         }, jwtSecret, { expiresIn: '24h' });
-        // Set secure HTTP-only cookie and redirect
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
-        res.cookie('authToken', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 24 * 60 * 60 * 1000, // 24 hours
-            path: '/'
-        });
-        res.redirect(`${frontendUrl}/`);
+        // Redirect back to frontend with token param
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        res.redirect(`${frontendUrl}/?token=${token}`);
     }
     catch (error) {
         console.error('Dev login error:', error);
@@ -81,8 +74,11 @@ router.get('/dev-login', async (req, res) => {
 // GET /auth/google
 router.get('/google', passport_1.default.authenticate('google', { scope: ['profile', 'email'] }));
 // GET /auth/google/callback
-router.get('/google/callback', passport_1.default.authenticate('google', { failureRedirect: '/auth/failure' }), (req, res) => {
-    // user was set by passport strategy
+router.get('/google/callback', passport_1.default.authenticate('google', {
+    session: false, // Stateless OAuth - no session needed
+    failureRedirect: '/auth/failure'
+}), (req, res) => {
+    // user was set by passport strategy (stateless)
     const user = req.user;
     if (!user?.id)
         return res.redirect('/auth/failure');
@@ -93,61 +89,19 @@ router.get('/google/callback', passport_1.default.authenticate('google', { failu
         displayName: user.display_name,
         profilePictureUrl: user.profile_picture_url,
         username: user.username,
-    }, jwtSecret, { expiresIn: '1h' });
-    // Set secure HTTP-only cookie and redirect
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
-    res.cookie('authToken', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 60 * 60 * 1000, // 1 hour
-        path: '/'
-    });
-    res.redirect(`${frontendUrl}/`);
+    }, jwtSecret, { expiresIn: '24h' } // Increased to 24h for better UX
+    );
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/?token=${token}`);
 });
 // GET /auth/logout
-router.get('/logout', (req, res, next) => {
-    // Clear the auth token cookie
-    res.clearCookie('authToken', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/'
+router.get('/logout', (req, res) => {
+    // JWT-only logout - no session to destroy
+    // Frontend handles token removal
+    res.status(200).json({
+        success: true,
+        message: 'Logged out successfully'
     });
-    // Passport 0.6 requires callback
-    req.logout((err) => {
-        if (err)
-            return next(err);
-        req.session?.destroy(() => {
-            res.clearCookie('connect.sid');
-            res.status(200).json({ message: 'Logged out' });
-        });
-    });
-});
-// GET /auth/me - Get current user from cookie
-router.get('/me', (req, res) => {
-    const token = req.cookies.authToken;
-    if (!token) {
-        return res.status(401).json({ message: 'No authentication token' });
-    }
-    try {
-        const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
-        const decoded = jsonwebtoken_1.default.verify(token, jwtSecret);
-        res.json({
-            success: true,
-            user: {
-                id: decoded.id,
-                email: decoded.email,
-                displayName: decoded.displayName,
-                profilePictureUrl: decoded.profilePictureUrl,
-                username: decoded.username
-            }
-        });
-    }
-    catch (error) {
-        res.clearCookie('authToken');
-        res.status(401).json({ message: 'Invalid or expired token' });
-    }
 });
 // GET /auth/failure
 router.get('/failure', (_req, res) => {

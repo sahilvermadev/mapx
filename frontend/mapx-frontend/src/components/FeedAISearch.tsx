@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mic, ArrowUp, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { recommendationsApi, type SearchResponse } from '@/services/recommendationsApi';
+import { recommendationsApi, type SearchResponse } from '@/services/recommendationsApiService';
 
 interface FeedAISearchProps {
   isAuthenticated: boolean;

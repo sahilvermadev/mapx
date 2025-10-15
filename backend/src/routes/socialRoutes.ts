@@ -38,26 +38,12 @@ import { extractMentionUserIds, saveCommentMentions } from '../db/mentions';
 
 const router = express.Router();
 
-// Temporary authentication middleware (will be replaced with proper auth)
-const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // For now, we'll use a mock user ID from query params or request body
-  // In production, this would come from JWT token
-  const userId = req.query.currentUserId as string || req.body.currentUserId;
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentication required'
-    });
-  }
-  (req as any).user = { id: userId };
-  next();
-};
 
 /**
  * POST /api/social/follow/:userId
  * Follow a user
  */
-router.post('/follow/:userId', requireAuth, async (req, res) => {
+router.post('/follow/:userId', async (req, res) => {
   try {
     const followerId = (req as any).user.id;
     const followingId = req.params.userId;
@@ -91,7 +77,7 @@ router.post('/follow/:userId', requireAuth, async (req, res) => {
  * DELETE /api/social/unfollow/:userId
  * Unfollow a user
  */
-router.delete('/unfollow/:userId', requireAuth, async (req, res) => {
+router.delete('/unfollow/:userId', async (req, res) => {
   try {
     const followerId = (req as any).user.id;
     const followingId = req.params.userId;
@@ -118,7 +104,7 @@ router.delete('/unfollow/:userId', requireAuth, async (req, res) => {
  * GET /api/social/followers/:userId
  * Get user's followers
  */
-router.get('/followers/:userId', requireAuth, async (req, res) => {
+router.get('/followers/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -150,7 +136,7 @@ router.get('/followers/:userId', requireAuth, async (req, res) => {
  * GET /api/social/following/:userId
  * Get users that the user is following
  */
-router.get('/following/:userId', requireAuth, async (req, res) => {
+router.get('/following/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -182,7 +168,7 @@ router.get('/following/:userId', requireAuth, async (req, res) => {
  * GET /api/social/users/search
  * Search for users
  */
-router.get('/users/search', requireAuth, async (req, res) => {
+router.get('/users/search', async (req, res) => {
   try {
     const currentUserId = (req as any).user.id;
     const query = req.query.q as string;
@@ -222,7 +208,7 @@ router.get('/users/search', requireAuth, async (req, res) => {
  * GET /api/social/users/suggestions
  * Get suggested users to follow
  */
-router.get('/users/suggestions', requireAuth, async (req, res) => {
+router.get('/users/suggestions', async (req, res) => {
   try {
     const currentUserId = (req as any).user.id;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -248,7 +234,7 @@ router.get('/users/suggestions', requireAuth, async (req, res) => {
  * GET /api/social/privacy-settings
  * Get user's privacy settings
  */
-router.get('/privacy-settings', requireAuth, async (req, res) => {
+router.get('/privacy-settings', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const settings = await getPrivacySettings(userId);
@@ -278,7 +264,7 @@ router.get('/privacy-settings', requireAuth, async (req, res) => {
  * PUT /api/social/privacy-settings
  * Update user's privacy settings
  */
-router.put('/privacy-settings', requireAuth, async (req, res) => {
+router.put('/privacy-settings', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const settings = req.body;
@@ -305,7 +291,7 @@ router.put('/privacy-settings', requireAuth, async (req, res) => {
  * POST /api/social/block/:userId
  * Block a user
  */
-router.post('/block/:userId', requireAuth, async (req, res) => {
+router.post('/block/:userId', async (req, res) => {
   try {
     const blockerId = (req as any).user.id;
     const blockedId = req.params.userId;
@@ -339,7 +325,7 @@ router.post('/block/:userId', requireAuth, async (req, res) => {
  * DELETE /api/social/unblock/:userId
  * Unblock a user
  */
-router.delete('/unblock/:userId', requireAuth, async (req, res) => {
+router.delete('/unblock/:userId', async (req, res) => {
   try {
     const blockerId = (req as any).user.id;
     const blockedId = req.params.userId;
@@ -366,7 +352,7 @@ router.delete('/unblock/:userId', requireAuth, async (req, res) => {
  * POST /api/social/comments/:recommendationId
  * Add a comment to a recommendation
  */
-router.post('/comments/:recommendationId', requireAuth, async (req, res) => {
+router.post('/comments/:recommendationId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const recommendationId = parseInt(req.params.recommendationId);
@@ -410,7 +396,7 @@ router.post('/comments/:recommendationId', requireAuth, async (req, res) => {
  * GET /api/social/comments/:recommendationId
  * Get comments for a recommendation
  */
-router.get('/comments/:recommendationId', requireAuth, async (req, res) => {
+router.get('/comments/:recommendationId', async (req, res) => {
   try {
     const currentUserId = (req as any).user.id;
     const recommendationId = parseInt(req.params.recommendationId);
@@ -443,7 +429,7 @@ router.get('/comments/:recommendationId', requireAuth, async (req, res) => {
  * PUT /api/social/comments/:commentId
  * Update a comment
  */
-router.put('/comments/:commentId', requireAuth, async (req, res) => {
+router.put('/comments/:commentId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const commentId = parseInt(req.params.commentId);
@@ -478,7 +464,7 @@ router.put('/comments/:commentId', requireAuth, async (req, res) => {
  * DELETE /api/social/comments/:commentId
  * Delete a comment
  */
-router.delete('/comments/:commentId', requireAuth, async (req, res) => {
+router.delete('/comments/:commentId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const commentId = parseInt(req.params.commentId);
@@ -505,7 +491,7 @@ router.delete('/comments/:commentId', requireAuth, async (req, res) => {
  * POST /api/social/likes/recommendation/:recommendationId
  * Like a recommendation
  */
-router.post('/likes/recommendation/:recommendationId', requireAuth, async (req, res) => {
+router.post('/likes/recommendation/:recommendationId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const recommendationId = parseInt(req.params.recommendationId);
@@ -532,7 +518,7 @@ router.post('/likes/recommendation/:recommendationId', requireAuth, async (req, 
  * DELETE /api/social/likes/recommendation/:recommendationId
  * Unlike a recommendation
  */
-router.delete('/likes/recommendation/:recommendationId', requireAuth, async (req, res) => {
+router.delete('/likes/recommendation/:recommendationId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const recommendationId = parseInt(req.params.recommendationId);
@@ -559,7 +545,7 @@ router.delete('/likes/recommendation/:recommendationId', requireAuth, async (req
  * GET /api/social/likes/recommendation/:recommendationId
  * Get recommendation likes count and check if current user liked it
  */
-router.get('/likes/recommendation/:recommendationId', requireAuth, async (req, res) => {
+router.get('/likes/recommendation/:recommendationId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const recommendationId = parseInt(req.params.recommendationId);
@@ -591,7 +577,7 @@ router.get('/likes/recommendation/:recommendationId', requireAuth, async (req, r
  * POST /api/social/likes/comment/:commentId
  * Like a comment
  */
-router.post('/likes/comment/:commentId', requireAuth, async (req, res) => {
+router.post('/likes/comment/:commentId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const commentId = parseInt(req.params.commentId);
@@ -618,7 +604,7 @@ router.post('/likes/comment/:commentId', requireAuth, async (req, res) => {
  * DELETE /api/social/likes/comment/:commentId
  * Unlike a comment
  */
-router.delete('/likes/comment/:commentId', requireAuth, async (req, res) => {
+router.delete('/likes/comment/:commentId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const commentId = parseInt(req.params.commentId);
@@ -645,7 +631,7 @@ router.delete('/likes/comment/:commentId', requireAuth, async (req, res) => {
  * POST /api/social/saved/:placeId
  * Save a place
  */
-router.post('/saved/:placeId', requireAuth, async (req, res) => {
+router.post('/saved/:placeId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const placeId = parseInt(req.params.placeId);
@@ -673,7 +659,7 @@ router.post('/saved/:placeId', requireAuth, async (req, res) => {
  * DELETE /api/social/saved/:placeId
  * Remove place from saved
  */
-router.delete('/saved/:placeId', requireAuth, async (req, res) => {
+router.delete('/saved/:placeId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const placeId = parseInt(req.params.placeId);
@@ -700,7 +686,7 @@ router.delete('/saved/:placeId', requireAuth, async (req, res) => {
  * GET /api/social/saved/:placeId
  * Check if place is saved by current user
  */
-router.get('/saved/:placeId', requireAuth, async (req, res) => {
+router.get('/saved/:placeId', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const placeId = parseInt(req.params.placeId);

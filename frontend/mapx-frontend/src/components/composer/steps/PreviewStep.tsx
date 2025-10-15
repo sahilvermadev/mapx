@@ -1,15 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { MapPin, Star } from 'lucide-react';
+import ContactReveal from '@/components/ContactReveal';
+import { FaPlus } from 'react-icons/fa';
 
 interface PreviewStepProps {
   currentUser: { displayName?: string; email?: string; profilePictureUrl?: string } | null | undefined;
   placeName?: string;
   placeAddress?: string;
   description: string;
+  contentType?: 'place' | 'service' | 'tip' | 'contact' | 'unclear' | string;
+  contact?: { phone?: string; email?: string } | null;
   isEditingDescription: boolean;
   editedPreview: string;
   onEditedPreviewChange: (v: string) => void;
@@ -21,6 +25,8 @@ interface PreviewStepProps {
   onCancelEdit: () => void;
   onSaveEdit: () => void;
   onApprove: () => void;
+  labels?: string[];
+  onLabelsChange?: (labels: string[]) => void;
 }
 
 export const PreviewStep: React.FC<PreviewStepProps> = ({
@@ -28,6 +34,8 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
   placeName,
   placeAddress,
   description,
+  contentType,
+  contact,
   isEditingDescription,
   editedPreview,
   onEditedPreviewChange,
@@ -38,8 +46,36 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
   onEdit,
   onCancelEdit,
   onSaveEdit,
-  onApprove
+  onApprove,
+  labels = [],
+  onLabelsChange
 }) => {
+  const [customLabel, setCustomLabel] = useState<string>('');
+  const [showCustomInput, setShowCustomInput] = useState<boolean>(false);
+
+  // Label editing functions
+  const removeLabel = (labelToRemove: string) => {
+    if (!onLabelsChange) return;
+    const newLabels = labels.filter(l => l !== labelToRemove);
+    onLabelsChange(newLabels);
+  };
+
+  const addCustomLabel = () => {
+    const value = customLabel.trim();
+    if (!value || !onLabelsChange) return;
+    
+    const normalized = value.replace(/\s+/g, ' ').slice(0, 40);
+    const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    
+    const exists = labels.some(l => l.toLowerCase() === capitalized.toLowerCase());
+    if (exists) {
+      setCustomLabel('');
+      return;
+    }
+    
+    onLabelsChange([...labels, capitalized]);
+    setCustomLabel('');
+  };
   const renderStars = (rating: number) => (
     [...Array(5)].map((_, index) => (
       <Star
@@ -66,6 +102,8 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
     return RATING_MESSAGES[roundedRating] || '';
   };
 
+  // Contact icon now rendered inline next to location; reserved for future reuse
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -74,11 +112,8 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
       className="space-y-6 py-6"
     >
       <div className="max-w-3xl mx-auto space-y-4">
-        <h1 className="text-2xl font-light text-black leading-tight mb-6 text-center">
-          Preview your recommendation
-        </h1>
 
-        <article className="w-full border-b border-border/50 pb-6 mb-6">
+        <article className="w-full border-b border-border/50 pb-6 mb-6 relative">
           <div className="relative">
             {rating && (
               <div className="absolute top-4 right-4 z-10">
@@ -121,12 +156,21 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                   <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3 pr-24">
                     <MapPin className="h-3 w-3 flex-shrink-0" />
                     <span className="truncate">{placeAddress}</span>
+                    {contentType === 'service' && (contact?.phone || contact?.email) && (
+                      <ContactReveal
+                        contact={contact}
+                        className="relative ml-2"
+                        buttonClassName="h-5 w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
+                        iconClassName="h-3 w-3"
+                        align="right"
+                      />
+                    )}
                   </div>
                 )}
 
                 {description && (
                   <div className="mb-3">
-                    <h4 className="font-semibold text-sm mb-1">Notes:</h4>
+                    {/* <h4 className="font-semibold text-sm mb-1">Notes:</h4> */}
                     {isEditingDescription ? (
                       <Textarea
                         value={editedPreview}
@@ -139,6 +183,79 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Labels Section */}
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* AI-generated and user labels */}
+                    {labels.map((label, index) => (
+                      <span
+                        key={index}
+                        className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200"
+                      >
+                        {label}
+                        {onLabelsChange && (
+                          <button
+                            type="button"
+                            onClick={() => removeLabel(label)}
+                            className="ml-1.5 text-yellow-600 hover:text-yellow-800 focus:outline-none transition-colors"
+                            aria-label={`Remove ${label} label`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    
+                    {/* Add custom label input */}
+                    {showCustomInput ? (
+                      <div className="inline-flex items-center gap-1">
+                        <input
+                          className="px-2.5 py-1 rounded-full text-xs font-medium border-[1.5px] border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+                          value={customLabel}
+                          onChange={e => setCustomLabel(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              addCustomLabel();
+                              setShowCustomInput(false);
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              setShowCustomInput(false);
+                              setCustomLabel('');
+                            }
+                          }}
+                          onBlur={() => {
+                            if (!customLabel.trim()) {
+                              setShowCustomInput(false);
+                            }
+                          }}
+                          placeholder="Add label…"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { addCustomLabel(); setShowCustomInput(false); }}
+                          disabled={!customLabel.trim()}
+                          className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label="Add label"
+                        >
+                          <FaPlus />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomInput(true)}
+                        className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5"
+                        aria-label="Add label"
+                      >
+                        <FaPlus />
+                        <span className="ml-1">Add</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

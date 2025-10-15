@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, Star, Heart, Bookmark, Share2, MapPin } from 'lucide-react';
 import ReviewModal, { type ReviewPayload } from './ReviewModal';
-import { recommendationsApi } from '../services/recommendationsApi';
+import { recommendationsApi } from '../services/recommendationsApiService';
 import { formatGoogleTypeForDisplay } from '../utils/placeTypes';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';

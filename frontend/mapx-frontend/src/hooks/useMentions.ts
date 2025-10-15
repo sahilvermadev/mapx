@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { socialApi } from '@/services/social';
+import { socialApi } from '@/services/socialService';
 
 export interface MentionUser {
   id: string;

@@ -18,38 +18,8 @@ import { embeddingQueue } from '../services/embeddingQueue';
 import pool from '../db'; // Import pool directly from db.ts
 import type { RecommendationSearchResult } from '../db/recommendations';
 import { extractMentionUserIds, savePostMentions } from '../db/mentions';
+import { getUserIdFromRequest } from '../middleware/auth';
 
-// Helper to extract user id from Bearer JWT if session user is not set
-function getUserIdFromRequest(req: express.Request): string | null {
-  const sessionUser = (req as any).user;
-  if (sessionUser && sessionUser.id) return sessionUser.id as string;
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return null;
-  const token = auth.slice(7);
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
-    const payload = JSON.parse(payloadJson);
-    return payload.id || payload.user_id || null;
-  } catch {
-    return null;
-  }
-}
-
-// Authentication middleware
-const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const userId = getUserIdFromRequest(req);
-  if (!userId) {
-    return res.status(401).json({
-      success: false,
-      message: 'Authentication required'
-    });
-  }
-
-  (req as any).user = { id: userId };
-  next();
-};
 import { upsertService } from '../services/serviceDeduplication';
 import { extractServiceType } from '../utils/nameSimilarity';
 
@@ -120,7 +90,7 @@ interface SaveRecommendationRequest {
   rating?: number;
   visibility?: 'friends' | 'public';
   
-  // User data (from authenticated session)
+  // User data (from JWT authentication)
   user_id: string;
 }
 
@@ -406,6 +376,10 @@ router.post('/save', async (req, res) => {
         ...place_metadata,
         ...(priceInfo ? priceInfo : {})
       };
+      // Canonical display address for UI
+      if (place_address) {
+        (finalContentData as any).display_address = place_address;
+      }
     } else if (finalContentType === 'service' && serviceId) {
       // For service recommendations, store service-specific data
       finalContentData = {
@@ -420,6 +394,11 @@ router.post('/save', async (req, res) => {
         ...service_metadata,
         ...(priceInfo ? priceInfo : {})
       };
+      // Canonical display address for UI
+      const canonicalServiceAddress = service_address || (finalContentData as any).address || (finalContentData as any).service_address;
+      if (canonicalServiceAddress) {
+        (finalContentData as any).display_address = canonicalServiceAddress;
+      }
     }
 
     // Step 3: Insert the recommendation with auto-generated embedding
@@ -582,7 +561,7 @@ router.get('/user/:userId', async (req, res) => {
  * GET /api/recommendations/place/:placeId
  * Get all recommendations for a specific place
  */
-router.get('/place/:placeId', requireAuth, async (req, res) => {
+router.get('/place/:placeId', async (req, res) => {
   try {
     const currentUserId = (req as any).user.id;
     const { placeId } = req.params;
@@ -670,7 +649,7 @@ router.get('/place/:placeId/network-rating', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid place ID is required' });
     }
 
-    // Get current user from session or JWT
+    // Get current user from JWT
     const userId = getUserIdFromRequest(req);
     // If unauthenticated, return empty rating rather than 401 to avoid disrupting UX
     if (!userId) {
@@ -1135,7 +1114,7 @@ router.post('/search', async (req, res) => {
  * GET /api/recommendations/places/reviewed
  * Get all places that have reviews/annotations
  */
-router.get('/places/reviewed', requireAuth, async (req, res) => {
+router.get('/places/reviewed', async (req, res) => {
   try {
     const currentUserId = (req as any).user.id;
     const visibility = req.query.visibility as 'friends' | 'public' | 'all' || 'all';

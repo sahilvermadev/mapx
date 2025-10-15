@@ -347,7 +347,7 @@ Respond with JSON:
 
   /**
    * Ensure per-category required fields are represented in missingFields with correct UI hints.
-   * - place: require location/address selection via Maps picker
+   * - place: require location/address selection via Maps picker 
    * - service: require at least one identifier (phone or email)
    * - future categories: add here; UI can render dynamically
    */
@@ -406,36 +406,78 @@ Respond with JSON:
       console.log('recommendationAI.formatRecommendationPost - data:', data);
       console.log('recommendationAI.formatRecommendationPost - originalText:', originalText);
       
-      const prompt = `You are a formatting assistant creating short, utilitarian recommendation posts in a third-person perspective.
-  
-  STYLE:
-  - Write 3–8 concise sentences in third-person, focusing on key details to inform and engage readers.
-  - Use a natural, straightforward tone that feels authentic and avoids overly personal or fake enthusiasm.
-  - Include only the following fields if explicitly provided in data: name/category, address, pricing, contact (phone/email), best time, tips, specialities.
-  - Order: name/category; address; pricing; contact; best time; tips; specialities.
-  - Completely skip any field not provided in the data; do not mention missing fields or say they are unavailable.
-  - Never invent or assume details; use only the provided data.
-  - Ensure readability with line breaks between sentences.
-  - Craft the post to pique interest with practical details, avoiding fluff or emojis.
-  - If originalText is provided, use it as inspiration for tone but prioritize data accuracy.
-  
-  DATA (includes additional_details from Q&A):
-  ${JSON.stringify(data, null, 2)}
-  
-  ORIGINAL (optional):
-  ${originalText || ''}
-  
-  TASK:
-  Produce a recommendation post in 3–8 lines, each a simple sentence in third-person.
-  Example:
-  Cafe Bloom offers a cozy cafe experience.
-  It's located at 123 Main St, Springfield.
-  Pricing is mid-range.
-  Mornings are the best time to visit.
-  Try the seasonal pastry for a treat.
-  
-  Return only the final text:`;
-  
+      // Determine content type from data (backend tolerant of either key)
+      const contentType: string = data?.contentType || data?.type || 'unclear';
+
+      // Build a content-type-aware prompt
+      const baseData = JSON.stringify(data, null, 2);
+      const original = originalText || '';
+
+      const servicePrompt = `You are formatting a SERVICE recommendation.
+
+GOAL:
+- Produce copy that reads like a trustworthy human wrote it: specific, clear, and to the point.
+
+STYLE:
+- Write 3–5 short sentences in third-person, using active voice.
+- Mention concrete details only when provided: specialties, outcomes, responsiveness, pricing, years of experience.
+- Prefer the professional title (e.g., neurosurgeon, carpenter) over generic terms like "service provider".
+- Avoid boilerplate phrases and hedging: do not use "recommended service provider", "skilled professional", "notable recommendation", or "as evidenced by".
+- Do not repeat the name more than once and vary sentence openings.
+- If the ORIGINAL text contains first-person details (e.g., "treated my son"), paraphrase to neutral third-person without implying AI authorship (e.g., "treated a patient" or "completed a successful procedure"). Do not mention "the recommender".
+- Never invent details.
+- Do not include location or contact information; the UI shows those separately.
+
+DATA:
+${baseData}
+
+ORIGINAL (optional):
+${original}
+
+Return only the final text.`;
+
+      const placePrompt = `You are formatting a PLACE recommendation.
+
+GOAL:
+- Help a reader quickly understand why the place is worth a visit.
+
+STYLE:
+- Write 3–5 short sentences in third-person, using active voice.
+- Focus on vibe, what it’s good for, best times to go, and any practical tip provided (queues, noise level, must-try items).
+- Avoid generic phrases like "recommended place" and avoid repeating the name more than once.
+- If the ORIGINAL text uses first-person anecdotes, paraphrase to neutral third-person (e.g., "I loved the quiet mornings" -> "Quiet in the mornings"). Do not mention "the recommender".
+- Keep language descriptive but utilitarian; no emojis or fluff. Never invent details.
+- Do not include location or contact information; the UI shows those separately.
+
+DATA:
+${baseData}
+
+ORIGINAL (optional):
+${original}
+
+Return only the final text.`;
+
+      const genericPrompt = `You are a formatting assistant creating short, useful recommendation posts in third-person.
+
+STYLE:
+- Write 3–5 short sentences in active voice.
+- Be specific, avoid filler and clichés. Do not repeat the name more than once.
+- Only use details that exist in the data (category, specialties, pricing, best time, tips). Never invent.
+- Convert any first-person statements from the ORIGINAL into neutral third-person without implying authorship or personal involvement. Avoid phrases like "I recommend" or "the recommender".
+- Do not include location or contact information; the UI surfaces those separately.
+
+DATA:
+${baseData}
+
+ORIGINAL (optional):
+${original}
+
+Return only the final text.`;
+
+      const prompt = contentType === 'service' ? servicePrompt
+        : contentType === 'place' ? placePrompt
+        : genericPrompt;
+
       const response = await groq.chat.completions.create({
         messages: [{ role: 'user', content: prompt }],
         model: 'llama-3.3-70b-versatile',
@@ -455,36 +497,34 @@ Respond with JSON:
   
     } catch (error) {
       console.error('Error formatting recommendation post:', error);
-      // Fallback: construct a simple formatted post locally to keep UX flowing
+      // Fallback: construct a simple formatted post locally to keep UX flowing (content-type aware, no contact info in text)
       const lines: string[] = [];
-      const nameOrCategory = (data?.name || data?.category || data?.type || data?.contentType || 'This recommendation').toString();
-      lines.push(`${nameOrCategory} is recommended.`);
-      if (data?.address || data?.location) {
-        lines.push(`Located at ${data.address || data.location}.`);
+      const nameOrCategory = (data?.name || data?.category || data?.title || 'This recommendation').toString();
+      const ct: string = data?.contentType || data?.type || 'unclear';
+
+      if (ct === 'service') {
+        lines.push(`${nameOrCategory} is recommended for their expertise.`);
+        if (Array.isArray(data?.specialities) && data.specialities.length) {
+          lines.push(`Specialities: ${data.specialities.join(', ')}.`);
+        }
+        if (data?.best_times) lines.push(`Best time: ${data.best_times}.`);
+        if (data?.tips) lines.push(`${data.tips}.`);
+      } else if (ct === 'place') {
+        lines.push(`${nameOrCategory} is a recommended place to visit.`);
+        const address = data?.location || data?.location_address;
+        if (address) lines.push(`Address: ${address}.`);
+        if (data?.pricing) lines.push(`Pricing: ${data.pricing}.`);
+        if (data?.best_times) lines.push(`Best time: ${data.best_times}.`);
+        if (data?.tips) lines.push(`${data.tips}.`);
+      } else {
+        lines.push(`${nameOrCategory} is recommended.`);
+        if (data?.pricing) lines.push(`Pricing: ${data.pricing}.`);
+        if (data?.best_times) lines.push(`Best time: ${data.best_times}.`);
+        if (data?.tips) lines.push(`${data.tips}.`);
+        if (Array.isArray(data?.specialities) && data.specialities.length) lines.push(`specialities: ${data.specialities.join(', ')}.`);
       }
-      if (data?.pricing) {
-        lines.push(`Pricing: ${data.pricing}.`);
-      }
-      const contactParts: string[] = [];
-      const contact = data?.contact || data?.contact_info;
-      if (contact?.phone) contactParts.push(`Phone: ${contact.phone}`);
-      if (contact?.email) contactParts.push(`Email: ${contact.email}`);
-      if (contactParts.length) {
-        lines.push(contactParts.join(' | '));
-      }
-      if (data?.best_times) {
-        lines.push(`Best time: ${data.best_times}.`);
-      }
-      if (data?.tips) {
-        lines.push(`${data.tips}.`);
-      }
-      if (Array.isArray(data?.specialities) && data.specialities.length) {
-        lines.push(`specialities: ${data.specialities.join(', ')}.`);
-      }
-      if (lines.length === 1 && originalText) {
-        // Ensure minimum content
-        lines.push(originalText);
-      }
+
+      if (!lines.length && originalText) lines.push(originalText);
       return lines.join('\n');
     }
   }

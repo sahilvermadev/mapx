@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { socialApi } from '@/services/social';
+import { socialApi } from '@/services/socialService';
 
 export const useFollowMutation = (currentUserId: string) => {
   const queryClient = useQueryClient();

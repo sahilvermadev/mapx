@@ -2,9 +2,8 @@ import React, { Suspense, lazy, useMemo, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './components/Header';
-import UsernameSetupModal from './components/UsernameSetupModal';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { AuthErrorBoundary } from './components/AuthErrorBoundary';
+import { UsernameSetupModal } from './auth';
+import { AuthProvider, useAuth, AuthErrorBoundary } from './auth';
 import { Toaster } from "sonner";
 
 // Lazy load page components for better performance
@@ -53,9 +52,11 @@ const AppContent: React.FC = () => {
     if (isRootRoute && isInitialized && !isChecking) {
       // Check if we're in the middle of an OAuth callback
       const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token');
+      const accessToken = urlParams.get('accessToken');
+      const refreshToken = urlParams.get('refreshToken');
+      const legacyToken = urlParams.get('token');
       
-      if (token) {
+      if (accessToken || refreshToken || legacyToken) {
         // Don't redirect if we're processing an OAuth callback
         return;
       }

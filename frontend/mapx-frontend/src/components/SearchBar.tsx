@@ -1,9 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { FaSearch, FaBrain, FaMapMarkerAlt } from 'react-icons/fa';
 import type { PlaceDetails } from './ContentCard';
-import type { SearchResponse } from '../services/recommendationsApi';
+import type { SearchResponse } from '../services/recommendationsApiService';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
-import { friendGroupsApi, type FriendGroup } from '../services/friendGroups';
+import { friendGroupsApi, type FriendGroup } from '../services/friendGroupsService';
 import './SearchBar.css';
 
 interface SearchBarProps {

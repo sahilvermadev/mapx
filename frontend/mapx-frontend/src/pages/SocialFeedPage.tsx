@@ -13,14 +13,14 @@ import FeedAISearch from '@/components/FeedAISearch';
 import AIResponseBanner from '@/components/SocialFeed/AIResponseBanner';
 import FeedGroups from '@/components/SocialFeed/FeedGroups';
 
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth';
 import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
 import { useFeedQuery } from '@/hooks/useFeedQuery';
 import { useSuggestedUsersQuery } from '@/hooks/useSuggestedUsersQuery';
 import { useFollowMutation } from '@/hooks/useFollowMutation';
 
-import { type User, type FeedPost as FeedPostType } from '@/services/social';
-import type { SearchResponse } from '@/services/recommendationsApi';
+import { type User, type FeedPost as FeedPostType } from '@/services/socialService';
+import type { SearchResponse } from '@/services/recommendationsApiService';
 
 // Helper functions
 const getInitials = (name: string): string => 

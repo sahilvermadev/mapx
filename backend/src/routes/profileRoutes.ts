@@ -1,16 +1,10 @@
 import express from 'express';
-import { getAnnotationsByUserId, deleteAnnotation } from '../db/annotations';
-import { getPlaceByGoogleId } from '../db/places';
+import { deleteRecommendation } from '../db/recommendations';
 import { getSavedPlacesCount, getSavedPlaces } from '../db/social';
 import pool from '../db';
 
 const router = express.Router();
 
-// Temporarily disable authentication for testing
-const requireAuth = (req: any, res: any, next: any) => {
-  // Skip authentication for now
-  next();
-};
 
 /**
  * GET /api/profile/:userId
@@ -252,7 +246,7 @@ router.delete('/recommendations/:annotationId', async (req, res) => {
   try {
     const { annotationId } = req.params;
     
-    const success = await deleteAnnotation(parseInt(annotationId), 'test-user-id');
+    const success = await deleteRecommendation(parseInt(annotationId), 'test-user-id');
     
     if (!success) {
       return res.status(404).json({

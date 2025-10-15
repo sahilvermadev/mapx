@@ -52,14 +52,14 @@ The enhanced embeddings enable powerful semantic searches:
 ### **Backend Components**
 
 #### **Enhanced Embedding Generation (`backend/src/utils/embeddings.ts`)**
-- **`generateAnnotationEmbedding()`**: Creates embeddings with place names, addresses, user names, and all review data
+- **`generateRecommendationEmbedding()`**: Creates embeddings with place/service/user context and rich content
 - **`generateSearchEmbedding()`**: Converts user queries into embeddings for similarity search
 - **`generatePlaceEmbedding()`**: Generates embeddings for place information
 
-#### **Database Operations (`backend/src/db/annotations.ts`)**
-- **`insertAnnotation()`**: Automatically generates enhanced embeddings with place and user info
-- **`searchAnnotationsBySimilarity()`**: Performs vector similarity search using pgvector
-- **`regenerateAllEmbeddings()`**: Updates existing embeddings with enhanced data
+#### **Database Operations (`backend/src/db/recommendations.ts`)**
+- **`insertRecommendation()`**: Queues embedding generation asynchronously
+- **`searchRecommendationsBySimilarity()`**: Performs vector similarity search using pgvector
+- **`regenerateAllRecommendationEmbeddings()`**: Updates existing embeddings with enhanced data
 
 #### **Search API (`backend/src/routes/recommendationRoutes.ts`)**
 - **`POST /api/recommendations/search`**: Main semantic search endpoint with AI-powered summaries
@@ -102,11 +102,22 @@ The enhanced embeddings enable powerful semantic searches:
 - **Conciseness**: 3-4 sentence summaries with actionable insights
 - **Fallback Handling**: Graceful degradation when AI fails
 
+## 📚 Documentation
+
+All project documentation is organized in the [`docs/`](./docs/) folder:
+
+- **[Complete Documentation Index](./docs/README.md)** - Overview of all documentation
+- **[Authentication Strategy](./docs/COMPREHENSIVE_AUTHENTICATION_STRATEGY.md)** - Complete authentication system (includes setup guide)
+- **[Backend Documentation](./docs/BACKEND_DOCUMENTATION.md)** - API and implementation details
+- **[AI Features](./docs/ASYNC_EMBEDDING_IMPLEMENTATION.md)** - Embedding and semantic search
+- **[Frontend Components](./docs/LANDING_PAGE_README.md)** - UI implementation guides
+
 ## 🚀 Getting Started
 
 ### **Prerequisites**
 - Node.js 18+
 - PostgreSQL 13+ with pgvector extension
+- Redis 7+ (for authentication)
 - OpenAI API key
 - Groq API key
 
@@ -115,6 +126,9 @@ The enhanced embeddings enable powerful semantic searches:
 # Database
 DATABASE_URL=postgresql://user:password@localhost:5432/mapx
 
+# Redis (for authentication)
+REDIS_URL=redis://localhost:6379
+
 # AI Services
 OPENAI_API_KEY=your_openai_api_key
 GROQ_API_KEY=your_groq_api_key
@@ -122,6 +136,9 @@ GROQ_API_KEY=your_groq_api_key
 # Google Services
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+# JWT Secret
+JWT_SECRET=your_jwt_secret_key
 ```
 
 ### **Installation & Setup**
@@ -135,10 +152,10 @@ cd backend && npm install
 cd ../frontend/mapx-frontend && npm install
 ```
 
-2. **Set up database**
+2. **Set up services**
 ```bash
-# Start PostgreSQL with pgvector
-docker-compose up db
+# Start PostgreSQL and Redis
+docker-compose up db redis
 
 # Run migrations
 cd backend
@@ -191,7 +208,7 @@ curl -X POST http://localhost:5000/api/recommendations/search \
 ## 📊 Performance Considerations
 
 ### **Embedding Generation**
-- New annotations automatically get enhanced embeddings
+- New recommendations automatically get enhanced embeddings
 - Existing embeddings can be regenerated in batches
 - Process handles 10 annotations concurrently to avoid API rate limits
 

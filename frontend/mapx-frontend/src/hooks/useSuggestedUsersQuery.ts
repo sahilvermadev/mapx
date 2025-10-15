@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { socialApi } from '@/services/social';
-import type { User } from '@/services/social';
+import { socialApi } from '@/services/socialService';
+import type { User } from '@/services/socialService';
 
 // Constants
 const SUGGESTED_USERS_LIMIT = 5;

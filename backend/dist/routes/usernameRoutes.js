@@ -5,30 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const db_1 = __importDefault(require("../db"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
-// Helper to extract user id from Bearer JWT
-function getUserIdFromRequest(req) {
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer '))
-        return null;
-    const token = auth.slice(7);
-    try {
-        // Use the same fallback secret used when issuing dev tokens
-        const secret = process.env.JWT_SECRET || 'dev-secret-key';
-        const decoded = jsonwebtoken_1.default.verify(token, secret);
-        if (!decoded?.id) {
-            console.warn('UsernameRoutes: JWT verified but missing id claim');
-        }
-        return decoded.id || null;
-    }
-    catch (err) {
-        const errName = err?.name;
-        const errMsg = err?.message;
-        console.warn('UsernameRoutes: JWT verification failed', { name: errName, message: errMsg });
-        return null;
-    }
-}
+// Note: Authentication is now handled by the JWT middleware in index.ts
 // Check if username is available
 router.get('/check/:username', async (req, res) => {
     try {
@@ -64,7 +43,7 @@ router.get('/check/:username', async (req, res) => {
 router.post('/set', async (req, res) => {
     try {
         const { username } = req.body;
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         if (!userId) {
             return res.status(401).json({ error: 'Authentication required' });
         }
@@ -109,7 +88,7 @@ router.post('/set', async (req, res) => {
 // Get current user's username status
 router.get('/status', async (req, res) => {
     try {
-        const userId = getUserIdFromRequest(req);
+        const userId = (0, auth_1.getUserIdFromRequest)(req);
         if (!userId) {
             return res.status(401).json({ error: 'Authentication required' });
         }

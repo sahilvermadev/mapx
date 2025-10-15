@@ -6,17 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const recommendationAI_1 = require("../services/recommendationAI");
 const router = express_1.default.Router();
-// Temporary auth middleware (replace with your actual auth)
-const requireAuth = (req, res, next) => {
-    const currentUserId = req.body.currentUserId || req.query.currentUserId;
-    if (!currentUserId) {
-        return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
-    req.user = { id: currentUserId };
-    next();
-};
+// Note: Authentication is now handled by the JWT middleware in index.ts
 // Analyze recommendation text
-router.post('/analyze', requireAuth, async (req, res) => {
+router.post('/analyze', async (req, res) => {
     try {
         const { text } = req.body;
         if (!text || typeof text !== 'string') {
@@ -46,7 +38,7 @@ router.post('/analyze', requireAuth, async (req, res) => {
     }
 });
 // Generate follow-up question
-router.post('/question', requireAuth, async (req, res) => {
+router.post('/question', async (req, res) => {
     try {
         const { currentData, missingField, contentType, conversationHistory } = req.body;
         if (!missingField || !contentType) {
@@ -70,7 +62,7 @@ router.post('/question', requireAuth, async (req, res) => {
     }
 });
 // Validate user response
-router.post('/validate', requireAuth, async (req, res) => {
+router.post('/validate', async (req, res) => {
     try {
         const { question, userResponse, expectedField } = req.body;
         if (!question || !userResponse || !expectedField) {
@@ -94,7 +86,7 @@ router.post('/validate', requireAuth, async (req, res) => {
     }
 });
 // Format recommendation text using LLM
-router.post('/format', requireAuth, async (req, res) => {
+router.post('/format', async (req, res) => {
     try {
         console.log('=== LLM FORMAT ENDPOINT ===');
         console.log('aiRecommendationRoutes - req.body:', req.body);

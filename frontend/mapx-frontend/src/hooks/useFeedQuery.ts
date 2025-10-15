@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { feedApi } from '@/services/feed';
-import type { FeedPost } from '@/services/social';
+import { feedApi } from '@/services/feedService';
+import type { FeedPost } from '@/services/socialService';
 
 // Constants
 const FEED_LIMIT = 20;

@@ -14,11 +14,19 @@ The API service layer follows a clean architecture pattern with:
 
 ### `api.ts`
 Base API client with:
-- JWT token management
+- Dual JWT token management (access + refresh tokens)
+- Automatic token refresh
 - Request/response interceptors
-- Automatic authentication headers
+- Authentication headers
 - Error handling and 401 redirects
 - User authentication status checks
+
+### Authentication Services
+Authentication services have been moved to the `auth/` module:
+- `auth/services/authService.ts` - Core authentication service
+- `auth/services/username.ts` - Username management service
+
+See `../auth/README.md` for authentication module documentation.
 
 ### `recommendations.ts`
 Recommendation API functions:
@@ -36,14 +44,21 @@ Test utilities for verifying API functionality.
 ### Basic Usage
 
 ```typescript
-import { apiClient } from '../services/api';
-import { recommendationsApi } from '../services/recommendationsApi';
+import { apiClient } from '../services/apiClient';
+import { authService } from '../auth';
+import { recommendationsApi } from '../services/recommendationsApiService';
 
 // Check if user is authenticated
-const isAuth = apiClient.isAuthenticated();
+const isAuth = authService.isAuthenticated();
 
 // Get current user from JWT
-const user = apiClient.getCurrentUser();
+const user = authService.getCurrentUser();
+
+// Store tokens from OAuth callback
+authService.storeTokens(accessToken, refreshToken);
+
+// Logout user
+await authService.logout();
 
 // Save a recommendation
 const result = await recommendationsApi.saveRecommendation({
@@ -58,10 +73,17 @@ const result = await recommendationsApi.saveRecommendation({
 ### Authentication
 
 The API client automatically:
-- Extracts JWT tokens from `localStorage.getItem('authToken')`
+- Extracts access tokens from `localStorage.getItem('accessToken')`
 - Adds `Authorization: Bearer <token>` headers to requests
-- Handles 401 errors by redirecting to login
+- Automatically refreshes tokens when they expire
+- Handles 401 errors by attempting token refresh
 - Provides user information from JWT payload
+
+The auth service provides:
+- Dual token management (access + refresh tokens)
+- Automatic token refresh before expiration
+- Proper logout with token blacklisting
+- Token validation and expiration checking
 
 ### Error Handling
 

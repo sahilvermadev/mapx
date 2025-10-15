@@ -8,20 +8,12 @@ const google_maps_services_js_1 = require("@googlemaps/google-maps-services-js")
 const router = express_1.default.Router();
 // Initialize Google Maps client
 const googleMapsClient = new google_maps_services_js_1.Client({});
-// Temporary auth middleware (replace with your actual auth)
-const requireAuth = (req, res, next) => {
-    const currentUserId = req.body.currentUserId || req.query.currentUserId;
-    if (!currentUserId) {
-        return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
-    req.user = { id: currentUserId };
-    next();
-};
+// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * POST /api/location/search
  * Search for places using Google Places API
  */
-router.post('/search', requireAuth, async (req, res) => {
+router.post('/search', async (req, res) => {
     try {
         const { query, types = ['establishment', 'geocode'] } = req.body;
         if (!query || typeof query !== 'string') {
@@ -108,7 +100,7 @@ router.post('/search', requireAuth, async (req, res) => {
  * GET /api/location/place/:placeId
  * Get detailed information for a specific place
  */
-router.get('/place/:placeId', requireAuth, async (req, res) => {
+router.get('/place/:placeId', async (req, res) => {
     try {
         const { placeId } = req.params;
         if (!placeId) {

@@ -2,7 +2,7 @@ import { EmbeddingQueue } from './embeddingQueue';
 
 // Mock the dependencies
 jest.mock('../utils/embeddings', () => ({
-  generateAnnotationEmbedding: jest.fn().mockResolvedValue([0.1, 0.2, 0.3])
+  generateRecommendationEmbedding: jest.fn().mockResolvedValue([0.1, 0.2, 0.3])
 }));
 
 jest.mock('../db/places', () => ({
@@ -34,9 +34,9 @@ describe('EmbeddingQueue', () => {
   });
 
   test('should enqueue tasks correctly', async () => {
-    const taskId = await queue.enqueue('annotation', 1, { user_id: 'test-user' }, 'normal');
+    const taskId = await queue.enqueue('recommendation', 1, { user_id: 'test-user' }, 'normal');
     
-    expect(taskId).toMatch(/^annotation-1-/);
+    expect(taskId).toMatch(/^recommendation-1-/);
     
     const status = queue.getStatus();
     expect(status.queueLength).toBe(1);
@@ -44,7 +44,7 @@ describe('EmbeddingQueue', () => {
   });
 
   test('should process tasks asynchronously', async () => {
-    const taskId = await queue.enqueue('annotation', 1, { user_id: 'test-user' }, 'normal');
+    const taskId = await queue.enqueue('recommendation', 1, { user_id: 'test-user' }, 'normal');
     
     // Wait a bit for processing
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -54,17 +54,17 @@ describe('EmbeddingQueue', () => {
   });
 
   test('should handle priority correctly', async () => {
-    await queue.enqueue('annotation', 1, { user_id: 'test-user' }, 'low');
-    await queue.enqueue('annotation', 2, { user_id: 'test-user' }, 'high');
-    await queue.enqueue('annotation', 3, { user_id: 'test-user' }, 'normal');
+    await queue.enqueue('recommendation', 1, { user_id: 'test-user' }, 'low');
+    await queue.enqueue('recommendation', 2, { user_id: 'test-user' }, 'high');
+    await queue.enqueue('recommendation', 3, { user_id: 'test-user' }, 'normal');
     
     const status = queue.getStatus();
     expect(status.queueLength).toBe(3);
   });
 
   test('should clear queue', () => {
-    queue.enqueue('annotation', 1, { user_id: 'test-user' }, 'normal');
-    queue.enqueue('annotation', 2, { user_id: 'test-user' }, 'normal');
+    queue.enqueue('recommendation', 1, { user_id: 'test-user' }, 'normal');
+    queue.enqueue('recommendation', 2, { user_id: 'test-user' }, 'normal');
     
     let status = queue.getStatus();
     expect(status.queueLength).toBe(2);

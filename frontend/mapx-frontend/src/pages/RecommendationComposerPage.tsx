@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import RecommendationComposer from '@/components/RecommendationComposer';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth';
 
 const RecommendationComposerPage: React.FC = () => {
   const navigate = useNavigate();

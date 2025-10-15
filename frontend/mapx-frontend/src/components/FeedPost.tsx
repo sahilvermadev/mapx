@@ -5,11 +5,12 @@ import { Heart, MessageCircle, MapPin, Star, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
-import { socialApi, type FeedPost as FeedPostType, type Comment } from '@/services/social';
-import { useAuth } from '@/contexts/AuthContext';
+import { socialApi, type FeedPost as FeedPostType, type Comment } from '@/services/socialService';
+import { useAuth } from '@/auth';
 import { formatUserDisplay, getUserInitials } from '../utils/userDisplay';
 import { renderWithMentions, insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
-import { socialApi as SocialApi } from '@/services/social';
+import ContactReveal from '@/components/ContactReveal';
+import { socialApi as SocialApi } from '@/services/socialService';
 import { toast } from 'sonner';
 
 // Types
@@ -294,12 +295,30 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             </div>
           </div>
 
-        {postData.place_address && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3 pr-32">
-            <MapPin className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">{postData.place_address}</span>
-          </div>
-        )}
+        {(() => {
+          const address =
+            (postData.content_data && postData.content_data.display_address) ||
+            postData.place_address ||
+            (postData.content_data && (postData.content_data.address || postData.content_data.service_address));
+          const contactPhone = (postData.content_data && (postData.content_data.contact_info?.phone || postData.content_data.phone)) || undefined;
+          const contactEmail = (postData.content_data && (postData.content_data.contact_info?.email || postData.content_data.email)) || undefined;
+          if (!address) return null;
+          return (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3 pr-32">
+              <MapPin className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate">{address}</span>
+              {postData.content_type === 'service' && (contactPhone || contactEmail) && (
+                <ContactReveal
+                  contact={{ phone: contactPhone, email: contactEmail }}
+                  className="relative ml-2"
+                  buttonClassName="h-5 w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
+                  iconClassName="h-3 w-3"
+                  align="right"
+                />
+              )}
+            </div>
+          );
+        })()}
 
         {(postData.description || (postData as any).notes) && (
           <div className="mb-3">

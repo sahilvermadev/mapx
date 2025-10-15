@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaMapMarkerAlt, FaStar, FaUsers, FaTags, FaCalendarAlt, FaTimes, FaSearch } from 'react-icons/fa';
-import type { SearchResponse, SearchResult } from '../services/recommendationsApi';
+import type { SearchResponse, SearchResult } from '../services/recommendationsApiService';
 import { formatAddress } from '../utils/addressFormatter';
 import './SearchResults.css';
 

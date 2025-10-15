@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { apiClient } from '../../services/apiClient';
 
 export interface UsernameCheckResult {
   available: boolean;

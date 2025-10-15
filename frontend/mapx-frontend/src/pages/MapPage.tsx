@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
-import { placesApiService } from '../services/placesApi';
-import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendationsApi';
-import { useAuth } from '../contexts/AuthContext';
+import { placesApiService } from '../services/placesApiService';
+import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendationsApiService';
+import { useAuth } from '../auth';
 import ContentCard from '../components/ContentCard';
 import SearchBar from '../components/SearchBar';
 import SearchResults from '../components/SearchResults';

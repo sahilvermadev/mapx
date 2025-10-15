@@ -18,6 +18,7 @@ export interface BuildDtoInput {
   formattedRecommendation: string; // final formatted text
   rating?: number | null;
   currentUserId: string;
+  labels?: string[]; // AI-generated labels
 }
 
 export interface SaveRecommendationRequestDTO {
@@ -50,7 +51,7 @@ function extractLocation(data: Record<string, any>): LocationData {
 }
 
 export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommendationRequestDTO {
-  const { contentType, extractedData, fieldResponses, formattedRecommendation, rating, currentUserId } = input;
+  const { contentType, extractedData, fieldResponses, formattedRecommendation, rating, currentUserId, labels } = input;
   const combined = { ...extractedData, ...fieldResponses } as Record<string, any>;
   const location = extractLocation(combined);
 
@@ -88,11 +89,7 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
     content_data,
     rating: rating || combined.rating || null,
     visibility: 'public',
-    labels: Array.isArray(combined.specialities)
-      ? combined.specialities
-      : combined.specialities
-      ? [combined.specialities]
-      : [],
+    labels: labels || [],
     user_id: currentUserId
   };
 

@@ -20,7 +20,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.pool = void 0;
 // Database helper functions
 __exportStar(require("./places"), exports);
-__exportStar(require("./annotations"), exports);
 // Re-export the pool for direct access if needed
 var db_1 = require("../db");
 Object.defineProperty(exports, "pool", { enumerable: true, get: function () { return __importDefault(db_1).default; } });

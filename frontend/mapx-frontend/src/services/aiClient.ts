@@ -1,5 +1,7 @@
-// Lightweight client for AI endpoints used by the composer
-// Centralizes retries, timeouts, and error normalization
+// AI-specific client for recommendation endpoints
+// Uses the main API client for consistency and proper authentication
+
+import { apiClient } from './api';
 
 export interface RecommendationAnalysis {
   isValid: boolean;
@@ -38,44 +40,52 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function jsonPost<T>(url: string, body: any): Promise<T> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || (data as any)?.success === false) {
-    const msg = (data as any)?.error || (data as any)?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return data as T;
-}
-
 export const aiClient = {
-  async analyze(text: string, currentUserId: string): Promise<RecommendationAnalysis> {
-    const payload = { text, currentUserId };
-    type Resp = { success: boolean; data: RecommendationAnalysis };
-    const result = await withTimeout(jsonPost<Resp>('http://localhost:5000/api/ai-recommendation/analyze', payload), 15000);
-    return result.data;
+  async analyze(text: string): Promise<RecommendationAnalysis> {
+    const payload = { text };
+    const result = await withTimeout(
+      apiClient.post<RecommendationAnalysis>('/ai-recommendation/analyze', payload),
+      15000
+    );
+    return result.data!;
   },
 
-  async validate(question: string, userResponse: string, expectedField: string, currentUserId: string): Promise<ValidationResult> {
-    const payload = { question, userResponse, expectedField, currentUserId };
-    type Resp = { success: boolean; data: ValidationResult };
-    const result = await withTimeout(jsonPost<Resp>('http://localhost:5000/api/ai-recommendation/validate', payload), 10000);
-    return result.data;
+  async validate(question: string, userResponse: string, expectedField: string): Promise<ValidationResult> {
+    const payload = { question, userResponse, expectedField };
+    const result = await withTimeout(
+      apiClient.post<ValidationResult>('/ai-recommendation/validate', payload),
+      10000
+    );
+    return result.data!;
   },
 
-  async format(data: any, originalText: string, currentUserId: string): Promise<string | null> {
-    const payload = { data, originalText, currentUserId };
-    type Resp = { success: boolean; formattedText?: string };
-    try {
-      const result = await withTimeout(jsonPost<Resp>('http://localhost:5000/api/ai-recommendation/format', payload), 12000);
-      return result.formattedText || null;
-    } catch {
-      return null;
+  async format(data: any, originalText: string): Promise<string | null> {
+    const payload = { data, originalText };
+    
+    // Retry logic for AI formatting
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`AI formatting attempt ${attempt}/2`);
+        const result = await withTimeout(
+          apiClient.post<{ formattedText?: string }>('/ai-recommendation/format', payload),
+          20000
+        );
+        // Endpoint returns { success, formattedText } (top-level), not under data
+        const formatted = (result as any).formattedText || result.data?.formattedText;
+        if (typeof formatted === 'string' && formatted.trim().length > 0) {
+          return formatted.trim();
+        }
+      } catch (error) {
+        console.warn(`AI formatting attempt ${attempt} failed:`, error);
+        if (attempt === 2) {
+          console.warn('All AI formatting attempts failed, using fallback');
+          return null;
+        }
+        // Wait 1 second before retry
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
+    return null;
   }
 };
 

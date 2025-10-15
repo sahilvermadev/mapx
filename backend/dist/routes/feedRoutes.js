@@ -6,25 +6,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const recommendations_1 = require("../db/recommendations");
 const router = express_1.default.Router();
-// Temporary authentication middleware (will be replaced with proper auth)
-const requireAuth = (req, res, next) => {
-    // For now, we'll use a mock user ID from query params
-    // In production, this would come from JWT token
-    const userId = req.query.currentUserId || req.body.currentUserId;
-    if (!userId) {
-        return res.status(401).json({
-            success: false,
-            message: 'Authentication required'
-        });
-    }
-    req.user = { id: userId };
-    next();
-};
+// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * GET /api/feed
  * Get social feed posts from followed users
  */
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         console.log('=== FEED ENDPOINT ===');
         console.log('feedRoutes - req.query:', req.query);
@@ -71,7 +58,7 @@ router.get('/', requireAuth, async (req, res) => {
  * GET /api/feed/friends
  * Get feed posts from friends only (same as main feed for now)
  */
-router.get('/friends', requireAuth, async (req, res) => {
+router.get('/friends', async (req, res) => {
     try {
         const userId = req.user.id;
         const limit = parseInt(req.query.limit) || 20;
@@ -100,7 +87,7 @@ router.get('/friends', requireAuth, async (req, res) => {
  * GET /api/feed/category/:category
  * Get feed posts filtered by category
  */
-router.get('/category/:category', requireAuth, async (req, res) => {
+router.get('/category/:category', async (req, res) => {
     try {
         const userId = req.user.id;
         const category = req.params.category;

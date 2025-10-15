@@ -4,9 +4,9 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import FeedPost from '@/components/FeedPost';
-import { apiClient } from '@/services/api';
-import { useAuth } from '@/contexts/AuthContext';
-import type { FeedPost as FeedPostType } from '@/services/social';
+import { apiClient } from '@/services/apiClient';
+import { useAuth } from '@/auth';
+import type { FeedPost as FeedPostType } from '@/services/socialService';
 
 const PostPage: React.FC = () => {
   const { recommendationId } = useParams<{ recommendationId: string }>();

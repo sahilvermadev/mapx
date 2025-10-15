@@ -6,26 +6,10 @@ import {
   markAllNotificationsAsRead,
   deleteNotification
 } from '../db/notifications';
+import { getUserIdFromRequest } from '../middleware/auth';
 
 const router = express.Router();
 
-// Helper to extract user id from Bearer JWT if session user is not set
-function getUserIdFromRequest(req: express.Request): string | null {
-  const sessionUser = (req as any).user;
-  if (sessionUser && sessionUser.id) return sessionUser.id as string;
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return null;
-  const token = auth.slice(7);
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
-    const payload = JSON.parse(payloadJson);
-    return payload.id || payload.user_id || null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * GET /api/notifications

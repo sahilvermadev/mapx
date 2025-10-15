@@ -1,29 +1,9 @@
 import express from 'express';
 import pool from '../db';
-import jwt from 'jsonwebtoken';
+import { getUserIdFromRequest } from '../middleware/auth';
 
 const router = express.Router();
 
-// Helper to extract user id from Bearer JWT
-function getUserIdFromRequest(req: express.Request): string | null {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return null;
-  const token = auth.slice(7);
-  try {
-    // Use the same fallback secret used when issuing dev tokens
-    const secret = (process.env.JWT_SECRET as string) || 'dev-secret-key';
-    const decoded = jwt.verify(token, secret) as any;
-    if (!decoded?.id) {
-      console.warn('UsernameRoutes: JWT verified but missing id claim');
-    }
-    return decoded.id || null;
-  } catch (err: any) {
-    const errName = err?.name;
-    const errMsg = err?.message;
-    console.warn('UsernameRoutes: JWT verification failed', { name: errName, message: errMsg });
-    return null;
-  }
-}
 
 // Check if username is available
 router.get('/check/:username', async (req, res) => {

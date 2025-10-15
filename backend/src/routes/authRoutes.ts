@@ -2,6 +2,9 @@ import express from 'express';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
+import { blacklistToken, storeRefreshToken, validateRefreshToken, revokeRefreshToken, revokeAllUserTokens } from '../utils/redis';
+import { getUserIdFromRequest } from '../middleware/auth';
+import pool from '../db';
 
 const router = express.Router();
 
@@ -59,21 +62,37 @@ router.get('/dev-login', async (req, res) => {
     };
 
     const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
-    const token = jwt.sign(
+    
+    // Generate access token (15 minutes)
+    const accessToken = jwt.sign(
       {
         id: mockUser.id,
         email: mockUser.email,
         displayName: mockUser.display_name,
         profilePictureUrl: mockUser.profile_picture_url,
         username: mockUser.username,
+        type: 'access'
       },
       jwtSecret,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
     );
 
-    // Redirect back to frontend with token param
+    // Generate refresh token (7 days)
+    const refreshToken = jwt.sign(
+      {
+        id: mockUser.id,
+        type: 'refresh'
+      },
+      jwtSecret,
+      { expiresIn: '7d' }
+    );
+
+    // Store refresh token in Redis
+    await storeRefreshToken(mockUser.id, refreshToken, 604800); // 7 days
+
+    // Redirect back to frontend with tokens
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/?token=${token}`);
+    res.redirect(`${frontendUrl}/?accessToken=${accessToken}&refreshToken=${refreshToken}`);
   } catch (error) {
     console.error('Dev login error:', error);
     res.status(500).json({ message: 'Development login failed' });
@@ -89,40 +108,194 @@ router.get(
 // GET /auth/google/callback
 router.get(
   '/google/callback',
-  passport.authenticate('google', { failureRedirect: '/auth/failure' }),
-  (req, res) => {
-    // user was set by passport strategy
-    const user: any = (req as any).user;
-    if (!user?.id) return res.redirect('/auth/failure');
+  passport.authenticate('google', { 
+    session: false,  // Stateless OAuth - no session needed
+    failureRedirect: '/auth/failure' 
+  }),
+  async (req, res) => {
+    try {
+      // user was set by passport strategy (stateless)
+      const user: any = (req as any).user;
+      if (!user?.id) return res.redirect('/auth/failure');
 
-    const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
-    const token = jwt.sign(
+      const jwtSecret = process.env.JWT_SECRET || 'dev-secret-key';
+      
+      // Generate access token (15 minutes)
+      const accessToken = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          displayName: user.display_name,
+          profilePictureUrl: user.profile_picture_url,
+          username: user.username,
+          type: 'access'
+        },
+        jwtSecret,
+        { expiresIn: '15m' }
+      );
+
+      // Generate refresh token (7 days)
+      const refreshToken = jwt.sign(
+        {
+          id: user.id,
+          type: 'refresh'
+        },
+        jwtSecret,
+        { expiresIn: '7d' }
+      );
+
+      // Store refresh token in Redis
+      await storeRefreshToken(user.id, refreshToken, 604800); // 7 days
+
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      res.redirect(`${frontendUrl}/?accessToken=${accessToken}&refreshToken=${refreshToken}`);
+    } catch (error) {
+      console.error('OAuth callback error:', error);
+      res.redirect('/auth/failure');
+    }
+  }
+);
+
+// POST /auth/refresh - Refresh access token using refresh token
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Refresh token required' 
+      });
+    }
+
+    // Verify refresh token
+    const secret = process.env.JWT_SECRET || 'dev-secret-key';
+    const decoded = jwt.verify(refreshToken, secret) as any;
+    
+    if (!decoded?.id || decoded.type !== 'refresh') {
+      return res.status(403).json({ 
+        success: false,
+        error: 'Invalid refresh token' 
+      });
+    }
+
+    // Validate refresh token in Redis
+    const isValidRefresh = await validateRefreshToken(decoded.id, refreshToken);
+    if (!isValidRefresh) {
+      return res.status(403).json({ 
+        success: false,
+        error: 'Refresh token has been revoked' 
+      });
+    }
+
+    // Get fresh user data from database
+    const userResult = await pool.query(
+      'SELECT id, email, display_name, profile_picture_url, username FROM users WHERE id = $1',
+      [decoded.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'User not found' 
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Generate new access token (15 minutes)
+    const newAccessToken = jwt.sign(
       {
         id: user.id,
         email: user.email,
         displayName: user.display_name,
         profilePictureUrl: user.profile_picture_url,
         username: user.username,
+        type: 'access'
       },
-      jwtSecret,
-      { expiresIn: '1h' }
+      secret,
+      { expiresIn: '15m' }
     );
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/?token=${token}`);
-  }
-);
-
-// GET /auth/logout
-router.get('/logout', (req, res, next) => {
-  // Passport 0.6 requires callback
-  (req as any).logout((err: any) => {
-    if (err) return next(err);
-    req.session?.destroy(() => {
-      res.clearCookie('connect.sid');
-      res.status(200).json({ message: 'Logged out' });
+    res.json({
+      success: true,
+      accessToken: newAccessToken,
+      expiresIn: 900 // 15 minutes in seconds
     });
-  });
+
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(401).json({ 
+      success: false,
+      error: 'Invalid refresh token' 
+    });
+  }
+});
+
+// POST /auth/logout - Proper logout with token blacklisting
+router.post('/logout', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (token) {
+      // Blacklist the access token
+      await blacklistToken(token, 900); // 15 minutes (same as token expiry)
+    }
+
+    // If refresh token is provided, revoke it
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+      const secret = process.env.JWT_SECRET || 'dev-secret-key';
+      try {
+        const decoded = jwt.verify(refreshToken, secret) as any;
+        if (decoded?.id) {
+          await revokeRefreshToken(decoded.id, refreshToken);
+        }
+      } catch (err) {
+        // Ignore invalid refresh tokens
+      }
+    }
+
+    res.json({ 
+      success: true,
+      message: 'Logged out successfully' 
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Logout failed' 
+    });
+  }
+});
+
+// POST /auth/logout-all - Logout from all devices
+router.post('/logout-all', async (req, res) => {
+  try {
+    const userId = getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Authentication required' 
+      });
+    }
+
+    // Revoke all refresh tokens for this user
+    await revokeAllUserTokens(userId);
+
+    res.json({ 
+      success: true,
+      message: 'Logged out from all devices successfully' 
+    });
+  } catch (error) {
+    console.error('Logout all error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Logout all failed' 
+    });
+  }
 });
 
 // GET /auth/failure

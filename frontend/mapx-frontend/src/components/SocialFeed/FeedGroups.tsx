@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Star, ChevronDown, ChevronUp, Clock, MapPin, Heart, MessageCircle, Share2 } from 'lucide-react';
-import type { FeedPost as FeedPostType } from '@/services/social';
+import type { FeedPost as FeedPostType } from '@/services/socialService';
 import { toast } from 'sonner';
 
 type Props = {
