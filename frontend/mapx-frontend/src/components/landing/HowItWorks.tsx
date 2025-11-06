@@ -1,9 +1,7 @@
 import { UserPlusIcon, SearchIcon, ShareIcon } from "lucide-react";
 import { Button } from "../ui/button";
-import { useNavigate } from "react-router-dom";
 
 export function HowItWorks() {
-  const navigate = useNavigate();
   return (
     <section id="how-it-works" className="h-screen bg-white flex flex-col">
       <div className="flex-1 flex items-center justify-center min-h-0">
@@ -66,7 +64,6 @@ export function HowItWorks() {
                 Join thousands of users who've already discovered their new favorite places through trusted recommendations.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button size="lg" className="rounded-none border-2 border-black bg-black text-white hover:bg-gray-900 font-bold" onClick={() => navigate('/map')}>Join the Beta</Button>
                 <Button size="lg" variant="outline" className="rounded-none border-2 border-black bg-white text-black hover:bg-gray-50 font-bold">Learn More</Button>
               </div>
             </div>

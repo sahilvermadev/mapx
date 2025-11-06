@@ -43,9 +43,6 @@ export function CallToAction() {
             {/* Secondary Actions */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button variant="ghost" size="lg" className="text-white hover:bg-white hover:text-black font-bold border-2 border-white rounded-none">
-                Watch Demo
-              </Button>
-              <Button variant="ghost" size="lg" className="text-white hover:bg-white hover:text-black font-bold border-2 border-white rounded-none">
                 Learn More
               </Button>
             </div>
