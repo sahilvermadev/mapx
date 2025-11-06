@@ -38,11 +38,11 @@ export const SEARCH_CONFIG = {
   
   // Debug and logging
   DEBUG: {
-    // Enable detailed logging for search operations
-    ENABLE_LOGGING: true,
+    // Enable detailed logging for search operations (disabled in production)
+    ENABLE_LOGGING: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEBUG_LOGGING === 'true',
     
-    // Log similarity scores for debugging
-    LOG_SIMILARITY_SCORES: true,
+    // Log similarity scores for debugging (disabled in production)
+    LOG_SIMILARITY_SCORES: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEBUG_LOGGING === 'true',
   }
 } as const;
 
