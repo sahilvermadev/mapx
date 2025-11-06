@@ -22,7 +22,18 @@ const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className,
   const [results, setResults] = useState<Array<{ name: string; country?: string }>>([]);
   const [loading, setLoading] = useState(false);
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
-  const sessionToken = useMemo(() => crypto.randomUUID(), []);
+  const sessionToken = useMemo(() => {
+    // Fallback for browsers that don't support crypto.randomUUID()
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // Fallback: generate a UUID-like string
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }, []);
 
   // Autofocus the input when the popover opens
   useEffect(() => {

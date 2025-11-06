@@ -33,7 +33,8 @@ const UsernameSetupModal: React.FC<UsernameSetupModalProps> = ({ onClose, onComp
     const timeoutId = setTimeout(async () => {
       setIsChecking(true);
       try {
-        const response = await fetch(`http://localhost:5000/api/username/check/${encodeURIComponent(username)}`, {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+        const response = await fetch(`${apiBase}/username/check/${encodeURIComponent(username)}`, {
           headers: {
             'Authorization': `Bearer ${apiClient.getToken()}`
           }
@@ -62,7 +63,8 @@ const UsernameSetupModal: React.FC<UsernameSetupModalProps> = ({ onClose, onComp
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:5000/api/username/set', {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const response = await fetch(`${apiBase}/username/set`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
