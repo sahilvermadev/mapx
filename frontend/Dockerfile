@@ -16,6 +16,10 @@ COPY mapx-frontend/ .
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
+# Build-time backend URL for OAuth redirects
+ARG VITE_BACKEND_URL=http://localhost:5000
+ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
+
 # Build the React app (production mode)
 RUN npm run build
 
