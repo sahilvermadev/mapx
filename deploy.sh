@@ -36,7 +36,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Check if Docker Compose is installed
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     echo -e "${RED}❌ Docker Compose is not installed. Please install Docker Compose first.${NC}"
     exit 1
 fi
@@ -44,19 +44,19 @@ fi
 # Function to check if services are running
 check_services() {
     echo "📊 Checking service status..."
-    docker-compose -f docker-compose.prod.yml ps
+    docker compose -f docker-compose.prod.yml ps
 }
 
 # Function to view logs
 view_logs() {
     echo "📋 Showing logs (Press Ctrl+C to exit)..."
-    docker-compose -f docker-compose.prod.yml logs -f
+    docker compose -f docker-compose.prod.yml logs -f
 }
 
 # Function to stop services
 stop_services() {
     echo "🛑 Stopping services..."
-    docker-compose -f docker-compose.prod.yml down
+    docker compose -f docker-compose.prod.yml down
     echo -e "${GREEN}✅ Services stopped.${NC}"
 }
 
@@ -67,11 +67,11 @@ deploy() {
     
     # Pull latest images
     echo "📥 Pulling latest images..."
-    docker-compose -f docker-compose.prod.yml pull
+    docker compose -f docker-compose.prod.yml pull
     
     # Build and start services
     echo "🔨 Building services..."
-    docker-compose -f docker-compose.prod.yml up -d --build
+    docker compose -f docker-compose.prod.yml up -d --build
     
     echo ""
     echo -e "${GREEN}✅ Services started successfully!${NC}"
@@ -98,8 +98,8 @@ deploy() {
     echo ""
     echo "📝 Next steps:"
     echo "1. Run database migrations: docker exec -it recce_backend_prod npm run migrate"
-    echo "2. Check logs: docker-compose -f docker-compose.prod.yml logs -f"
-    echo "3. View status: docker-compose -f docker-compose.prod.yml ps"
+    echo "2. Check logs: docker compose -f docker-compose.prod.yml logs -f"
+    echo "3. View status: docker compose -f docker-compose.prod.yml ps"
 }
 
 # Function to run migrations
