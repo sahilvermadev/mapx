@@ -148,44 +148,72 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : ['http://localhost:5173']; // Default for development
 
-// CORS configuration - strict in production, permissive in development
+// CORS configuration - strict in production, but allow navigation requests without Origin
 const isProduction = process.env.NODE_ENV === 'production';
-app.use(cors({ 
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests) in development
-    if (!origin) {
-      if (isProduction) {
-        return callback(new Error('CORS: Origin header required in production'));
-      }
-      return callback(null, true);
-    }
-    
-    // In production, only allow explicitly configured origins
+
+// Use a delegate so we can inspect the request path/method
+app.use(cors((req, callback) => {
+  const requestOrigin = req.headers.origin as string | undefined;
+
+  // Allow requests without Origin for certain paths (browser navigations don't send Origin)
+  const allowNoOriginPaths = [
+    '/auth',          // OAuth redirects/initiations
+    '/health',        // health checks
+    '/share',         // public OG routes
+    '/api/public',    // public API
+  ];
+
+  const isNoOriginAllowed = allowNoOriginPaths.some(prefix => req.path.startsWith(prefix));
+
+  if (!requestOrigin) {
     if (isProduction) {
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      logger.warn('CORS blocked origin', { origin, allowedOrigins });
-      return callback(new Error(`CORS: Origin ${origin} not allowed`));
+      // Allow if route is in the allowlist, otherwise deny
+      return callback(null, {
+        origin: isNoOriginAllowed,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
+        exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+      });
     }
-    
-    // In development, allow localhost and configured origins
-    if (
-      allowedOrigins.includes(origin) || 
-      origin.includes('localhost') || 
-      origin.includes('127.0.0.1')
-    ) {
-      return callback(null, true);
+    // Non-production: allow missing Origin
+    return callback(null, {
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
+      exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+    });
+  }
+
+  // With Origin header
+  if (isProduction) {
+    const isAllowed = allowedOrigins.includes(requestOrigin);
+    if (!isAllowed) {
+      logger.warn('CORS blocked origin', { origin: requestOrigin, allowedOrigins });
     }
-    
-    // Reject unknown origins even in development (for security)
-    logger.warn('CORS blocked origin in development', { origin });
-    return callback(new Error(`CORS: Origin ${origin} not allowed`));
-  },
-  credentials: true,
-  exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept']
+    return callback(null, {
+      origin: isAllowed,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
+      exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+    });
+  }
+
+  // Development: allow localhost and configured origins
+  const devAllowed = 
+    allowedOrigins.includes(requestOrigin) || 
+    requestOrigin.includes('localhost') || 
+    requestOrigin.includes('127.0.0.1');
+
+  return callback(null, {
+    origin: devAllowed,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
+    exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+  });
 }));
 // Configure compression to exclude image responses (they're already compressed)
 app.use(compression({
