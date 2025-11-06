@@ -485,8 +485,7 @@ STYLE:
 - Mention concrete details only when provided: specialties, outcomes, responsiveness, pricing, years of experience.
 - Prefer the professional title (e.g., neurosurgeon, carpenter) over generic terms like "service provider".
 - Avoid boilerplate phrases and hedging: do not use "recommended service provider", "skilled professional", "notable recommendation", or "as evidenced by".
-- CRITICAL: Do NOT include the service provider's name in the text. The name is already displayed as the title in the UI, so referring to it by name is redundant. Use pronouns like "they", "this provider", or the professional title instead.
-- Vary sentence openings.
+- Do not repeat the name more than once and vary sentence openings.
 - If the ORIGINAL text contains first-person details (e.g., "treated my son"), paraphrase to neutral third-person without implying AI authorship (e.g., "treated a patient" or "completed a successful procedure"). Do not mention "the recommender".
 - Never invent details.
 - Do not include location or contact information; the UI shows those separately.
@@ -510,8 +509,7 @@ GOAL:
 STYLE:
 - Write 3–5 short sentences in third-person, using active voice.
 - Focus on vibe, what it's good for, best times to go, and any practical tip provided (queues, noise level, must-try items).
-- CRITICAL: Do NOT include the place name in the text. The place name is already displayed as the title in the UI, so referring to it by name is redundant. Use pronouns like "it", "this place", or "the establishment" instead, or simply describe the place without naming it.
-- Avoid generic phrases like "recommended place".
+- Avoid generic phrases like "recommended place" and avoid repeating the name more than once.
 - If the ORIGINAL text uses first-person anecdotes, paraphrase to neutral third-person (e.g., "I loved the quiet mornings" -> "Quiet in the mornings"). Do not mention "the recommender".
 - Keep language descriptive but utilitarian; no emojis or fluff. Never invent details.
 - Do not include location or contact information; the UI shows those separately.
@@ -531,8 +529,7 @@ Return only the final text.`;
 
 STYLE:
 - Write 3–5 short sentences in active voice.
-- Be specific, avoid filler and clichés.
-- CRITICAL: Do NOT include the name in the text. The name is already displayed as the title in the UI, so referring to it by name is redundant. Use pronouns or descriptive terms instead.
+- Be specific, avoid filler and clichés. Do not repeat the name more than once.
 - Only use details that exist in the data (category, specialties, pricing, best time, tips). Never invent.
 - Convert any first-person statements from the ORIGINAL into neutral third-person without implying authorship or personal involvement. Avoid phrases like "I recommend" or "the recommender".
 - Do not include location or contact information; the UI surfaces those separately.
