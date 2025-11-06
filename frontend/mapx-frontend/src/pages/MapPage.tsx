@@ -652,11 +652,13 @@ const MapPage: React.FC = () => {
           return;
         }
         
-        map.current = new google.maps.Map(mapContainer.current, {
+        // Map configuration - use custom mapId if available, otherwise use default
+        // Note: If mapId doesn't exist in Google Cloud Console or API key doesn't have access,
+        // Google Maps will silently fall back to default map style
+        const mapConfig: google.maps.MapOptions = {
           center: DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
           clickableIcons: true,
-          mapId: '95079f4fa5e07d01680ea67e',
           streetViewControl: false,
           fullscreenControl: false,
           zoomControl: false,
@@ -665,6 +667,27 @@ const MapPage: React.FC = () => {
           rotateControl: false,
           gestureHandling: 'greedy',
           disableDefaultUI: true
+        };
+
+        // Only use custom mapId if it's explicitly configured in environment variables
+        // To create a custom map style:
+        // 1. Go to Google Cloud Console > Maps > Map Styles
+        // 2. Create a new map style or use an existing one
+        // 3. Copy the Map ID and set it in VITE_GOOGLE_MAPS_MAP_ID environment variable
+        // 4. Ensure your API key has access to the Maps JavaScript API
+        const customMapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
+        if (customMapId) {
+          mapConfig.mapId = customMapId;
+          console.log('Using custom map style with mapId:', customMapId);
+        } else {
+          console.log('No custom mapId configured, using default map style');
+        }
+
+        map.current = new google.maps.Map(mapContainer.current, mapConfig);
+
+        // Listen for map errors (e.g., invalid mapId)
+        google.maps.event.addListenerOnce(map.current, 'tilesloaded', () => {
+          console.log('Map tiles loaded successfully');
         });
 
         // Wait for map to be fully loaded before initializing places service
