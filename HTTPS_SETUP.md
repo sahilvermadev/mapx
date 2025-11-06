@@ -1,10 +1,12 @@
-# HTTPS Setup Guide for recommender.myftp.org
+# HTTPS Setup Guide
 
 This guide will help you set up HTTPS/SSL for your production site using Let's Encrypt.
 
+**Note:** Replace `YOUR_DOMAIN.com` with your actual domain name throughout this guide.
+
 ## Prerequisites
 
-- Domain `recommender.myftp.org` is pointing to your Droplet's IP
+- Domain `YOUR_DOMAIN.com` is pointing to your Droplet's IP
 - Docker containers are running (frontend on port 80, backend on port 5000)
 - SSH access to your Droplet
 
@@ -23,13 +25,15 @@ Create the nginx configuration file:
 sudo nano /etc/nginx/sites-available/recommender
 ```
 
+**Note:** Replace `YOUR_DOMAIN.com` with your actual domain name in the configuration below.
+
 Add this configuration:
 
 ```nginx
 # HTTP to HTTPS redirect
 server {
     listen 80;
-    server_name recommender.myftp.org;
+    server_name YOUR_DOMAIN.com;
     
     # Allow Let's Encrypt verification
     location /.well-known/acme-challenge/ {
@@ -45,11 +49,11 @@ server {
 # HTTPS server
 server {
     listen 443 ssl http2;
-    server_name recommender.myftp.org;
+    server_name YOUR_DOMAIN.com;
 
     # SSL certificates (will be added by Certbot)
-    ssl_certificate /etc/letsencrypt/live/recommender.myftp.org/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/recommender.myftp.org/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/YOUR_DOMAIN.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN.com/privkey.pem;
 
     # SSL configuration
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -130,7 +134,7 @@ sudo systemctl enable nginx
 
 ```bash
 # Get SSL certificate (Certbot will automatically configure nginx)
-sudo certbot --nginx -d recommender.myftp.org
+sudo certbot --nginx -d YOUR_DOMAIN.com
 
 # Follow the prompts:
 # - Enter your email address
@@ -186,10 +190,10 @@ docker compose -f docker-compose.prod.yml restart backend
 2. Navigate to **APIs & Services** → **Credentials**
 3. Edit your OAuth 2.0 Client ID
 4. Update **Authorized redirect URIs**:
-   - Add: `https://recommender.myftp.org/auth/google/callback`
+   - Add: `https://YOUR_DOMAIN.com/auth/google/callback`
    - Remove the old HTTP URL if it exists
 5. Update **Authorized JavaScript origins**:
-   - Add: `https://recommender.myftp.org`
+   - Add: `https://YOUR_DOMAIN.com`
    - Remove the old HTTP origin if it exists
 
 ## Step 8b: Update Backend Environment Variables
@@ -201,18 +205,18 @@ cd /opt/recce
 nano .env
 ```
 
-Update:
+Update (replace `YOUR_DOMAIN.com` with your actual domain):
 ```bash
-ALLOWED_ORIGINS=https://recommender.myftp.org
-BACKEND_URL=https://recommender.myftp.org
-FRONTEND_URL=https://recommender.myftp.org
+ALLOWED_ORIGINS=https://YOUR_DOMAIN.com
+BACKEND_URL=https://YOUR_DOMAIN.com
+FRONTEND_URL=https://YOUR_DOMAIN.com
 ```
 
 **Note:** Even though the backend internally uses `http://localhost:5000`, the `BACKEND_URL` should be set to the public HTTPS URL for OAuth redirects.
 
 ## Step 9: Verify HTTPS is Working
 
-1. Visit `https://recommender.myftp.org` in your browser
+1. Visit `https://YOUR_DOMAIN.com` in your browser
 2. Check that the lock icon appears in the address bar
 3. Test that the site loads correctly
 4. Test that API calls work (check browser console for errors)
@@ -231,7 +235,7 @@ sudo nginx -t
 ### Certificate not found
 ```bash
 # Check if certificate exists
-sudo ls -la /etc/letsencrypt/live/recommender.myftp.org/
+sudo ls -la /etc/letsencrypt/live/YOUR_DOMAIN.com/
 
 # Check Certbot logs
 sudo tail -f /var/log/letsencrypt/letsencrypt.log
@@ -242,7 +246,7 @@ sudo tail -f /var/log/letsencrypt/letsencrypt.log
 - Check if ports 80 and 5000 are accessible: `sudo netstat -tlnp | grep -E '80|5000'`
 
 ### CORS errors after HTTPS
-- Update `ALLOWED_ORIGINS` in `.env` to include `https://recommender.myftp.org`
+- Update `ALLOWED_ORIGINS` in `.env` to include `https://YOUR_DOMAIN.com`
 - Restart backend: `docker compose -f docker-compose.prod.yml restart backend`
 
 ## Maintenance
