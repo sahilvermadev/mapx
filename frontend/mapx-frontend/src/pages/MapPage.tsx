@@ -909,50 +909,32 @@ const MapPage: React.FC = () => {
         />
       )}
 
-      {/* Reviewed Places Status */}
+      {/* Reviewed Places Status - Compact Neobrutalist Design */}
       {isAuthenticated && !showContentCard && (
-        <div className="fixed top-20 right-4 z-40 bg-white rounded-lg shadow-lg p-4 max-w-xs hidden md:block">
-          <div className="space-y-3">
-            {/* Reviewed Places Status */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${showReviewedPlaces ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                <span className="text-sm font-medium">Reviewed Places</span>
-              </div>
-            </div>
-            
-            {/* Group Filter Status */}
-            {selectedGroupIds.length > 0 && (
-              <div className="text-xs text-blue-600 bg-blue-50 rounded px-2 py-1">
-                Filtered by {selectedGroupIds.length} group{selectedGroupIds.length !== 1 ? 's' : ''}
-              </div>
-            )}
-            
-            {/* Loading and Error States */}
-            {reviewedPlacesLoading && (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
-                Loading places...
-              </div>
-            )}
-            
-            {reviewedPlacesError && (
-              <div className="text-sm text-red-600">
-                {reviewedPlacesError}
-              </div>
-            )}
-            
-            {!reviewedPlacesLoading && !reviewedPlacesError && (
-              <div className="text-sm text-gray-600 border-t pt-2">
-                <div>{reviewedPlaces.length} places with reviews</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Zoom: {currentZoom} 
+        <div className="fixed top-20 right-4 z-40 hidden md:block">
+          <div className="bg-white border-2 border-black rounded-lg shadow-[4px_4px_0_0_#000] px-3 py-2 inline-block">
+            <div className="flex items-center gap-2">
+              {/* Status Indicator */}
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${showReviewedPlaces ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+              
+              {/* Content */}
+              {reviewedPlacesLoading ? (
+                <div className="flex items-center gap-1.5">
+                  <div className="animate-spin rounded-full h-2.5 w-2.5 border-2 border-black border-t-transparent"></div>
+                  <span className="text-xs font-semibold text-black">Loading...</span>
+                </div>
+              ) : reviewedPlacesError ? (
+                <span className="text-xs font-semibold text-red-600">Error</span>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-black">{reviewedPlaces.length}</span>
+                  <span className="text-xs font-medium text-gray-700">places</span>
                   {showReviewedPlaces && currentZoom < 12 && (
-                    <span className="text-orange-600 ml-1">(markers hidden, zoom in)</span>
+                    <span className="text-[10px] font-medium text-orange-600 ml-0.5">(zoom in)</span>
                   )}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
