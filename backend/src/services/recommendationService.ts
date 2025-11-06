@@ -5,7 +5,7 @@
 
 import { insertRecommendation, type RecommendationData } from '../db/recommendations';
 import { upsertPlace } from '../db/places';
-import { getPlaceDetails, deriveAdmin, slugifyCity } from './placesClient';
+import { getPlaceDetails, deriveAdmin, slugifyCity, normalizeFromPlaceDetails } from './placesClient';
 import { upsertService } from '../services/serviceDeduplication';
 import { embeddingQueue } from './embeddingQueue';
 import { onRecommendationCreated } from '../db/questionCounters';
