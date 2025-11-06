@@ -881,8 +881,6 @@ const MapPage: React.FC = () => {
         <ContentCard
           place={selectedPlace}
           onClose={() => setShowContentCard(false)}
-          onSave={() => {}}
-          onShare={() => {}}
         />
       )}
 

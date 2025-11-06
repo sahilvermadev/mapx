@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
-import { X, ChevronLeft, ChevronRight, Star, Heart, Bookmark, Share2, MapPin, MessageCircle } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Star, Heart, MapPin, MessageCircle } from 'lucide-react';
 import ReviewModal, { type ReviewPayload } from './ReviewModal';
 import { recommendationsApi, type PlaceRecommendation } from '../services/recommendationsApiService';
 import { formatGoogleTypeForDisplay } from '../utils/placeTypes';
@@ -68,8 +68,6 @@ interface ReviewCommentsState {
 interface ContentCardProps {
   place: PlaceDetails;
   onClose: () => void;
-  onSave: () => void;
-  onShare: () => void;
 }
 
 // Helper functions
@@ -122,8 +120,6 @@ const transformRecommendationToReview = (rec: PlaceRecommendation & { likes_coun
 const ContentCard: React.FC<ContentCardProps> = ({
   place,
   onClose,
-  onSave,
-  onShare,
 }) => {
   const navigate = useNavigate();
   const { user: currentUser, isAuthenticated } = useAuth();
@@ -160,7 +156,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const y = useMotionValue(0);
   const opacity = useTransform(y, [0, 300], [1, 0]);
   
-  const handleDragEnd = useCallback((event: any, info: any) => {
+  const handleDragEnd = useCallback((_event: unknown, info: { offset: { y: number } }) => {
     if (isMobile && info.offset.y > 100) {
       onClose();
     } else {
@@ -464,7 +460,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
 
   // Render components
   const renderImageGallery = () => (
-    <div className="relative w-full h-64 md:h-72 overflow-hidden border-b-2 border-black">
+    <div className="relative w-full h-64 md:h-72 overflow-hidden border-b-2 border-black flex-shrink-0">
       {place.images && place.images.length > 0 ? (
         <>
           <img 
@@ -883,9 +879,9 @@ const ContentCard: React.FC<ContentCardProps> = ({
       {/* Content Card */}
       <motion.div
         className="
-          fixed bg-white z-50 overflow-y-auto
+          fixed bg-white z-50 overflow-y-auto flex flex-col
           inset-x-0 bottom-0 rounded-t-2xl border-t-2 border-black shadow-[0_-8px_0_0_#000] max-h-[90vh]
-          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:shadow-[8px_0_0_0_#000] md:max-h-none md:pt-16
+          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:shadow-[8px_0_0_0_#000] md:max-h-none md:pt-16 md:h-screen
         "
         initial={isMobile ? { y: '100%' } : { x: '-100%' }}
         animate={isMobile ? { y: 0 } : { x: 0 }}
@@ -899,7 +895,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
       >
         {/* Drag handle for mobile */}
         <div 
-          className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none md:hidden"
+          className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none md:hidden flex-shrink-0"
           onPointerDown={(e) => e.stopPropagation()}
         >
           <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
@@ -907,7 +903,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
 
         {renderImageGallery()}
         
-        <div className="p-4 md:p-6 space-y-8">
+        <div className="p-4 md:p-6 space-y-8 flex-1">
           {renderPlaceHeader()}
           
           <Separator className="bg-black/20" />

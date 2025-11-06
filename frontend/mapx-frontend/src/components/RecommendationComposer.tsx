@@ -140,8 +140,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
       // Navigate directly after celebration animation completes
       // Don't close celebration - let navigation unmount the component
       // This prevents the flash back to preview screen
-      setTimeout(() => {
-        onPostCreated();
+        setTimeout(() => {
+      onPostCreated();
       }, 1800); // Slightly shorter than celebration duration to ensure smooth transition
     }
   };
@@ -253,8 +253,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           // Navigate directly after celebration animation completes
           // Don't close celebration - let navigation unmount the component
           // This prevents the flash back to preview screen
-          setTimeout(() => {
-            onPostCreated();
+            setTimeout(() => {
+          onPostCreated();
           }, 1800); // Slightly shorter than celebration duration to ensure smooth transition
         }
       }}

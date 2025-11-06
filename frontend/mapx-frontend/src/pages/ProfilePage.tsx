@@ -57,7 +57,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const y = useMotionValue(0);
   const opacity = useTransform(y, [0, 300], [1, 0]);
   
-  const handleCitiesModalDragEnd = useCallback((event: any, info: any) => {
+  const handleCitiesModalDragEnd = useCallback((_event: unknown, info: { offset: { y: number } }) => {
     if (isMobile && info.offset.y > 100) {
       setShowCitiesModal(false);
     } else {
@@ -129,23 +129,21 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   });
 
   // Type guard to check if query is infinite query
-  const isInfiniteQuery = (query: typeof placesQuery): query is typeof placesQuery & { 
-    data: { pages: Array<{ data: any[] }> } | undefined;
-    isFetchingNextPage: boolean;
-    fetchNextPage: () => void;
-  } => {
-    return 'fetchNextPage' in query && typeof query.fetchNextPage === 'function';
+  const isInfiniteQuery = (query: typeof placesQuery): query is Extract<typeof placesQuery, { fetchNextPage: () => void }> => {
+    return 'fetchNextPage' in query && typeof (query as { fetchNextPage?: unknown }).fetchNextPage === 'function';
   };
 
   // Extract places data based on query type
   const places = useMemo(() => {
     if (activeTab === 'questions') {
-      // Regular query result
-      return placesQuery.data || [];
+      // Regular query result - placesQuery is UseQueryResult<any[], Error>
+      const regularQuery = placesQuery as Extract<typeof placesQuery, { data?: any[] }>;
+      return regularQuery.data || [];
     }
     // Infinite query result - flatten pages
     if (isInfiniteQuery(placesQuery)) {
-      return placesQuery.data?.pages.flatMap(page => page.data) || [];
+      const infiniteQuery = placesQuery as Extract<typeof placesQuery, { data?: { pages: Array<{ data: any[] }> } }>;
+      return infiniteQuery.data?.pages.flatMap(page => page.data) || [];
     }
     return [];
   }, [placesQuery, activeTab]);
@@ -153,14 +151,21 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const placesLoading = placesQuery.isLoading || placesQuery.isFetching;
   const loadingMore = useMemo(() => {
     if (activeTab === 'questions') return false;
-    return isInfiniteQuery(placesQuery) ? placesQuery.isFetchingNextPage : false;
+    if (isInfiniteQuery(placesQuery)) {
+      const infiniteQuery = placesQuery as Extract<typeof placesQuery, { isFetchingNextPage?: boolean }>;
+      return infiniteQuery.isFetchingNextPage ?? false;
+    }
+    return false;
   }, [activeTab, placesQuery]);
   
   const hasMore = useMemo(() => {
     if (activeTab === 'questions') return false;
-    if (isInfiniteQuery(placesQuery) && placesQuery.data?.pages) {
-      const lastPage = placesQuery.data.pages[placesQuery.data.pages.length - 1];
-      return lastPage?.nextPage !== undefined;
+    if (isInfiniteQuery(placesQuery)) {
+      const infiniteQuery = placesQuery as Extract<typeof placesQuery, { data?: { pages: Array<{ nextPage?: number }> } }>;
+      if (infiniteQuery.data?.pages) {
+        const lastPage = infiniteQuery.data.pages[infiniteQuery.data.pages.length - 1];
+        return lastPage?.nextPage !== undefined;
+      }
     }
     return false;
   }, [activeTab, placesQuery]);
@@ -282,7 +287,8 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   // Handle load more
   const handleLoadMore = () => {
     if (!loadingMore && hasMore && isInfiniteQuery(placesQuery)) {
-      placesQuery.fetchNextPage();
+      const infiniteQuery = placesQuery as Extract<typeof placesQuery, { fetchNextPage: () => void }>;
+      infiniteQuery.fetchNextPage();
     }
   };
 

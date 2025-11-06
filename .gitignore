@@ -10,3 +10,10 @@ node_modules/
 .env.*.local
 .env.development
 .env.production
+
+# Build outputs (compiled files)
+dist/
+backend/dist/
+frontend/dist/
+frontend/mapx-frontend/dist/
+*.tsbuildinfo

@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { TrendingUp, MapPin, Star, Users, Clock, Award } from 'lucide-react';
 
 interface EnhancedAISummaryProps {
@@ -12,37 +11,32 @@ interface EnhancedAISummaryProps {
 }
 
 const EnhancedAISummary: React.FC<EnhancedAISummaryProps> = ({ text, totals, rawData = [] }) => {
-  // Process data for visualizations
-  const chartData = useMemo(() => {
+  // Process data for statistics
+  const statistics = useMemo(() => {
     if (!rawData.length) return null;
     
+    const categories = rawData.reduce((acc, item) => {
+      const category = item.type === 'place' ? 'Places' : 'Services';
+      acc[category] = (acc[category] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const ratings = rawData.map((item) => ({
+      name: item.place_name || item.service_name || 'Item',
+      rating: item.average_similarity * 5,
+      recommendations: item.total_recommendations,
+    }));
+
+    const averageRating = ratings.length > 0
+      ? ratings.reduce((sum, item) => sum + item.rating, 0) / ratings.length
+      : 0;
+
     return {
-      ratings: rawData.map((item, index) => ({
-        name: item.place_name || item.service_name || `Item ${index + 1}`,
-        rating: item.average_similarity * 5,
-        recommendations: item.total_recommendations,
-      })),
-      categories: rawData.reduce((acc, item) => {
-        const category = item.type === 'place' ? 'Places' : 'Services';
-        acc[category] = (acc[category] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
+      categories,
+      ratings,
+      averageRating,
     };
   }, [rawData]);
-
-  const pieData = useMemo(() => {
-    if (!chartData?.categories) return [];
-    return Object.entries(chartData.categories).map(([name, value]) => ({
-      name,
-      value,
-      color: name === 'Places' ? '#3b82f6' : '#10b981',
-    }));
-  }, [chartData]);
-
-  const averageRating = useMemo(() => {
-    if (!chartData?.ratings.length) return 0;
-    return chartData.ratings.reduce((sum, item) => sum + item.rating, 0) / chartData.ratings.length;
-  }, [chartData]);
 
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 rounded-r-lg shadow-lg">
@@ -122,7 +116,9 @@ const EnhancedAISummary: React.FC<EnhancedAISummaryProps> = ({ text, totals, raw
                   <Star className="h-5 w-5" />
                   <span className="text-sm font-medium">Avg Rating</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900">{averageRating.toFixed(1)}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {statistics?.averageRating ? statistics.averageRating.toFixed(1) : '0.0'}
+                </p>
               </div>
               
               <div className="bg-white p-4 rounded-lg shadow-sm border">
@@ -135,61 +131,24 @@ const EnhancedAISummary: React.FC<EnhancedAISummaryProps> = ({ text, totals, raw
             </div>
           )}
 
-          {/* Visualizations */}
-          {chartData && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Rating Chart */}
-              {chartData.ratings.length > 0 && (
-                <div className="bg-white p-4 rounded-lg shadow-sm border">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Rating Distribution</h3>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={chartData.ratings}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="name" 
-                        tick={{ fontSize: 12 }}
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                      />
-                      <YAxis domain={[0, 5]} />
-                      <Tooltip 
-                        formatter={(value: number) => [`${value.toFixed(1)}/5`, 'Rating']}
-                        labelFormatter={(label) => `Place: ${label}`}
-                      />
-                      <Bar 
-                        dataKey="rating" 
-                        fill="#3b82f6"
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* Category Pie Chart */}
-              {pieData.length > 0 && (
-                <div className="bg-white p-4 rounded-lg shadow-sm border">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Content Types</h3>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={80}
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+          {/* Additional Statistics */}
+          {statistics && statistics.ratings.length > 0 && (
+            <div className="bg-white p-4 rounded-lg shadow-sm border">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Top Recommendations</h3>
+              <div className="space-y-2">
+                {statistics.ratings.slice(0, 5).map((item, index) => (
+                  <div key={index} className="flex items-center justify-between py-2 border-b last:border-b-0">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                      <p className="text-xs text-gray-500">{item.recommendations} recommendations</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Star className="h-4 w-4 text-yellow-500 fill-current" />
+                      <span className="text-sm font-semibold text-gray-700">{item.rating.toFixed(1)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
