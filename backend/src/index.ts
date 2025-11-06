@@ -158,20 +158,83 @@ const allowNoOriginPaths = [
   '/api/public',   // public API
 ];
 
+// Helper function to detect same-origin requests (no Origin header but from same domain)
+function isSameOriginRequest(req: express.Request): boolean {
+  // If there's an Origin header, it's not a same-origin request
+  if (req.headers.origin) {
+    return false;
+  }
+
+  // Check if request is coming through nginx proxy (same domain)
+  // Nginx sets X-Real-IP or X-Forwarded-For headers
+  const hasProxyHeaders = req.headers['x-real-ip'] || req.headers['x-forwarded-for'];
+  if (hasProxyHeaders) {
+    // Request is coming through nginx, so it's from the same domain
+    return true;
+  }
+
+  // Check Referer header to see if it's from an allowed origin
+  const referer = req.headers.referer || req.headers.referrer;
+  if (referer) {
+    try {
+      const refererUrl = new URL(referer as string);
+      const refererOrigin = `${refererUrl.protocol}//${refererUrl.host}`;
+      // Check if referer origin matches any allowed origin
+      if (allowedOrigins.some(allowed => {
+        try {
+          const allowedUrl = new URL(allowed);
+          return allowedUrl.host === refererUrl.host && allowedUrl.protocol === refererUrl.protocol;
+        } catch {
+          return allowed === refererOrigin;
+        }
+      })) {
+        return true;
+      }
+    } catch {
+      // Invalid referer URL, ignore
+    }
+  }
+
+  return false;
+}
+
 // Custom CORS middleware that checks the request path
 app.use((req, res, next) => {
   const origin = req.headers.origin as string | undefined;
   const path = req.path;
   const isNoOriginAllowed = allowNoOriginPaths.some(prefix => path.startsWith(prefix));
+  const isSameOrigin = isSameOriginRequest(req);
 
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
     if (!origin) {
-      if (isProduction && !isNoOriginAllowed) {
+      // Allow same-origin requests or no-origin paths
+      if (isProduction && !isNoOriginAllowed && !isSameOrigin) {
         return res.status(403).json({ error: 'CORS: Origin header required in production' });
       }
-      // Allow preflight for no-origin paths (no credentials for no-origin)
-      res.header('Access-Control-Allow-Origin', '*');
+      // For same-origin requests, use the referer origin or first allowed origin
+      if (isSameOrigin) {
+        const referer = req.headers.referer || req.headers.referrer;
+        if (referer) {
+          try {
+            const refererUrl = new URL(referer as string);
+            const refererOrigin = `${refererUrl.protocol}//${refererUrl.host}`;
+            res.header('Access-Control-Allow-Origin', refererOrigin);
+            res.header('Access-Control-Allow-Credentials', 'true');
+          } catch {
+            // Fallback to first allowed origin
+            res.header('Access-Control-Allow-Origin', allowedOrigins[0] || '*');
+            res.header('Access-Control-Allow-Credentials', 'true');
+          }
+        } else {
+          // Fallback to first allowed origin
+          res.header('Access-Control-Allow-Origin', allowedOrigins[0] || '*');
+          res.header('Access-Control-Allow-Credentials', 'true');
+        }
+      } else {
+        // Allow preflight for no-origin paths (no credentials for no-origin)
+        res.header('Access-Control-Allow-Origin', '*');
+      }
       res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Origin, Accept');
       return res.sendStatus(200);
@@ -198,11 +261,35 @@ app.use((req, res, next) => {
 
   // Handle actual requests
   if (!origin) {
-    if (isProduction && !isNoOriginAllowed) {
+    // Allow same-origin requests or no-origin paths
+    if (isProduction && !isNoOriginAllowed && !isSameOrigin) {
       return res.status(403).json({ error: 'CORS: Origin header required in production' });
     }
-    // Allow no-origin for specific paths (no credentials for no-origin)
-    res.header('Access-Control-Allow-Origin', '*');
+    
+    // For same-origin requests, use the referer origin or first allowed origin
+    if (isSameOrigin) {
+      const referer = req.headers.referer || req.headers.referrer;
+      if (referer) {
+        try {
+          const refererUrl = new URL(referer as string);
+          const refererOrigin = `${refererUrl.protocol}//${refererUrl.host}`;
+          res.header('Access-Control-Allow-Origin', refererOrigin);
+          res.header('Access-Control-Allow-Credentials', 'true');
+        } catch {
+          // Fallback to first allowed origin
+          res.header('Access-Control-Allow-Origin', allowedOrigins[0] || '*');
+          res.header('Access-Control-Allow-Credentials', 'true');
+        }
+      } else {
+        // Fallback to first allowed origin
+        res.header('Access-Control-Allow-Origin', allowedOrigins[0] || '*');
+        res.header('Access-Control-Allow-Credentials', 'true');
+      }
+    } else {
+      // Allow no-origin for specific paths (no credentials for no-origin)
+      res.header('Access-Control-Allow-Origin', '*');
+    }
+    res.header('Access-Control-Expose-Headers', 'Content-Type, Cache-Control, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset');
     return next();
   }
 
