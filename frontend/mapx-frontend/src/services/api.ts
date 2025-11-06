@@ -17,15 +17,15 @@ export interface ApiResponse<T = any> {
 }
 
 
+import { getApiBaseUrl } from '@/config/apiConfig';
+
 // Base API client configuration
 class ApiClient {
   private client: AxiosInstance;
   private baseURL: string;
 
   constructor() {
-    // Use relative URL in production (via nginx proxy), absolute URL in development
-    const envApiBase = (import.meta as any).env.VITE_API_BASE_URL;
-    this.baseURL = envApiBase || (import.meta.env.PROD ? '/api' : 'http://localhost:5000/api');
+    this.baseURL = getApiBaseUrl();
     
     this.client = axios.create({
       baseURL: this.baseURL,

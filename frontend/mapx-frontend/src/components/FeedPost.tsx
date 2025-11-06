@@ -58,11 +58,11 @@ const getInitials = (name: string | undefined | null): string => {
     .slice(0, 2);
 };
 
+import { getProfilePictureUrl } from '@/config/apiConfig';
+
 const getProxiedImageUrl = (url?: string): string => {
   if (!url) return '';
-  return url.includes('googleusercontent.com')
-    ? `http://localhost:5000/auth/profile-picture?url=${encodeURIComponent(url)}`
-    : url;
+  return getProfilePictureUrl(url) || url;
 };
 
 const getRatingMessage = (rating: number): string => {
@@ -234,8 +234,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   const handleShare = async () => {
     try {
-      const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-      const url = `${backendBase}/share/post/${postData.recommendation_id}`;
+      const { getBackendUrl } = await import('@/config/apiConfig');
+      const url = getBackendUrl(`/share/post/${postData.recommendation_id}`);
       const shareData: ShareData = {
         title: postData.place_name || postData.title || 'Post',
         text: postData.description || 'Check out this post on RECCE',

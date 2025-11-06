@@ -29,9 +29,9 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, next }) => {
     try {
       // Simulate a brief loading state for better UX
       await new Promise(resolve => setTimeout(resolve, 500));
-      const backendBase = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5000';
+      const { getBackendUrl } = await import('@/config/apiConfig');
       const nextParam = next ? `?next=${encodeURIComponent(next)}` : '';
-      window.location.href = `${backendBase}/auth/google${nextParam}`;
+      window.location.href = `${getBackendUrl('/auth/google')}${nextParam}`;
     } catch (error) {
       console.error('Login error:', error);
       setIsLoading(false);

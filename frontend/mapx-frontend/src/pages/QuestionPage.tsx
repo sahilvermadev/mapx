@@ -89,10 +89,10 @@ const QuestionPage: React.FC = () => {
             variant="dark"
             hideNav
             position="fixed"
-            onSignInClick={() => {
-              const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+            onSignInClick={async () => {
+              const { getBackendUrl } = await import('@/config/apiConfig');
               const nextUrl = `/question/${id}`;
-              window.location.href = `${backendBase}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+              window.location.href = `${getBackendUrl('/auth/google')}?next=${encodeURIComponent(nextUrl)}`;
             }}
           />
         )}
@@ -115,10 +115,10 @@ const QuestionPage: React.FC = () => {
             {!isAuthenticated && (
               <Button
                 size="sm"
-                onClick={() => {
-                  const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+                onClick={async () => {
+                  const { getBackendUrl } = await import('@/config/apiConfig');
                   const nextUrl = `/question/${id}`;
-                  window.location.href = `${backendBase}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+                  window.location.href = `${getBackendUrl('/auth/google')}?next=${encodeURIComponent(nextUrl)}`;
                 }}
               >
                 Sign in to view more

@@ -62,13 +62,13 @@ function isTokenExpiringSoon(token: string | null, bufferMinutes: number = 2): b
   }
 }
 
+import { getApiBaseUrl } from '@/config/apiConfig';
+
 class AuthService {
   private baseURL: string;
 
   constructor() {
-    // Use relative URL in production (via nginx proxy), absolute URL in development
-    const envApiBase = import.meta.env.VITE_API_BASE_URL;
-    this.baseURL = envApiBase || (import.meta.env.PROD ? '/api' : 'http://localhost:5000/api');
+    this.baseURL = getApiBaseUrl();
   }
 
   /**

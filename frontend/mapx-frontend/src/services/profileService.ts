@@ -172,9 +172,8 @@ class ProfileApiService {
     // Use axios directly for multipart/form-data uploads
     const axios = (await import('axios')).default;
     const token = localStorage.getItem('accessToken');
-    // Use relative URL in production (via nginx proxy), absolute URL in development
-    const envApiBase = import.meta.env.VITE_API_BASE_URL;
-    const baseURL = envApiBase || (import.meta.env.PROD ? '/api' : 'http://localhost:5000/api');
+    const { getApiBaseUrl } = await import('@/config/apiConfig');
+    const baseURL = getApiBaseUrl();
     
     try {
       const response = await axios.post(

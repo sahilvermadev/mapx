@@ -58,12 +58,11 @@ const getButtonClasses = (variant: HeaderVariant): string => {
 
 const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
+import { getProfilePictureUrl } from '@/config/apiConfig';
+
 const getProxiedProfilePicture = (originalUrl?: string): string => {
   if (!originalUrl) return '';
-  if (originalUrl.includes('googleusercontent.com')) {
-    return `http://localhost:5000/auth/profile-picture?url=${encodeURIComponent(originalUrl)}`;
-  }
-  return originalUrl;
+  return getProfilePictureUrl(originalUrl) || originalUrl;
 };
 
 // Component

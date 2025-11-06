@@ -40,11 +40,11 @@ const getInitials = (name: string): string =>
     .toUpperCase()
     .slice(0, 2);
 
+import { getProfilePictureUrl } from '@/config/apiConfig';
+
 const getProxiedImageUrl = (url?: string): string => {
   if (!url) return '';
-  return url.includes('googleusercontent.com')
-    ? `http://localhost:5000/auth/profile-picture?url=${encodeURIComponent(url)}`
-    : url;
+  return getProfilePictureUrl(url) || url;
 };
 
 const SocialFeedPage: React.FC = () => {

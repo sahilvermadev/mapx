@@ -22,11 +22,13 @@ export interface SetUsernameResponse {
 }
 
 // Username service methods
+import { getApiBaseUrl } from '@/config/apiConfig';
+
 export const usernameService = {
   // Check if username is available
   async checkAvailability(username: string): Promise<UsernameCheckResult> {
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const apiBase = getApiBaseUrl();
       const response = await fetch(`${apiBase}/username/check/${encodeURIComponent(username)}`);
       return await response.json();
     } catch (error) {
@@ -38,7 +40,7 @@ export const usernameService = {
   // Set username for current user
   async setUsername(username: string): Promise<SetUsernameResponse> {
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const apiBase = getApiBaseUrl();
       const response = await fetch(`${apiBase}/username/set`, {
         method: 'POST',
         headers: {
@@ -74,7 +76,7 @@ export const usernameService = {
         setTimeout(() => reject(new Error('Timeout')), 2000) // 2 second timeout
       );
       
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const apiBase = getApiBaseUrl();
       const fetchPromise = fetch(`${apiBase}/username/status`, {
         headers: {
           'Authorization': `Bearer ${token}`

@@ -7,6 +7,7 @@ import { MapPin, Star } from 'lucide-react';
 import ContactReveal from '@/components/ContactReveal';
 import { FaPlus } from 'react-icons/fa';
 import { ArrowLeft } from 'lucide-react';
+import { getProfilePictureUrl } from '@/config/apiConfig';
 
 interface PreviewStepProps {
   currentUser: { displayName?: string; email?: string; profilePictureUrl?: string } | null | undefined;
@@ -94,9 +95,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
 
   const getProxiedImageUrl = (url?: string): string => {
     if (!url) return '';
-    return url.includes('googleusercontent.com')
-      ? `http://localhost:5000/auth/profile-picture?url=${encodeURIComponent(url)}`
-      : url;
+    return getProfilePictureUrl(url) || url;
   };
 
   const getRatingMessage = (rating: number): string => {

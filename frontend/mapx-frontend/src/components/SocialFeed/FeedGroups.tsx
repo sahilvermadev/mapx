@@ -238,8 +238,8 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                           size="sm"
                           onClick={async () => {
                             try {
-                              const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-                              const url = `${backendBase}/share/post/${displayPost.recommendation_id}`;
+                              const { getBackendUrl } = await import('@/config/apiConfig');
+                              const url = getBackendUrl(`/share/post/${displayPost.recommendation_id}`);
                               const shareData: ShareData = {
                                 title: displayPost.place_name || displayPost.title || 'Post',
                                 text: displayPost.description || 'Check out this post on RECCE',

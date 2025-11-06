@@ -49,11 +49,11 @@ const getInitials = (name: string | undefined | null): string => {
     .slice(0, 2);
 };
 
+import { getProfilePictureUrl } from '@/config/apiConfig';
+
 const getProxiedImageUrl = (url?: string): string => {
   if (!url) return '';
-  return url.includes('googleusercontent.com')
-    ? `http://localhost:5000/auth/profile-picture?url=${encodeURIComponent(url)}`
-    : url;
+  return getProfilePictureUrl(url) || url;
 };
 
 // Loading skeleton component
@@ -162,8 +162,8 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
   }, [navigate, questionContext, question.id, promptLoginIfNeeded]);
 
   const handleShare = useCallback(async () => {
-    const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-    const url = `${backendBase}/share/question/${question.id}`;
+    const { getBackendUrl } = await import('@/config/apiConfig');
+    const url = getBackendUrl(`/share/question/${question.id}`);
     const shareData: ShareData = {
       title: 'Question',
       text: questionText || 'Check out this question',
