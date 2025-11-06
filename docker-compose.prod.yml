@@ -121,9 +121,36 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: recce_pgadmin_prod
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@recce.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-change_me_in_production}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      # Use a non-standard port for security (only accessible from server)
+      # Access via SSH tunnel: ssh -L 8080:localhost:8080 user@your-server
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   db_data:
   redis_data:
+  pgadmin_data:
 
 networks:
   app-network:
