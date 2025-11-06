@@ -28,6 +28,9 @@ RUN npm ci --only=production
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy migrations folder (needed for running migrations)
+COPY migrations ./migrations
+
 # Copy health check script
 COPY healthcheck.js ./
 
