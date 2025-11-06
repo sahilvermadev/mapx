@@ -14,6 +14,10 @@ function configurePassport() {
     throw new Error('Missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET');
   }
 
+  // Get callback URL from environment or default to localhost for development
+  const backendUrl = process.env.BACKEND_URL || process.env.API_BASE_URL || 'http://localhost:5000';
+  const callbackURL = `${backendUrl}/auth/google/callback`;
+
   if (isDevelopmentMode) {
     logger.warn('Running in development mode with test OAuth credentials');
     logger.warn('OAuth will be bypassed for development purposes');
@@ -23,7 +27,7 @@ function configurePassport() {
       {
         clientID: 'test-client-id',
         clientSecret: 'test-client-secret',
-        callbackURL: 'http://localhost:5000/auth/google/callback',
+        callbackURL,
         scope: ['profile', 'email'],
       },
       async (accessToken: string, refreshToken: string | undefined, profile: any, done: VerifyCallback) => {
@@ -63,12 +67,13 @@ function configurePassport() {
     ));
   } else {
     // Production OAuth configuration
+    logger.info('Configuring Google OAuth with callback URL', { callbackURL });
     passport.use(
       new GoogleStrategy(
         {
           clientID,
           clientSecret,
-          callbackURL: 'http://localhost:5000/auth/google/callback',
+          callbackURL,
           scope: ['profile', 'email', 'openid'],
         },
         async (
