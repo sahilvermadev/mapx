@@ -52,88 +52,7 @@ logger.info('Environment check completed', envCheck);
 const app = express();
 const port = process.env.PORT || 5000;
 
-// CORS configuration with environment-driven origins
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['http://localhost:5173']; // Default for development
-
-// CORS configuration - strict in production, permissive in development
-const isProduction = process.env.NODE_ENV === 'production';
-app.use(cors({ 
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests) in development
-    if (!origin) {
-      if (isProduction) {
-        return callback(new Error('CORS: Origin header required in production'));
-      }
-      return callback(null, true);
-    }
-    
-    // In production, only allow explicitly configured origins
-    if (isProduction) {
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      logger.warn('CORS blocked origin', { origin, allowedOrigins });
-      return callback(new Error(`CORS: Origin ${origin} not allowed`));
-    }
-    
-    // In development, allow localhost and configured origins
-    if (
-      allowedOrigins.includes(origin) || 
-      origin.includes('localhost') || 
-      origin.includes('127.0.0.1')
-    ) {
-      return callback(null, true);
-    }
-    
-    // Reject unknown origins even in development (for security)
-    logger.warn('CORS blocked origin in development', { origin });
-    return callback(new Error(`CORS: Origin ${origin} not allowed`));
-  },
-  credentials: true,
-  exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept']
-}));
-// Configure compression to exclude image responses (they're already compressed)
-app.use(compression({
-  filter: (req, res) => {
-    // Don't compress image responses
-    if (req.path.includes('/profile-picture')) {
-      return false;
-    }
-    // Use compression for everything else
-    return compression.filter(req, res);
-  }
-}));
-
-// Security headers via Helmet
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:", "http:", "blob:"], // Allow images from all sources for profile pictures
-      connectSrc: ["'self'", "https:", "http:"], // Allow connections to backend and external APIs
-      fontSrc: ["'self'", "data:", "https:"],
-    },
-  },
-  hsts: {
-    maxAge: 31536000, // 1 year
-    includeSubDomains: true,
-    preload: true
-  },
-  crossOriginEmbedderPolicy: false, // Allow embedding for Google Maps and other services
-  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin resource loading for images
-}));
-
-// Request tracking middleware (early in the chain)
-app.use(requestTrackingMiddleware);
-app.use(requestLoggingMiddleware);
-
-// Health check endpoint (before other middleware)
+// Health check endpoint (before CORS middleware to allow internal health checks)
 app.get('/health', async (req, res) => {
   const health: {
     status: 'healthy' | 'unhealthy' | 'degraded';
@@ -223,6 +142,87 @@ app.get('/health', async (req, res) => {
 
   res.status(statusCode).json(health);
 });
+
+// CORS configuration with environment-driven origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:5173']; // Default for development
+
+// CORS configuration - strict in production, permissive in development
+const isProduction = process.env.NODE_ENV === 'production';
+app.use(cors({ 
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests) in development
+    if (!origin) {
+      if (isProduction) {
+        return callback(new Error('CORS: Origin header required in production'));
+      }
+      return callback(null, true);
+    }
+    
+    // In production, only allow explicitly configured origins
+    if (isProduction) {
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      logger.warn('CORS blocked origin', { origin, allowedOrigins });
+      return callback(new Error(`CORS: Origin ${origin} not allowed`));
+    }
+    
+    // In development, allow localhost and configured origins
+    if (
+      allowedOrigins.includes(origin) || 
+      origin.includes('localhost') || 
+      origin.includes('127.0.0.1')
+    ) {
+      return callback(null, true);
+    }
+    
+    // Reject unknown origins even in development (for security)
+    logger.warn('CORS blocked origin in development', { origin });
+    return callback(new Error(`CORS: Origin ${origin} not allowed`));
+  },
+  credentials: true,
+  exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept']
+}));
+// Configure compression to exclude image responses (they're already compressed)
+app.use(compression({
+  filter: (req, res) => {
+    // Don't compress image responses
+    if (req.path.includes('/profile-picture')) {
+      return false;
+    }
+    // Use compression for everything else
+    return compression.filter(req, res);
+  }
+}));
+
+// Security headers via Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:", "http:", "blob:"], // Allow images from all sources for profile pictures
+      connectSrc: ["'self'", "https:", "http:"], // Allow connections to backend and external APIs
+      fontSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true
+  },
+  crossOriginEmbedderPolicy: false, // Allow embedding for Google Maps and other services
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin resource loading for images
+}));
+
+// Request tracking middleware (early in the chain)
+app.use(requestTrackingMiddleware);
+app.use(requestLoggingMiddleware);
 
 // Request body parsing with size limits
 // IMPORTANT: Skip parsing for multipart/form-data - multer needs the raw stream
