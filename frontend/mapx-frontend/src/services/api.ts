@@ -23,7 +23,9 @@ class ApiClient {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+    // Use relative URL in production (via nginx proxy), absolute URL in development
+    const envApiBase = (import.meta as any).env.VITE_API_BASE_URL;
+    this.baseURL = envApiBase || (import.meta.env.PROD ? '/api' : 'http://localhost:5000/api');
     
     this.client = axios.create({
       baseURL: this.baseURL,

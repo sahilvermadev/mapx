@@ -24,8 +24,12 @@ const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className,
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
   const sessionToken = useMemo(() => {
     // Fallback for browsers that don't support crypto.randomUUID()
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return crypto.randomUUID();
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+    } catch (e) {
+      // crypto.randomUUID might exist but throw an error
     }
     // Fallback: generate a UUID-like string
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {

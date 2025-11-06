@@ -80,7 +80,9 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     const formattedPrefs = { ...prefsData };
     // Ensure bannerUrl is properly formatted (add base URL if it's a relative path)
     if (formattedPrefs.bannerUrl && !formattedPrefs.bannerUrl.startsWith('http')) {
-      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      // Use relative URL in production (via nginx proxy), absolute URL in development
+      const envApiBase = import.meta.env.VITE_API_BASE_URL;
+      const baseURL = envApiBase || (import.meta.env.PROD ? '' : 'http://localhost:5000');
       formattedPrefs.bannerUrl = formattedPrefs.bannerUrl.startsWith('/') 
         ? `${baseURL}${formattedPrefs.bannerUrl}` 
         : `${baseURL}/api${formattedPrefs.bannerUrl}`;
@@ -614,7 +616,9 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
         const result = await profileApi.uploadBannerImage(userId, file);
         
         // Ensure the URL is properly formatted with base URL
-        const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+        // Use relative URL in production (via nginx proxy), absolute URL in development
+      const envApiBase = import.meta.env.VITE_API_BASE_URL;
+      const baseURL = envApiBase || (import.meta.env.PROD ? '' : 'http://localhost:5000');
         const bannerUrl = result.bannerUrl.startsWith('/') 
           ? `${baseURL}${result.bannerUrl}` 
           : `${baseURL}/api${result.bannerUrl}`;
