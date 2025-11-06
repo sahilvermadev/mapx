@@ -1,6 +1,5 @@
 import express from 'express';
 import compression from 'compression';
-import cors from 'cors';
 import helmet from 'helmet';
 import './config/env';
 import { validateEnvironment } from './config/env';
@@ -151,70 +150,78 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 // CORS configuration - strict in production, but allow navigation requests without Origin
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Use a delegate so we can inspect the request path/method
-app.use(cors((req, callback) => {
-  const requestOrigin = req.headers.origin as string | undefined;
+// Paths that allow requests without Origin header (browser navigations don't send Origin)
+const allowNoOriginPaths = [
+  '/auth',          // OAuth redirects/initiations
+  '/health',        // health checks
+  '/share',         // public OG routes
+  '/api/public',   // public API
+];
 
-  // Allow requests without Origin for certain paths (browser navigations don't send Origin)
-  const allowNoOriginPaths = [
-    '/auth',          // OAuth redirects/initiations
-    '/health',        // health checks
-    '/share',         // public OG routes
-    '/api/public',    // public API
-  ];
+// Custom CORS middleware that checks the request path
+app.use((req, res, next) => {
+  const origin = req.headers.origin as string | undefined;
+  const path = req.path;
+  const isNoOriginAllowed = allowNoOriginPaths.some(prefix => path.startsWith(prefix));
 
-  const isNoOriginAllowed = allowNoOriginPaths.some(prefix => req.path.startsWith(prefix));
-
-  if (!requestOrigin) {
-    if (isProduction) {
-      // Allow if route is in the allowlist, otherwise deny
-      return callback(null, {
-        origin: isNoOriginAllowed,
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
-        exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-      });
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    if (!origin) {
+      if (isProduction && !isNoOriginAllowed) {
+        return res.status(403).json({ error: 'CORS: Origin header required in production' });
+      }
+      // Allow preflight for no-origin paths (no credentials for no-origin)
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Origin, Accept');
+      return res.sendStatus(200);
     }
-    // Non-production: allow missing Origin
-    return callback(null, {
-      origin: true,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
-      exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-    });
+    
+    // Check if origin is allowed
+    const isAllowed = isProduction 
+      ? allowedOrigins.includes(origin)
+      : allowedOrigins.includes(origin) || origin.includes('localhost') || origin.includes('127.0.0.1');
+    
+    if (isAllowed) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    } else {
+      logger.warn('CORS blocked origin', { origin, allowedOrigins, path });
+      return res.status(403).json({ error: `CORS: Origin ${origin} not allowed` });
+    }
+    
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Origin, Accept');
+    res.header('Access-Control-Expose-Headers', 'Content-Type, Cache-Control, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset');
+    return res.sendStatus(200);
   }
 
-  // With Origin header
-  if (isProduction) {
-    const isAllowed = allowedOrigins.includes(requestOrigin);
-    if (!isAllowed) {
-      logger.warn('CORS blocked origin', { origin: requestOrigin, allowedOrigins });
+  // Handle actual requests
+  if (!origin) {
+    if (isProduction && !isNoOriginAllowed) {
+      return res.status(403).json({ error: 'CORS: Origin header required in production' });
     }
-    return callback(null, {
-      origin: isAllowed,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
-      exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-    });
+    // Allow no-origin for specific paths (no credentials for no-origin)
+    res.header('Access-Control-Allow-Origin', '*');
+    return next();
   }
 
-  // Development: allow localhost and configured origins
-  const devAllowed = 
-    allowedOrigins.includes(requestOrigin) || 
-    requestOrigin.includes('localhost') || 
-    requestOrigin.includes('127.0.0.1');
+  // Check if origin is allowed
+  const isAllowed = isProduction 
+    ? allowedOrigins.includes(origin)
+    : allowedOrigins.includes(origin) || origin.includes('localhost') || origin.includes('127.0.0.1');
 
-  return callback(null, {
-    origin: devAllowed,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
-    exposedHeaders: ['Content-Type', 'Cache-Control', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-  });
-}));
+  if (isAllowed) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  } else {
+    logger.warn('CORS blocked origin', { origin, allowedOrigins, path });
+    return res.status(403).json({ error: `CORS: Origin ${origin} not allowed` });
+  }
+
+  res.header('Access-Control-Expose-Headers', 'Content-Type, Cache-Control, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset');
+  next();
+});
 // Configure compression to exclude image responses (they're already compressed)
 app.use(compression({
   filter: (req, res) => {
