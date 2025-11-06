@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import { useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Header as LandingHeader } from '@/components/landing/Header';
 import { Card } from '@/components/ui/card';
+import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
 import FeedPost from '@/components/FeedPost';
 import { apiClient } from '@/services/apiClient';
 import { useAuth } from '@/auth';
@@ -10,47 +11,66 @@ import type { FeedPost as FeedPostType } from '@/services/socialService';
 
 const PostPage: React.FC = () => {
   const { recommendationId } = useParams<{ recommendationId: string }>();
-  const navigate = useNavigate();
   const { user: currentUser, isChecking, isAuthenticated } = useAuth();
   const [post, setPost] = useState<FeedPostType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bgReady, setBgReady] = useState(false);
+  const [followSuggestion, setFollowSuggestion] = useState<{ friendId: string; friendName: string } | null>(null);
 
   useEffect(() => {
-    const fetchPost = async () => {
-      if (!recommendationId) {
-        setError('No post ID provided');
-        setLoading(false);
-        return;
-      }
-      
+    if (!recommendationId) {
+      setError('No post ID provided');
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const fetchPublic = async () => {
       try {
         setLoading(true);
         setError(null);
-        
-        const response = await apiClient.get(`/recommendations/${recommendationId}`);
-        
-        if (response.data && typeof response.data === 'object' && response.data !== null && 'recommendation_id' in response.data) {
-          setPost(response.data as FeedPostType);
-        } else {
-          setError('Post not found');
-        }
-      } catch (err) {
-        console.error('Error fetching post:', err);
-        setError('Failed to load post');
+        const { data: payload } = await apiClient.get(`/public/recommendations/${recommendationId}`);
+        const raw = payload && typeof payload === 'object' && (payload as any).data ? (payload as any).data : payload;
+        if (!raw) return;
+        if (!cancelled) setPost(raw as any);
+      } catch (e: any) {
+        const data = e?.response?.data;
+        if (!cancelled) setError(data?.error || 'Failed to load post');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
+    fetchPublic();
 
-    fetchPost();
-  }, [recommendationId]);
+    // If authenticated, fetch the full data and replace
+    const fetchPrivate = async () => {
+      if (!isAuthenticated) return;
+      try {
+        const { data: payload } = await apiClient.get(`/recommendations/${recommendationId}`);
+        const raw = payload && typeof payload === 'object' && (payload as any).data ? (payload as any).data : payload;
+        if (raw && !cancelled) setPost(raw as any);
+      } catch {}
+    };
+    fetchPrivate();
+    return () => { cancelled = true; };
+  }, [recommendationId, isAuthenticated]);
 
   useEffect(() => {
-    if (!isChecking && !isAuthenticated) {
-      navigate('/landing');
+    const img = new Image();
+    img.src = '/src/assets/post-page-bg.jpg';
+    img.onload = () => setBgReady(true);
+  }, []);
+
+  // Suggest following sharer post-login
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const params = new URLSearchParams(window.location.search);
+    const friendId = params.get('friendId');
+    const friendName = params.get('friendName');
+    if (friendId && friendName) {
+      setFollowSuggestion({ friendId, friendName });
     }
-  }, [isChecking, isAuthenticated, navigate]);
+  }, [isAuthenticated]);
 
   if (isChecking) {
     return null;
@@ -58,31 +78,55 @@ const PostPage: React.FC = () => {
 
   return (
     <div 
-      className="h-full grid place-items-center overflow-hidden"
+      className="h-full grid place-items-center overflow-hidden transition-opacity duration-300"
       style={{
         backgroundImage: 'url(/src/assets/post-page-bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
+        opacity: bgReady ? 1 : 0.7
       }}
     >
+        {!isAuthenticated && (
+          <LandingHeader
+            variant="dark"
+            hideNav
+            position="fixed"
+            onSignInClick={() => {
+              const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+              const nextUrl = `/post/${recommendationId}`;
+              window.location.href = `${backendBase}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+            }}
+          />
+        )}
       <div className="w-full max-w-2xl p-4">
 
         {/* Loading State */}
         {loading && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <RefreshCw className="h-8 w-8 animate-spin mb-4 text-gray-400" />
-            <p className="text-gray-500">Loading post...</p>
-          </div>
+          <Card className="p-6 shadow-sm border border-white/40 bg-white/90 backdrop-blur-sm">
+            <FeedPostSkeleton noOuterSpacing />
+          </Card>
         )}
 
         {/* Error State */}
         {error && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <p className="text-red-500 mb-4">{error}</p>
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <p className="text-red-500">{error}</p>
             <Button onClick={() => window.location.reload()} variant="outline" size="sm">
               Try Again
             </Button>
+            {!isAuthenticated && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+                  const nextUrl = `/post/${recommendationId}`;
+                  window.location.href = `${backendBase}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+                }}
+              >
+                Sign in to view more
+              </Button>
+            )}
           </div>
         )}
 
@@ -91,18 +135,25 @@ const PostPage: React.FC = () => {
           <Card className="p-6 shadow-sm border border-white/40 bg-white/90 backdrop-blur-sm">
             <div className="w-full flex justify-center">
               <div className="w-full max-w-xl">
-                <FeedPost
-                  post={post}
-                  currentUserId={currentUser.id}
-                  noOuterSpacing
-                  onPostUpdate={() => {
-                    // Reload the post data after update
-                    window.location.reload();
-                  }}
-                />
+                {post && (
+                  <FeedPost
+                    post={post}
+                    currentUserId={isAuthenticated && currentUser ? currentUser.id : undefined}
+                    noOuterSpacing
+                    readOnly={!isAuthenticated}
+                    onPostUpdate={() => {
+                      window.location.reload();
+                    }}
+                  />
+                )}
               </div>
             </div>
           </Card>
+        )}
+        {!isAuthenticated && !loading && !error && post && followSuggestion && (
+          <div className="mt-3 text-center text-sm text-gray-600">
+            You'll be able to follow {followSuggestion.friendName} after signing in.
+          </div>
         )}
       </div>
     </div>

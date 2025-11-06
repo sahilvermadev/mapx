@@ -104,9 +104,10 @@ class EmbeddingQueue {
                 business_name: service?.business_name,
                 address: service?.address
             };
-            // Generate embedding (different strategy for recommendations vs annotations)
-            const embedding = task.type === 'recommendation'
-                ? await (0, embeddings_1.generateRecommendationEmbedding)({
+            // Generate embedding based on type
+            let embedding;
+            if (task.type === 'recommendation') {
+                embedding = await (0, embeddings_1.generateRecommendationEmbedding)({
                     content_type: enhancedData.content_type,
                     title: enhancedData.title,
                     description: enhancedData.description,
@@ -121,8 +122,15 @@ class EmbeddingQueue {
                     user_name: enhancedData.user_name,
                     content_data: enhancedData.content_data,
                     metadata: enhancedData.metadata,
-                })
-                : await (0, embeddings_1.generateAnnotationEmbedding)(enhancedData);
+                });
+            }
+            else if (task.type === 'question') {
+                const text = (task.data && task.data.text) || enhancedData.text || '';
+                embedding = await (0, embeddings_1.generateSearchEmbedding)(text);
+            }
+            else {
+                embedding = await (0, embeddings_1.generateAnnotationEmbedding)(enhancedData);
+            }
             // Update the record in database
             await this.updateRecordWithEmbedding(task.type, task.recordId, embedding);
             console.log(`Successfully processed embedding task: ${task.id}`);
@@ -153,7 +161,9 @@ class EmbeddingQueue {
     async getFullRecordData(type, recordId) {
         const client = await db_1.default.connect();
         try {
-            const table = type === 'annotation' ? 'annotations' : 'recommendations';
+            const table = type === 'annotation' ? 'annotations'
+                : type === 'recommendation' ? 'recommendations'
+                    : 'questions';
             const query = `SELECT * FROM ${table} WHERE id = $1`;
             const result = await client.query(query, [recordId]);
             if (result.rows.length === 0) {
@@ -175,7 +185,9 @@ class EmbeddingQueue {
     async updateRecordWithEmbedding(type, recordId, embedding) {
         const client = await db_1.default.connect();
         try {
-            const table = type === 'annotation' ? 'annotations' : 'recommendations';
+            const table = type === 'annotation' ? 'annotations'
+                : type === 'recommendation' ? 'recommendations'
+                    : 'questions';
             const query = `
         UPDATE ${table} 
         SET embedding = $1, updated_at = CURRENT_TIMESTAMP 

@@ -3,8 +3,11 @@ import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './components/Header';
 import { UsernameSetupModal } from './auth';
-import { AuthProvider, useAuth, AuthErrorBoundary } from './auth';
+import { AuthProvider, useAuth } from './auth';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { OfflineIndicator } from './hooks/useOffline';
 import { Toaster } from "sonner";
+import { ThemeProvider } from '@/contexts/ThemeContext';
 
 // Lazy load page components for better performance
 const MapPage = lazy(() => import('./pages/MapPage'));
@@ -14,6 +17,7 @@ const SocialFeedPage = lazy(() => import('./pages/SocialFeedPage'));
 const FriendsPage = lazy(() => import('./pages/FriendsPage'));
 const RecommendationComposerPage = lazy(() => import('./pages/RecommendationComposerPage'));
 const PostPage = lazy(() => import('./pages/PostPage'));
+const QuestionPage = lazy(() => import('./pages/QuestionPage'));
 
 // Fast loading component
 const LoadingSkeleton: React.FC = () => (
@@ -95,6 +99,7 @@ const AppContent: React.FC = () => {
 
   return (
     <div className={`w-full h-screen relative ${isMapRoute ? 'overflow-hidden' : 'overflow-auto'}`}>
+      <OfflineIndicator />
       <Toaster
         toastOptions={{
           classNames: {
@@ -164,6 +169,7 @@ const AppContent: React.FC = () => {
               <Route path="/friends" element={<FriendsPage />} />
               <Route path="/compose" element={<RecommendationComposerPage />} />
               <Route path="/post/:recommendationId" element={<PostPage />} />
+              <Route path="/question/:id" element={<QuestionPage />} />
             </Routes>
           </Suspense>
         </div>
@@ -186,17 +192,19 @@ const queryClient = new QueryClient({
 
 const App: React.FC = () => {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthErrorBoundary>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <ThemeProvider>
           <Router>
             <Routes>
               <Route path="/*" element={<AppContent />} />
             </Routes>
           </Router>
+          </ThemeProvider>
         </AuthProvider>
-      </AuthErrorBoundary>
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 };
 

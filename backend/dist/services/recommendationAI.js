@@ -5,10 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.recommendationAI = void 0;
 const groq_sdk_1 = __importDefault(require("groq-sdk"));
-const dotenv_1 = __importDefault(require("dotenv"));
-const path_1 = __importDefault(require("path"));
-// Load .env file from the root directory
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../../.env') });
+require("../config/env");
 // Initialize Groq client
 const groq = new groq_sdk_1.default({
     apiKey: process.env.GROQ_API_KEY,
@@ -16,6 +13,8 @@ const groq = new groq_sdk_1.default({
 class RecommendationAI {
     async analyzeRecommendation(text) {
         try {
+            // More sophisticated detection of question context
+            const isAnsweringQuestion = this.detectQuestionContext(text);
             const prompt = `You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. Your job is to:
 
 1. Determine if the text is valid content (not gibberish, spam, or irrelevant)
@@ -24,6 +23,19 @@ class RecommendationAI {
 4. Identify what important information is missing and generate smart follow-up questions
 
 User's text: "${text}"
+
+${isAnsweringQuestion ? `
+CONTEXT: The user is answering a question from someone else. This text appears to be a question that someone is asking, and the user wants to provide a recommendation to answer it. 
+
+The follow-up questions should be SHORT and DIRECT, like form fields. Use concise, simple questions:
+- "What's the name?"
+- "Where is it located?"
+- "What's the contact info?"
+- "What makes it good?"
+- "Any tips or notes?"
+
+Avoid long explanations or phrases like "To give a complete answer" or "To help others understand".
+` : ''}
 
 Analyze this text and respond with a JSON object containing:
 
@@ -68,13 +80,19 @@ Guidelines:
 - Be specific and contextual in your questions
 - If the text is gibberish or irrelevant, set isValid to false and isGibberish to true
 - IMPORTANT: For location-related fields (location, address, place), set "needsLocationPicker": true to enable Google Maps location selection
+${isAnsweringQuestion ? `
+- IMPORTANT: Since this is answering a question, make follow-up questions SHORT and DIRECT like form fields
+- Use simple, concise questions that feel like filling out a form
+- Avoid long explanations or verbose phrasing
+- Focus on getting the essential information quickly
+` : ''}
 
 Respond with valid JSON only.`;
             const completion = await groq.chat.completions.create({
                 messages: [
                     {
                         role: "system",
-                        content: "You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. You must respond with valid JSON only. Be thorough in your analysis and generate helpful, contextual questions."
+                        content: "You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. You must respond with valid JSON only. Be thorough in your analysis and generate helpful, contextual questions. When the user is answering a question, make follow-up questions SHORT and DIRECT like form fields."
                     },
                     {
                         role: "user",
@@ -116,6 +134,8 @@ Respond with valid JSON only.`;
     }
     async generateFollowUpQuestion(currentData, missingField, contentType, conversationHistory) {
         try {
+            // Check if this is part of answering a question using more sophisticated detection
+            const isAnsweringQuestion = this.detectQuestionContext(conversationHistory.join(' '));
             const prompt = `You are an intelligent AI assistant that generates contextual follow-up questions for a local knowledge sharing platform.
 
 Current information collected:
@@ -125,11 +145,27 @@ Content type: ${contentType}
 Missing field: ${missingField}
 Conversation history: ${conversationHistory.join(' | ')}
 
+${isAnsweringQuestion ? `
+CONTEXT: The user is answering a question from someone else. Your follow-up question should be SHORT and DIRECT, like a form field.
+
+Use concise, simple questions:
+- "What's the name?"
+- "Where is it located?"
+- "What's the contact info?"
+- "What makes it good?"
+- "Any tips or notes?"
+
+Avoid long explanations or verbose phrasing.
+` : ''}
+
 Generate a smart, contextual question to ask for the missing field. The question should:
 1. Be natural and conversational
 2. Provide context about why this information is important
 3. Give examples when helpful
 4. Be specific to the content type
+${isAnsweringQuestion ? `
+5. Be SHORT and DIRECT like a form field - avoid verbose explanations
+` : ''}
 
 Respond with JSON:
 {
@@ -142,7 +178,7 @@ Respond with JSON:
                 messages: [
                     {
                         role: "system",
-                        content: "You are an intelligent AI assistant that generates contextual follow-up questions. Respond with valid JSON only."
+                        content: "You are an intelligent AI assistant that generates contextual follow-up questions. Respond with valid JSON only. When the user is answering a question, make questions SHORT and DIRECT like form fields."
                     },
                     {
                         role: "user",
@@ -233,6 +269,24 @@ Respond with JSON:
             };
         }
     }
+    detectQuestionContext(text) {
+        const lowerText = text.toLowerCase();
+        // Check for question patterns
+        const questionIndicators = [
+            '?', 'what', 'where', 'when', 'why', 'how', 'which', 'who', 'can you', 'do you know',
+            'any recommendations', 'suggestions', 'advice', 'help with', 'looking for'
+        ];
+        const hasQuestionIndicators = questionIndicators.some(indicator => lowerText.includes(indicator));
+        // Check for question sentence structure
+        const questionWords = ['what', 'where', 'when', 'why', 'how', 'which', 'who'];
+        const startsWithQuestionWord = questionWords.some(word => lowerText.startsWith(word));
+        // Check for question patterns in the text
+        const hasQuestionPattern = /\?/.test(text) ||
+            /^(what|where|when|why|how|which|who|can|do|are|is|would|could|should)/i.test(text.trim());
+        // Check if it looks like someone is asking for recommendations
+        const isAskingForRecommendations = /(recommend|suggest|know.*good|looking.*for|any.*good|best.*place|good.*restaurant|good.*service)/i.test(text);
+        return hasQuestionIndicators || startsWithQuestionWord || hasQuestionPattern || isAskingForRecommendations;
+    }
     cleanJsonResponse(response) {
         // Remove any text before the first { and after the last }
         const startIndex = response.indexOf('{');
@@ -316,34 +370,81 @@ Respond with JSON:
             console.log('=== RECOMMENDATION AI FORMAT ===');
             console.log('recommendationAI.formatRecommendationPost - data:', data);
             console.log('recommendationAI.formatRecommendationPost - originalText:', originalText);
-            const prompt = `You are a formatting assistant creating short, utilitarian recommendation posts in a third-person perspective.
-  
-  STYLE:
-  - Write 3–8 concise sentences in third-person, focusing on key details to inform and engage readers.
-  - Use a natural, straightforward tone that feels authentic and avoids overly personal or fake enthusiasm.
-  - Include only the following fields if explicitly provided in data: name/category, pricing, contact (phone/email), best time, tips, specialities.
-  - Order: name/category; pricing; contact; best time; tips; specialities.
-  - Completely skip any field not provided in the data; do not mention missing fields or say they are unavailable.
-  - Never invent or assume details; use only the provided data.
-  - Ensure readability with line breaks between sentences.
-  - Craft the post to pique interest with practical details, avoiding fluff or emojis.
-  - If originalText is provided, use it as inspiration for tone but prioritize data accuracy.
-  
-  DATA (includes additional_details from Q&A):
-  ${JSON.stringify(data, null, 2)}
-  
-  ORIGINAL (optional):
-  ${originalText || ''}
-  
-  TASK:
-  Produce a recommendation post in 3–8 lines, each a simple sentence in third-person.
-  Example:
-  Cafe Bloom offers a cozy cafe experience.
-  Pricing is mid-range.
-  Mornings are the best time to visit.
-  Try the seasonal pastry for a treat.
-  
-  Return only the final text:`;
+            // Determine content type from data (backend tolerant of either key)
+            const contentType = data?.contentType || data?.type || 'unclear';
+            // Build a content-type-aware prompt
+            const baseData = JSON.stringify(data, null, 2);
+            const original = originalText || '';
+            const servicePrompt = `You are formatting a SERVICE recommendation.
+
+GOAL:
+- Produce copy that reads like a trustworthy human wrote it: specific, clear, and to the point.
+
+STYLE:
+- Write 3–5 short sentences in third-person, using active voice.
+- Mention concrete details only when provided: specialties, outcomes, responsiveness, pricing, years of experience.
+- Prefer the professional title (e.g., neurosurgeon, carpenter) over generic terms like "service provider".
+- Avoid boilerplate phrases and hedging: do not use "recommended service provider", "skilled professional", "notable recommendation", or "as evidenced by".
+- Do not repeat the name more than once and vary sentence openings.
+- If the ORIGINAL text contains first-person details (e.g., "treated my son"), paraphrase to neutral third-person without implying AI authorship (e.g., "treated a patient" or "completed a successful procedure"). Do not mention "the recommender".
+- Never invent details.
+- Do not include location or contact information; the UI shows those separately.
+${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
+- CONTEXT: This is answering a question. Make sure the recommendation directly addresses what was asked and provides a helpful answer.
+` : ''}
+
+DATA:
+${baseData}
+
+ORIGINAL (optional):
+${original}
+
+Return only the final text.`;
+            const placePrompt = `You are formatting a PLACE recommendation.
+
+GOAL:
+- Help a reader quickly understand why the place is worth a visit.
+
+STYLE:
+- Write 3–5 short sentences in third-person, using active voice.
+- Focus on vibe, what it's good for, best times to go, and any practical tip provided (queues, noise level, must-try items).
+- Avoid generic phrases like "recommended place" and avoid repeating the name more than once.
+- If the ORIGINAL text uses first-person anecdotes, paraphrase to neutral third-person (e.g., "I loved the quiet mornings" -> "Quiet in the mornings"). Do not mention "the recommender".
+- Keep language descriptive but utilitarian; no emojis or fluff. Never invent details.
+- Do not include location or contact information; the UI shows those separately.
+${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
+- CONTEXT: This is answering a question. Make sure the recommendation directly addresses what was asked and provides a helpful answer.
+` : ''}
+
+DATA:
+${baseData}
+
+ORIGINAL (optional):
+${original}
+
+Return only the final text.`;
+            const genericPrompt = `You are a formatting assistant creating short, useful recommendation posts in third-person.
+
+STYLE:
+- Write 3–5 short sentences in active voice.
+- Be specific, avoid filler and clichés. Do not repeat the name more than once.
+- Only use details that exist in the data (category, specialties, pricing, best time, tips). Never invent.
+- Convert any first-person statements from the ORIGINAL into neutral third-person without implying authorship or personal involvement. Avoid phrases like "I recommend" or "the recommender".
+- Do not include location or contact information; the UI surfaces those separately.
+${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
+- CONTEXT: This is answering a question. Make sure the recommendation directly addresses what was asked and provides a helpful answer.
+` : ''}
+
+DATA:
+${baseData}
+
+ORIGINAL (optional):
+${original}
+
+Return only the final text.`;
+            const prompt = contentType === 'service' ? servicePrompt
+                : contentType === 'place' ? placePrompt
+                    : genericPrompt;
             const response = await groq.chat.completions.create({
                 messages: [{ role: 'user', content: prompt }],
                 model: 'llama-3.3-70b-versatile',
@@ -359,35 +460,45 @@ Respond with JSON:
         }
         catch (error) {
             console.error('Error formatting recommendation post:', error);
-            // Fallback: construct a simple formatted post locally to keep UX flowing
+            // Fallback: construct a simple formatted post locally to keep UX flowing (content-type aware, no contact info in text)
             const lines = [];
-            const nameOrCategory = (data?.name || data?.category || data?.type || data?.contentType || 'This recommendation').toString();
-            lines.push(`${nameOrCategory} is recommended.`);
-            if (data?.pricing) {
-                lines.push(`Pricing: ${data.pricing}.`);
+            const nameOrCategory = (data?.name || data?.category || data?.title || 'This recommendation').toString();
+            const ct = data?.contentType || data?.type || 'unclear';
+            if (ct === 'service') {
+                lines.push(`${nameOrCategory} is recommended for their expertise.`);
+                if (Array.isArray(data?.specialities) && data.specialities.length) {
+                    lines.push(`Specialities: ${data.specialities.join(', ')}.`);
+                }
+                if (data?.best_times)
+                    lines.push(`Best time: ${data.best_times}.`);
+                if (data?.tips)
+                    lines.push(`${data.tips}.`);
             }
-            const contactParts = [];
-            const contact = data?.contact || data?.contact_info;
-            if (contact?.phone)
-                contactParts.push(`Phone: ${contact.phone}`);
-            if (contact?.email)
-                contactParts.push(`Email: ${contact.email}`);
-            if (contactParts.length) {
-                lines.push(contactParts.join(' | '));
+            else if (ct === 'place') {
+                lines.push(`${nameOrCategory} is a recommended place to visit.`);
+                const address = data?.location || data?.location_address;
+                if (address)
+                    lines.push(`Address: ${address}.`);
+                if (data?.pricing)
+                    lines.push(`Pricing: ${data.pricing}.`);
+                if (data?.best_times)
+                    lines.push(`Best time: ${data.best_times}.`);
+                if (data?.tips)
+                    lines.push(`${data.tips}.`);
             }
-            if (data?.best_times) {
-                lines.push(`Best time: ${data.best_times}.`);
+            else {
+                lines.push(`${nameOrCategory} is recommended.`);
+                if (data?.pricing)
+                    lines.push(`Pricing: ${data.pricing}.`);
+                if (data?.best_times)
+                    lines.push(`Best time: ${data.best_times}.`);
+                if (data?.tips)
+                    lines.push(`${data.tips}.`);
+                if (Array.isArray(data?.specialities) && data.specialities.length)
+                    lines.push(`specialities: ${data.specialities.join(', ')}.`);
             }
-            if (data?.tips) {
-                lines.push(`${data.tips}.`);
-            }
-            if (Array.isArray(data?.specialities) && data.specialities.length) {
-                lines.push(`specialities: ${data.specialities.join(', ')}.`);
-            }
-            if (lines.length === 1 && originalText) {
-                // Ensure minimum content
+            if (!lines.length && originalText)
                 lines.push(originalText);
-            }
             return lines.join('\n');
         }
     }

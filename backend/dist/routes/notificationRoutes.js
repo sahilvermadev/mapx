@@ -7,7 +7,6 @@ const express_1 = __importDefault(require("express"));
 const notifications_1 = require("../db/notifications");
 const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
-// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * GET /api/notifications
  * Get notifications for the current user

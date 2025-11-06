@@ -8,7 +8,6 @@ const google_maps_services_js_1 = require("@googlemaps/google-maps-services-js")
 const router = express_1.default.Router();
 // Initialize Google Maps client
 const googleMapsClient = new google_maps_services_js_1.Client({});
-// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * POST /api/location/search
  * Search for places using Google Places API

@@ -1,6 +1,6 @@
-# MapX - AI-Powered Semantic Search
+# recce_ - AI-Powered Semantic Search
 
-MapX is a location-based recommendation platform that uses AI-powered semantic search to help users discover amazing places. The system leverages vector embeddings and natural language processing to understand user queries and provide intelligent, contextual recommendations.
+recce_ is a location-based recommendation platform that uses AI-powered semantic search to help users discover amazing places. The system leverages vector embeddings and natural language processing to understand user queries and provide intelligent, contextual recommendations.
 
 ## 🚀 Enhanced Semantic Search Features
 
@@ -72,12 +72,12 @@ The enhanced embeddings enable powerful semantic searches:
 
 ### **Frontend Components**
 
-#### **Search Interface (`frontend/mapx-frontend/src/components/SearchBar.tsx`)**
+#### **Search Interface (`frontend/recce_-frontend/src/components/SearchBar.tsx`)**
 - Dual-mode search: Google Places API + AI Semantic Search
 - Intelligent query handling and mode switching
 - Real-time search suggestions
 
-#### **Search Results (`frontend/mapx-frontend/src/components/SearchResults.tsx`)**
+#### **Search Results (`frontend/recce_-frontend/src/components/SearchResults.tsx`)**
 - Displays AI-generated summaries with 🤖 badge
 - Shows place information with similarity scores
 - Lists individual recommendations with user attribution
@@ -124,7 +124,7 @@ All project documentation is organized in the [`docs/`](./docs/) folder:
 ### **Environment Variables**
 ```bash
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/mapx
+DATABASE_URL=postgresql://user:password@localhost:5432/recce_
 
 # Redis (for authentication)
 REDIS_URL=redis://localhost:6379
@@ -146,10 +146,10 @@ JWT_SECRET=your_jwt_secret_key
 1. **Clone and install dependencies**
 ```bash
 git clone <repository>
-cd mapx
+cd recce_
 npm install
 cd backend && npm install
-cd ../frontend/mapx-frontend && npm install
+cd ../frontend/recce_-frontend && npm install
 ```
 
 2. **Set up services**
@@ -168,7 +168,7 @@ npm run migrate
 cd backend && npm run dev
 
 # Frontend (from root directory)
-cd frontend/mapx-frontend && npm run dev
+cd frontend/recce_-frontend && npm run dev
 ```
 
 4. **Regenerate embeddings (for existing data)**
@@ -276,4 +276,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-**MapX** - Discover amazing places with AI-powered intelligence! 🗺️✨ 
+**recce_** - Discover amazing places with AI-powered intelligence! 🗺️✨ 

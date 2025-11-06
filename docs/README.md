@@ -1,6 +1,6 @@
-# MapX Documentation
+# recce_ Documentation
 
-This directory contains all documentation for the MapX project, organized by topic and component.
+This directory contains all documentation for the recce_ project, organized by topic and component.
 
 ## 📚 **Documentation Index**
 
@@ -126,4 +126,4 @@ For questions about documentation:
 ---
 
 **Last Updated**: December 2024  
-**Maintained By**: MapX Development Team
+**Maintained By**: recce_ Development Team

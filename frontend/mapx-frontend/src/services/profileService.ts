@@ -11,12 +11,73 @@ export interface UserData {
   last_login_at: string;
 }
 
+export type ThemeName = 'neo-brutal' | 'ocean' | 'sunset' | 'forest' | 'monochrome';
+
+export interface Theme {
+  name: ThemeName;
+  displayName: string;
+  accentColor: string;
+  backgroundColor: string;
+  textColor: string;
+  patternEnabled: boolean;
+}
+
+export const THEMES: Record<ThemeName, Theme> = {
+  'neo-brutal': {
+    name: 'neo-brutal',
+    displayName: 'Sunflower',
+    accentColor: '#FFE66D', // Yellow
+    backgroundColor: '#FFF9E6', // Light yellow
+    textColor: '#000000',
+    patternEnabled: false,
+  },
+  'ocean': {
+    name: 'ocean',
+    displayName: 'Ocean',
+    accentColor: '#4ECDC4', // Teal
+    backgroundColor: '#F0FDFC', // Light teal
+    textColor: '#000000',
+    patternEnabled: false,
+  },
+  'sunset': {
+    name: 'sunset',
+    displayName: 'Cotton Candy',
+    accentColor: '#FF6B6B', // Red
+    backgroundColor: '#FFF5F5', // Light pink
+    textColor: '#000000',
+    patternEnabled: false,
+  },
+  'forest': {
+    name: 'forest',
+    displayName: 'Forest',
+    accentColor: '#95D5B2', // Green
+    backgroundColor: '#F6FFFA', // Light green
+    textColor: '#000000',
+    patternEnabled: false,
+  },
+  'monochrome': {
+    name: 'monochrome',
+    displayName: 'Monochrome',
+    accentColor: '#000000', // Black
+    backgroundColor: '#FFFFFF', // White
+    textColor: '#000000',
+    patternEnabled: true, // Dotted pattern
+  },
+};
+
+export interface ProfilePreferences {
+  bannerUrl?: string;
+  theme?: ThemeName;
+  font?: 'default' | 'serif' | 'mono' | 'sans-bold' | 'cursive';
+}
+
 export interface UserStats {
   total_recommendations: number;
   total_likes: number;
+  total_questions: number;
   total_saved: number;
   average_rating: number;
-  total_places_visited: number;
+  total_cities_visited: number;
   total_reviews: number;
 }
 
@@ -29,6 +90,8 @@ export interface FilterOptions {
   date_from?: string;
   date_to?: string;
   content_type?: 'place' | 'service' | 'all';
+  city_slug?: string;
+  categories?: string[];
 }
 
 export interface SortOptions {
@@ -80,6 +143,76 @@ class ProfileApiService {
     }
     
     return response.data;
+  }
+
+  async getUserPreferences(userId: string): Promise<ProfilePreferences> {
+    const response = await apiClient.get<ProfilePreferences>(`/profile/${userId}/preferences`);
+    if (!('success' in response) || !(response as any).success) {
+      // Fallback shape
+      return {} as ProfilePreferences;
+    }
+    return (response as any).data || {};
+  }
+
+  async updateUserPreferences(userId: string, prefs: ProfilePreferences): Promise<ProfilePreferences> {
+    const response = await apiClient.put<ProfilePreferences>(`/profile/${userId}/preferences`, prefs);
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to save preferences');
+    }
+    return response.data;
+  }
+
+  /**
+   * Upload banner image
+   */
+  async uploadBannerImage(userId: string, file: File): Promise<{ bannerUrl: string }> {
+    const formData = new FormData();
+    formData.append('banner', file);
+    
+    // Use axios directly for multipart/form-data uploads
+    const axios = (await import('axios')).default;
+    const token = localStorage.getItem('accessToken');
+    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+    
+    try {
+      const response = await axios.post(
+        `${baseURL}/profile/${userId}/banner`,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            // Don't set Content-Type - axios will set it automatically with boundary for FormData
+          },
+          maxContentLength: 10 * 1024 * 1024, // 10MB
+          maxBodyLength: 10 * 1024 * 1024, // 10MB
+        }
+      );
+      
+      if (!response.data.success || !response.data.data) {
+        throw new Error(response.data.error || 'Failed to upload banner image');
+      }
+      
+      return response.data.data;
+    } catch (error: any) {
+      // Provide more detailed error message
+      if (error.response?.data?.error) {
+        throw new Error(error.response.data.error);
+      }
+      if (error.response?.data?.details) {
+        throw new Error(`${error.response.data.error}: ${error.response.data.details}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Delete banner image
+   */
+  async deleteBannerImage(userId: string): Promise<void> {
+    const response = await apiClient.delete(`/profile/${userId}/banner`);
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to delete banner image');
+    }
   }
 
   /**
@@ -201,6 +334,22 @@ class ProfileApiService {
     const response = await apiClient.delete(`/profile/saved/${placeId}`);
     return response.success;
   }
+
+  /**
+   * Get user's questions
+   */
+  async getUserQuestions(userId: string): Promise<{ data: any[] }> {
+    const response = await apiClient.get<any[]>(`/profile/${userId}/questions`);
+    
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to fetch user questions');
+    }
+    
+    return {
+      data: response.data || []
+    };
+  }
+
 }
 
 // Export singleton instance

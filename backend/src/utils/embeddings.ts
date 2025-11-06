@@ -1,10 +1,6 @@
 import OpenAI from 'openai';
-import dotenv from 'dotenv';
-import path from 'path';
+import '../config/env';
 // NOTE: Avoid importing deprecated annotation types. Accept a flexible shape instead.
-
-// Load .env file from the root directory (two levels up from backend/src)
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -111,10 +107,13 @@ export async function generateAnnotationEmbedding(annotationData: {
 }
 
 /**
- * Generate embedding from a simple text string (for search queries)
+ * Generate embedding from a search query, structured to match recommendation embeddings
  */
 export async function generateSearchEmbedding(searchText: string): Promise<number[]> {
-  return generateEmbedding(searchText);
+  // Structure the search query to match the recommendation embedding format
+  // This helps the search query be more semantically similar to recommendation embeddings
+  const structuredQuery = `Looking for: ${searchText}. Search query for recommendations.`;
+  return generateEmbedding(structuredQuery);
 }
 
 /**

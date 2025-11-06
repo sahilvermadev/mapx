@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the implementation of asynchronous embedding generation in MapX, which improves performance by processing embeddings in the background without blocking user operations.
+This document describes the implementation of asynchronous embedding generation in recce_, which improves performance by processing embeddings in the background without blocking user operations.
 
 ## Key Changes
 

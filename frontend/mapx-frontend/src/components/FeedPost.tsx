@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { socialApi, type FeedPost as FeedPostType, type Comment } from '@/services/socialService';
-import { useAuth } from '@/auth';
+import { useAuth, LoginModal } from '@/auth';
 import { formatUserDisplay, getUserInitials } from '../utils/userDisplay';
 import { renderWithMentions, insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
+import { useLocationNavigation } from '@/hooks/useLocationNavigation';
+import type { LocationData } from '@/types/location';
 import ContactReveal from '@/components/ContactReveal';
 import { socialApi as SocialApi } from '@/services/socialService';
 import { toast } from 'sonner';
@@ -20,6 +22,7 @@ interface FeedPostProps {
   onPostUpdate?: () => void;
   noOuterSpacing?: boolean;
   isLoading?: boolean;
+  readOnly?: boolean;
 }
 
 // Constants
@@ -82,15 +85,17 @@ const renderStars = (rating: number) => (
 
 // Component
 // onPostUpdate currently unused
-const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing, isLoading }) => {
+const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing, isLoading, readOnly }) => {
   if (isLoading) {
     return <FeedPostSkeleton noOuterSpacing={noOuterSpacing} />;
   }
 
-  if (!post || !currentUserId) {
+  const isReadOnly = Boolean(readOnly) || !currentUserId;
+  if (!post || (!currentUserId && !isReadOnly)) {
     return null;
   }
   const navigate = useNavigate();
+  const { getLocationNavigationProps } = useLocationNavigation();
   // State
   const [postData, setPostData] = useState(post);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -99,6 +104,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isLiked, setIsLiked] = useState(post.is_liked_by_current_user);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   // Mentions state for comment input
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]);
@@ -107,6 +113,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const [usernameToUser, setUsernameToUser] = useState<Record<string, { id: string; displayName: string }>>({});
 
   const { user: currentUser } = useAuth();
+
+  const effectiveUserId = currentUserId || '';
 
   // Effects
   useEffect(() => {
@@ -124,7 +132,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         return;
       }
       try {
-        const res = await SocialApi.searchUsers(mentionQuery, currentUserId);
+        const res = await SocialApi.searchUsers(mentionQuery, effectiveUserId);
         if (active && (res as any).success) setMentionSuggestions((res as any).data || []);
       } catch {
         if (active) setMentionSuggestions([]);
@@ -138,7 +146,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const loadComments = async () => {
     setIsLoadingComments(true);
     try {
-      const response = await socialApi.getComments(postData.recommendation_id, currentUserId);
+      const response = await socialApi.getComments(postData.recommendation_id, effectiveUserId);
       if (response.success && response.data) {
         setComments(response.data);
       } else {
@@ -161,7 +169,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     try {
       // Convert any @username to stable @[id:name] tokens based on mapping
       const textWithTokens = convertUsernamesToTokens(newComment, usernameToUser);
-      const response = await socialApi.addComment(postData.recommendation_id, currentUserId, textWithTokens);
+      const response = await socialApi.addComment(postData.recommendation_id, effectiveUserId, textWithTokens);
       if (response.success && response.data) {
         setComments(prev => [response.data!, ...prev]);
         setNewComment('');
@@ -177,7 +185,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   const handleDeleteComment = async (commentId: number) => {
     try {
-      const response = await socialApi.deleteComment(commentId, currentUserId);
+      const response = await socialApi.deleteComment(commentId, effectiveUserId);
       if (response.success) {
         setComments(prev => prev.filter(comment => comment.id !== commentId));
         // Update comment count locally
@@ -188,17 +196,26 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     }
   };
 
+  const promptLoginIfNeeded = () => {
+    if (readOnly) {
+      setShowLoginModal(true);
+      return true;
+    }
+    return false;
+  };
+
   const handleLike = async () => {
+    if (promptLoginIfNeeded()) return;
     try {
       if (isLiked) {
-        const response = await socialApi.unlikeAnnotation(postData.recommendation_id, currentUserId);
+        const response = await socialApi.unlikeAnnotation(postData.recommendation_id, effectiveUserId);
         if (response.success) {
           setIsLiked(false);
           // Update like count locally without full reload
           setPostData(prev => ({ ...prev, likes_count: Math.max(0, prev.likes_count - 1) }));
         }
       } else {
-        const response = await socialApi.likeAnnotation(postData.recommendation_id, currentUserId);
+        const response = await socialApi.likeAnnotation(postData.recommendation_id, effectiveUserId);
         if (response.success) {
           setIsLiked(true);
           // Update like count locally without full reload
@@ -210,11 +227,15 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     }
   };
 
-  const handleToggleComments = () => setShowComments(!showComments);
+  const handleToggleComments = () => {
+    if (promptLoginIfNeeded()) return;
+    setShowComments(!showComments);
+  };
 
   const handleShare = async () => {
     try {
-      const url = `${window.location.origin}/post/${postData.recommendation_id}`;
+      const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+      const url = `${backendBase}/share/post/${postData.recommendation_id}`;
       const shareData: ShareData = {
         title: postData.place_name || postData.title || 'Post',
         text: postData.description || 'Check out this post on RECCE',
@@ -246,12 +267,12 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   // Render components
   const renderRatingBadge = () => (
-    <div className="absolute top-4 right-4 z-10">
-      <div className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-1 px-2 py-1">
+    <div className="absolute top-3 right-3 md:top-4 md:right-4 z-10">
+      <div className="flex flex-col items-end gap-0.5 md:gap-1">
+        <div className="flex items-center gap-0.5 md:gap-1 px-1.5 md:px-2 py-0.5 md:py-1">
           {renderStars(postData.rating)}
         </div>
-        <div className="text-xs text-muted-foreground text-right">
+        <div className="text-[10px] md:text-xs text-muted-foreground text-right leading-tight">
           {getRatingMessage(postData.rating)}
         </div>
       </div>
@@ -266,16 +287,28 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     });
 
     return (
-      <div className="flex items-start gap-3 pr-32">
-        <Avatar className="h-12 w-12 flex-shrink-0">
-          <AvatarImage src={getProxiedImageUrl(postData.user_picture)} alt={userDisplay.name} />
-          <AvatarFallback>{getUserInitials({ displayName: postData.user_name })}</AvatarFallback>
-        </Avatar>
+      <div className="flex items-start gap-3 pr-20 md:pr-32">
+        <button
+          onClick={() => navigate(`/profile/${postData.user_id}`)}
+          className="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+          aria-label={`View ${userDisplay.name}'s profile`}
+        >
+          <Avatar className="h-10 w-10 md:h-12 md:w-12">
+            <AvatarImage src={getProxiedImageUrl(postData.user_picture)} alt={userDisplay.name} />
+            <AvatarFallback>{getUserInitials({ displayName: postData.user_name })}</AvatarFallback>
+          </Avatar>
+        </button>
 
         <div className="flex-1 min-w-0">
-          <div className="mb-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-sm">{userDisplay.name}</span>
+          <div className="mb-2 md:mb-2.5">
+            <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
+              <button
+                onClick={() => navigate(`/profile/${postData.user_id}`)}
+                className="font-semibold text-sm hover:underline cursor-pointer focus:outline-none focus:underline"
+                aria-label={`View ${userDisplay.name}'s profile`}
+              >
+                {userDisplay.name}
+              </button>
               {userDisplay.subtitle && (
                 <span className="text-sm text-muted-foreground">{userDisplay.subtitle}</span>
               )}
@@ -303,15 +336,36 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           const contactPhone = (postData.content_data && (postData.content_data.contact_info?.phone || postData.content_data.phone)) || undefined;
           const contactEmail = (postData.content_data && (postData.content_data.contact_info?.email || postData.content_data.email)) || undefined;
           if (!address) return null;
+          
+          // Check if we have coordinates for navigation
+          const hasCoordinates = postData.place_lat && postData.place_lng && 
+            postData.place_lat !== 0 && postData.place_lng !== 0;
+          
+          const locationData: LocationData = {
+            lat: postData.place_lat || 0,
+            lng: postData.place_lng || 0,
+            placeName: postData.place_name || address,
+            placeAddress: address,
+            googlePlaceId: (postData as any).google_place_id || (postData.content_data && (postData.content_data as any).google_place_id)
+          };
+          
+          const locationProps = getLocationNavigationProps({
+            hasCoordinates: Boolean(hasCoordinates),
+            locationData,
+            className: 'md:truncate'
+          });
+          
           return (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3 pr-32">
-              <MapPin className="h-3 w-3 flex-shrink-0" />
-              <span className="truncate">{address}</span>
+            <div className="flex items-center gap-1.5 md:gap-1 text-xs text-muted-foreground mb-3 pr-20 md:pr-32">
+              <MapPin className="h-3 w-3 md:h-3 md:w-3 flex-shrink-0" />
+              <span {...locationProps} className="truncate flex-1 min-w-0">
+                {address}
+              </span>
               {postData.content_type === 'service' && (contactPhone || contactEmail) && (
                 <ContactReveal
                   contact={{ phone: contactPhone, email: contactEmail }}
-                  className="relative ml-2"
-                  buttonClassName="h-5 w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
+                  className="relative flex-shrink-0"
+                  buttonClassName="h-5 w-5 md:h-5 md:w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
                   iconClassName="h-3 w-3"
                   align="right"
                 />
@@ -321,7 +375,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         })()}
 
         {(postData.description || (postData as any).notes) && (
-          <div className="mb-3">
+          <div className="mb-3 md:mb-4">
             {/* <h4 className="font-semibold text-sm mb-1">Notes:</h4> */}
             <p className="text-sm leading-relaxed">
               {renderWithMentions(postData.description || (postData as any).notes, (userId) => navigate(`/profile/${userId}`))}
@@ -330,15 +384,15 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         )}
 
         {postData.labels && postData.labels.length > 0 && (
-          <div className="mb-4">
-            <div className="flex items-center gap-2 flex-wrap">
+          <div className="mb-3 md:mb-4">
+            <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
               {postData.labels.slice(0, 6).map((label: string, i: number) => (
-                <span key={i} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition-colors">
+                <span key={i} className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition-colors">
                   {label}
                 </span>
               ))}
               {postData.labels.length > 6 && (
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                <span className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
                   +{postData.labels.length - 6} more
                 </span>
               )}
@@ -351,37 +405,37 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 };
 
   const renderInteractionButtons = () => (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between mt-4 pt-4 border-t border-black/10">
+      <div className="flex items-center gap-2 md:gap-3">
         <Button
           variant="ghost"
           size="sm"
           onClick={handleLike}
-          className={`flex items-center gap-2 h-8 px-2 ${
-            isLiked ? 'text-red-500' : 'text-muted-foreground hover:text-foreground'
+          className={`flex items-center gap-1 md:gap-2 h-8 md:h-8 px-2 md:px-3 rounded-md border border-black bg-white/95 shadow-[1px_1px_0_0_#000] transition-all duration-150 hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-y-0.5 ${
+            isLiked ? 'text-red-600' : 'text-foreground'
           }`}
         >
-          <Heart className={`h-4 w-4 ${isLiked ? 'fill-current' : ''}`} />
-          <span className="text-sm">{postData.likes_count}</span>
+          <Heart className={`h-3.5 w-3.5 md:h-4 md:w-4 ${isLiked ? 'fill-current' : ''}`} />
+          <span className="text-xs md:text-sm font-medium">{postData.likes_count}</span>
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
           onClick={handleToggleComments}
-          className="flex items-center gap-2 h-8 px-2 text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1 md:gap-2 h-8 md:h-8 px-2 md:px-3 rounded-md border border-black bg-white/95 shadow-[1px_1px_0_0_#000] transition-all duration-150 hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-y-0.5"
         >
-          <MessageCircle className="h-4 w-4" />
-          <span className="text-sm">{postData.comments_count}</span>
+          <MessageCircle className="h-3.5 w-3.5 md:h-4 md:w-4" />
+          <span className="text-xs md:text-sm font-medium">{postData.comments_count}</span>
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
           onClick={handleShare}
-          className="flex items-center gap-2 h-8 px-2 text-muted-foreground hover:text-foreground"
+          className="flex items-center justify-center h-8 w-8 md:h-8 md:w-auto md:px-3 rounded-md border border-black bg-white/95 shadow-[1px_1px_0_0_#000] transition-all duration-150 hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-y-0.5"
         >
-          <Share2 className="h-4 w-4" />
+          <Share2 className="h-3.5 w-3.5 md:h-4 md:w-4" />
         </Button>
       </div>
       
@@ -403,7 +457,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const handleCommentLike = async (commentId: number, isCurrentlyLiked: boolean) => {
     try {
       if (isCurrentlyLiked) {
-        const response = await socialApi.unlikeComment(commentId, currentUserId);
+        const response = await socialApi.unlikeComment(commentId, effectiveUserId);
         if (response.success) {
           setComments(prev => updateCommentInState(prev, commentId, {
             is_liked_by_current_user: false,
@@ -411,7 +465,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           }));
         }
       } else {
-        const response = await socialApi.likeComment(commentId, currentUserId);
+        const response = await socialApi.likeComment(commentId, effectiveUserId);
         if (response.success) {
           setComments(prev => updateCommentInState(prev, commentId, {
             is_liked_by_current_user: true,
@@ -593,7 +647,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   );
 
   const renderCommentsSection = () => (
-    showComments && (
+    !readOnly && showComments && (
       <div className="mt-3">
         {/* Loading state */}
         {isLoadingComments && (
@@ -624,8 +678,11 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   // Main render
   return (
-    <article className={noOuterSpacing ? "w-full" : "w-full border-b border-border/50 pb-6 mb-6 last:border-b-0"}>
-      <div className="relative">
+    <article className={noOuterSpacing ? "w-full" : "w-full mb-6 md:mb-8"}>
+      <div className={noOuterSpacing ? "relative" : "relative rounded-lg border-2 border-black bg-white p-4 md:p-6 shadow-[4px_4px_0_0_#000]"}>
+        {showLoginModal && (
+          <LoginModal onClose={() => setShowLoginModal(false)} next={window.location.pathname + window.location.search} />
+        )}
         {renderRatingBadge()}
         {renderUserInfo()}        
         {renderInteractionButtons()}
@@ -635,4 +692,4 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   );
 };
 
-export default FeedPost; 
+export default React.memo(FeedPost);

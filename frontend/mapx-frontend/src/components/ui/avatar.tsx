@@ -23,6 +23,8 @@ function AvatarImage({
   className,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  // Note: crossOrigin is not needed since profile pictures are proxied through our backend
+  // which makes them same-origin requests. Only use crossOrigin for external images.
   return (
     <AvatarPrimitive.Image
       data-slot="avatar-image"

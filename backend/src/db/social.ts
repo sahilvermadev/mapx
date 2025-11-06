@@ -625,26 +625,76 @@ export async function getUserRecommendations(
   userId: string,
   limit: number = 20,
   offset: number = 0,
-  contentType?: 'place' | 'service'
+  contentType?: 'place' | 'service',
+  searchQuery?: string,
+  citySlug?: string,
+  categoryKeys?: string[]
 ): Promise<any[]> {
   try {
-    // Build dynamic WHERE clause for optional content type filter
+    // Sanitize and validate search query
+    const sanitizedSearch = searchQuery?.trim();
+    const hasSearchQuery = sanitizedSearch && sanitizedSearch.length > 0;
+
+    // Build dynamic WHERE clause for optional filters
     const whereParts: string[] = [
       'r.user_id = $1',
       "r.visibility IN ('public', 'friends')"
     ];
-    const params: any[] = [userId];
+    const params: (string | number)[] = [userId];
+    let paramCount = 1;
 
+    // Add content type filter if provided
     if (contentType) {
-      whereParts.push('r.content_type = $4');
+      paramCount++;
+      whereParts.push(`r.content_type = $${paramCount}`);
+      params.push(contentType);
     }
 
-    // Final params order: $1 userId, $2 limit, $3 offset, optional $4 contentType
-    params.push(limit); // $2
-    params.push(offset); // $3
-    if (contentType) {
-      params.push(contentType); // $4
+    // Add search query filter if provided (search in description, title, or place name)
+    if (hasSearchQuery) {
+      paramCount++;
+      const searchPattern = `%${sanitizedSearch}%`;
+      whereParts.push(
+        `(r.description ILIKE $${paramCount} OR r.title ILIKE $${paramCount} OR p.name ILIKE $${paramCount})`
+      );
+      params.push(searchPattern);
     }
+
+    // Add city filter if provided
+    if (citySlug) {
+      paramCount++;
+      whereParts.push(`p.city_slug = $${paramCount}`);
+      params.push(citySlug);
+    }
+
+    // Add category filter if provided
+    if (categoryKeys && categoryKeys.length > 0) {
+      const categoryConditions: string[] = [];
+      categoryKeys.forEach(catKey => {
+        paramCount++;
+        const paramIndex = paramCount;
+        categoryConditions.push(`(
+          LOWER(COALESCE(p.primary_type, '')) = LOWER($${paramIndex})
+          OR r.content_type = LOWER($${paramIndex})
+          OR EXISTS (
+            SELECT 1 FROM unnest(r.labels) AS label 
+            WHERE LOWER(label::text) LIKE '%' || LOWER($${paramIndex}) || '%'
+          )
+        )`);
+        params.push(catKey);
+      });
+      if (categoryConditions.length > 0) {
+        whereParts.push(`(${categoryConditions.join(' OR ')})`);
+      }
+    }
+
+    // Add limit and offset at the end
+    paramCount++;
+    const limitParamIndex = paramCount;
+    params.push(limit);
+    paramCount++;
+    const offsetParamIndex = paramCount;
+    params.push(offset);
 
     const result = await pool.query(
       `SELECT 
@@ -653,6 +703,8 @@ export async function getUserRecommendations(
         r.title,
         r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
         p.name as place_name, p.address as place_address, p.lat as place_lat, p.lng as place_lng, p.google_place_id,
+        p.city_name as place_city_name, p.city_slug as place_city_slug, p.country_code as place_country_code, p.admin1_name as place_admin1_name,
+        p.primary_type as place_primary_type,
         u.id as user_id, u.display_name as user_name, u.profile_picture_url as user_picture,
         COUNT(DISTINCT ac.id) as comments_count,
         COUNT(DISTINCT al.id) as likes_count,
@@ -667,10 +719,10 @@ export async function getUserRecommendations(
       LEFT JOIN saved_places sp ON p.id = sp.place_id AND sp.user_id = $1
       WHERE ${whereParts.join(' AND ')}
       GROUP BY r.id, r.place_id, r.title, r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
-               p.name, p.address, p.lat, p.lng, p.google_place_id,
+               p.name, p.address, p.lat, p.lng, p.google_place_id, p.city_name, p.city_slug, p.country_code, p.admin1_name, p.primary_type,
                u.id, u.display_name, u.profile_picture_url, al2.id, sp.id
       ORDER BY r.created_at DESC
-      LIMIT $2 OFFSET $3`,
+      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`,
       params
     );
     return result.rows;

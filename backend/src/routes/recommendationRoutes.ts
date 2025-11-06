@@ -13,10 +13,14 @@ import {
   regenerateAllRecommendationEmbeddings
 } from '../db/recommendations';
 import { generatePlaceEmbedding, generateSearchEmbedding } from '../utils/embeddings';
-import { generateAISummary, type SearchContext } from '../utils/aiSummaries';
+import { generateAISummary, type SearchContext, type SummaryMode } from '../utils/aiSummaries';
 import { embeddingQueue } from '../services/embeddingQueue';
+import { SEARCH_CONFIG } from '../config/searchConfig';
 import pool from '../db'; // Import pool directly from db.ts
 import type { RecommendationSearchResult } from '../db/recommendations';
+import { recommendationService } from '../services/recommendationService';
+import { getPlaceDetails, deriveAdmin, slugifyCity } from '../services/placesClient';
+import { handleError } from '../utils/errorHandling';
 import { extractMentionUserIds, savePostMentions } from '../db/mentions';
 import { getUserIdFromRequest } from '../middleware/auth';
 
@@ -24,6 +28,125 @@ import { upsertService } from '../services/serviceDeduplication';
 import { extractServiceType } from '../utils/nameSimilarity';
 
 const router = express.Router();
+
+// Lightweight in-memory caches (process-local)
+// Embedding cache: 60s TTL, keyed by trimmed query
+// Summary cache: 10m TTL, keyed by query + ordered result ids
+// @ts-ignore
+const _g: any = global as any;
+if (!_g._mxEmbeddingCache) _g._mxEmbeddingCache = new Map<string, { vec: number[]; ts: number }>();
+if (!_g._mxSummaryCache) _g._mxSummaryCache = new Map<string, { text: string; ts: number }>();
+const EMBED_TTL_MS = 60_000;
+const SUMMARY_TTL_MS = 10 * 60_000;
+
+/**
+ * Filter search results to only include semantically relevant recommendations
+ * Uses keyword-based filtering and AI validation to ensure relevance
+ */
+async function filterRelevantResults(
+  recommendations: any[], 
+  query: string
+): Promise<any[]> {
+  if (recommendations.length === 0) {
+    return [];
+  }
+
+  
+  // First pass: keyword-based filtering
+  const queryLower = query.toLowerCase();
+  const relevantKeywords = extractRelevantKeywords(queryLower);
+  
+  const keywordFiltered = recommendations.filter(rec => {
+    const description = (rec.description || '').toLowerCase();
+    const title = (rec.title || '').toLowerCase();
+    const contentData = rec.content_data || {};
+    const serviceType = (contentData.service_type || '').toLowerCase();
+    const placeName = (contentData.place_name || '').toLowerCase();
+    const serviceName = (contentData.service_name || '').toLowerCase();
+    
+    // Also check the raw content_data for any relevant fields
+    const allContentText = Object.values(contentData).join(' ').toLowerCase();
+    
+    // Check if any relevant keyword appears in the recommendation
+    const hasRelevantKeyword = relevantKeywords.some(keyword => 
+      description.includes(keyword) || 
+      title.includes(keyword) || 
+      serviceType.includes(keyword) ||
+      placeName.includes(keyword) ||
+      serviceName.includes(keyword) ||
+      allContentText.includes(keyword)
+    );
+    
+    return hasRelevantKeyword;
+  });
+  
+  
+  // If we have very few results after keyword filtering, be more lenient
+  if (keywordFiltered.length === 0 && recommendations.length > 0) {
+    // Return only high-similarity results (above 0.85) as a fallback
+    const highSimilarityResults = recommendations.filter(rec => rec.similarity > 0.85);
+    
+    // If still no results, return top 3 as fallback
+    if (highSimilarityResults.length === 0) {
+      return recommendations.slice(0, 3);
+    }
+    
+    return highSimilarityResults;
+  }
+  
+  return keywordFiltered;
+}
+
+/**
+ * Extract relevant keywords from a search query
+ */
+function extractRelevantKeywords(query: string): string[] {
+  const keywords = [];
+  
+  // Common service mappings with comprehensive keyword sets
+  const serviceMappings: Record<string, string[]> = {
+    'painter': ['painter', 'painting', 'paint', 'interior', 'exterior', 'wall', 'color', 'brush', 'coating', 'finish', 'mural', 'decorative'],
+    'electrician': ['electrician', 'electrical', 'wiring', 'electric', 'power', 'outlet', 'circuit', 'switch', 'light', 'installation'],
+    'plumber': ['plumber', 'plumbing', 'pipe', 'water', 'drain', 'toilet', 'faucet', 'leak', 'repair', 'installation'],
+    'carpenter': ['carpenter', 'carpentry', 'wood', 'furniture', 'cabinet', 'shelf', 'door', 'window', 'frame'],
+    'contractor': ['contractor', 'construction', 'renovation', 'remodel', 'building', 'repair', 'maintenance'],
+    'cleaner': ['cleaner', 'cleaning', 'housekeeping', 'maid', 'janitor', 'sanitize', 'disinfect'],
+    'gardener': ['gardener', 'gardening', 'landscape', 'lawn', 'plant', 'tree', 'flower', 'yard', 'garden'],
+    'mechanic': ['mechanic', 'auto', 'car', 'vehicle', 'repair', 'engine', 'brake', 'tire', 'maintenance'],
+    'chef': ['chef', 'cooking', 'catering', 'food', 'kitchen', 'restaurant', 'meal', 'recipe'],
+    'photographer': ['photographer', 'photography', 'photo', 'camera', 'wedding', 'event', 'portrait', 'studio']
+  };
+  
+  // Find matching service types
+  for (const [service, terms] of Object.entries(serviceMappings)) {
+    if (query.includes(service)) {
+      keywords.push(...terms);
+    }
+  }
+  
+  // Add the original query words
+  const words = query.split(/\s+/).filter(word => word.length > 2);
+  keywords.push(...words);
+  
+  // Add common service-related terms that might appear in descriptions
+  const commonServiceTerms = ['service', 'professional', 'expert', 'specialist', 'technician', 'worker', 'provider'];
+  keywords.push(...commonServiceTerms);
+  
+  // Add variations of common words
+  const queryWords = query.toLowerCase().split(/\s+/);
+  queryWords.forEach(word => {
+    if (word.length > 3) {
+      // Add plural/singular variations
+      if (word.endsWith('s')) {
+        keywords.push(word.slice(0, -1)); // painter -> paint
+      } else {
+        keywords.push(word + 's'); // paint -> paints
+      }
+    }
+  });
+  
+  return [...new Set(keywords)]; // Remove duplicates
+}
 
 
 // Helpers
@@ -164,7 +287,6 @@ router.get('/place/google/:googlePlaceId', async (req, res) => {
  */
 router.post('/save', async (req, res) => {
   try {
-    console.log('[recommendations/save] incoming payload keys:', Object.keys(req.body || {}));
     const {
       content_type,
       google_place_id,
@@ -235,7 +357,6 @@ router.post('/save', async (req, res) => {
         finalContentType = 'place'; // default
       }
     }
-    console.log('[recommendations/save] inferred content_type:', finalContentType);
     
     let placeId: number | undefined;
     let serviceId: number | undefined;
@@ -243,21 +364,120 @@ router.post('/save', async (req, res) => {
     
     // Step 1: Handle place data (only for place-type recommendations)
     if (finalContentType === 'place' && (place_name || google_place_id)) {
-      console.log('Upserting place:', place_name || 'Unnamed Place');
-      placeId = await upsertPlace({
+      let enrichedName = place_name || 'Unnamed Place';
+      let enrichedAddress = place_address;
+      let enrichedLat = place_lat;
+      let enrichedLng = place_lng;
+      let city_name: string | undefined;
+      let city_slug: string | undefined;
+      let admin1_name: string | undefined;
+      let country_code: string | undefined;
+      let primary_type: string | undefined;
+      let types: string[] | undefined;
+      let category_name = place_category;
+
+      if (google_place_id) {
+        try {
+          const { getPlaceDetails, normalizeFromPlaceDetails } = await import('../services/placesClient');
+          console.log('[routes/save] Fetching Place Details for', google_place_id, {
+            usingKey: Boolean(process.env.PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY)
+          });
+          const details = await getPlaceDetails(google_place_id);
+          const normalized = normalizeFromPlaceDetails(details, {
+            name: enrichedName,
+            address: enrichedAddress,
+            lat: enrichedLat,
+            lng: enrichedLng,
+            category_name,
+          });
+          if (normalized) {
+            enrichedName = normalized.name || enrichedName;
+            enrichedAddress = normalized.address || enrichedAddress;
+            enrichedLat = normalized.lat ?? enrichedLat;
+            enrichedLng = normalized.lng ?? enrichedLng;
+            city_name = normalized.city_name;
+            city_slug = normalized.city_slug;
+            admin1_name = normalized.admin1_name;
+            country_code = normalized.country_code;
+            primary_type = normalized.primary_type;
+            types = normalized.types;
+            category_name = normalized.category_name;
+            console.log('[routes/save] Derived', { city_name, city_slug, admin1_name, country_code, primary_type, category_name });
+          } else {
+            console.warn('[routes/save] Place Details returned null for', google_place_id);
+          }
+        } catch (e) {
+          console.warn('[routes/save] Place Details enrichment failed:', (e as Error).message);
+        }
+      }
+
+      const placePayload = {
         google_place_id,
-        name: place_name || 'Unnamed Place',
-        address: place_address,
-        category_name: place_category,
-        lat: place_lat,
-        lng: place_lng,
+        name: enrichedName,
+        address: enrichedAddress,
+        category_name,
+        lat: enrichedLat,
+        lng: enrichedLng,
+        city_name,
+        city_slug,
+        admin1_name,
+        country_code,
+        primary_type,
+        types,
         metadata: place_metadata
-      });
+      } as const;
+      console.log('[routes/save] upsertPlace payload', { ...placePayload, metadata: undefined });
+      placeId = await upsertPlace({ ...placePayload });
     }
     
     // Step 1.5: Handle service data (only for service-type recommendations)
     if (finalContentType === 'service') {
       const cd = content_data || {};
+      try {
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[recommendations/save] incoming content_data.location:', {
+            city_name: cd?.location?.city_name || cd?.city_name,
+            city_slug: cd?.location?.city_slug || cd?.city_slug,
+            admin1_name: cd?.location?.admin1_name || cd?.admin1_name,
+            country_code: cd?.location?.country_code || cd?.country_code,
+          });
+        }
+      } catch {}
+      const toSlug = (s?: string) => (typeof s === 'string' && s.trim().length > 0 ? s.trim().toLowerCase().replace(/\s+/g, '-') : undefined);
+      let normalizedCityName: string | undefined = cd.city_name || cd?.location?.city_name || cd.location_name || cd?.place_city_name;
+      let normalizedCitySlug: string | undefined = cd.city_slug || cd?.location?.city_slug || toSlug(normalizedCityName);
+      let normalizedAdmin1: string | undefined = cd.admin1_name || cd?.location?.admin1_name || cd.location_admin1_name;
+      let normalizedCountry: string | undefined = cd.country_code || cd?.location?.country_code || cd.location_country_code;
+
+      // Fallback to Google Place Details (like we do for places) when we have a place_id
+      try {
+        const googlePlaceId = cd.google_place_id || cd.location_google_place_id || google_place_id;
+        if (googlePlaceId && (!normalizedCityName || !normalizedCountry)) {
+          const { getPlaceDetails, deriveAdmin, slugifyCity } = await import('../services/placesClient');
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('[recommendations/save] (service) Fetching Place Details for', googlePlaceId, {
+              usingKey: Boolean(process.env.PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY)
+            });
+          }
+          const details = await getPlaceDetails(googlePlaceId);
+          if (details) {
+            const admin = deriveAdmin(details.addressComponents);
+            normalizedCityName = normalizedCityName || admin.city;
+            normalizedCitySlug = normalizedCitySlug || slugifyCity(admin.city);
+            normalizedAdmin1 = normalizedAdmin1 || admin.admin1;
+            normalizedCountry = (normalizedCountry || admin.countryCode);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('[recommendations/save] (service) Derived from Place Details', {
+                normalizedCityName, normalizedCitySlug, normalizedAdmin1, normalizedCountry
+              });
+            }
+          }
+        }
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('[recommendations/save] (service) place-details fallback failed:', (e as Error).message);
+        }
+      }
       const derivedServiceName = service_name || title || cd.service_name || cd.place_name || 'Unnamed Service';
       const { phone: normPhone, email: normEmail } = normalizeContactInfo(cd.contact_info, description);
       const derivedPhone = service_phone || cd.service_phone || normPhone;
@@ -267,80 +487,64 @@ router.post('/save', async (req, res) => {
       const derivedWebsite = service_website || cd.service_website || cd.website;
       const derivedServiceType = service_type || cd.service_type || cd.category;
       const combinedMetadata = { ...(service_metadata || {}), ...cd } as Record<string, any>;
-      console.log('[recommendations/save] service derived fields:', {
-        derivedServiceName,
-        derivedPhone,
-        derivedEmail,
-        derivedBusinessName,
-        derivedAddress,
-        derivedWebsite,
-        derivedServiceType
-      });
-      // Services table requires at least one identifier (phone or email)
-      if (derivedPhone || derivedEmail) {
-        console.log('Upserting service:', derivedServiceName);
+      // Helper: attempt type from specialities/description text if name/business didn't yield one
+      const inferTypeFromFreeText = (...texts: Array<string | string[] | undefined>) => {
+        const flattened = texts
+          .flatMap(t => Array.isArray(t) ? t : [t])
+          .filter(Boolean)
+          .map(t => String(t));
+        if (flattened.length === 0) return null;
+        const joined = flattened.join(' ');
+        return extractServiceType(joined, '');
+      };
 
-        // Helper: attempt type from specialities/description text if name/business didn't yield one
-        const inferTypeFromFreeText = (...texts: Array<string | string[] | undefined>) => {
-          const flattened = texts
-            .flatMap(t => Array.isArray(t) ? t : [t])
-            .filter(Boolean)
-            .map(t => String(t));
-          if (flattened.length === 0) return null;
-          const joined = flattened.join(' ');
-          return extractServiceType(joined, '');
-        };
-
-        let extractedServiceType = derivedServiceType || extractServiceType(derivedServiceName || '', derivedBusinessName);
-        if (!extractedServiceType) {
-          extractedServiceType = inferTypeFromFreeText(cd?.specialities, cd?.category, description, derivedServiceName);
-        }
-
-        console.log('[recommendations/save] service type resolution:', {
-          inputName: derivedServiceName,
-          inputBusinessName: derivedBusinessName,
-          payloadServiceType: derivedServiceType,
-          extractedServiceType,
-          inferredFrom: (!derivedServiceType && !extractServiceType(derivedServiceName || '', derivedBusinessName)) ? 'free_text' : 'name_business'
-        });
-
-        const serviceData = {
-          name: derivedServiceName || 'Unnamed Service',
-          phone_number: derivedPhone,
-          email: derivedEmail,
-          service_type: extractedServiceType || undefined,
-          business_name: derivedBusinessName,
-          address: derivedAddress,
-          website: derivedWebsite,
-          metadata: combinedMetadata
-        };
-        console.log('[recommendations/save] final serviceData to upsert:', serviceData);
-
-        let upsertResult;
-        try {
-          upsertResult = await upsertService(serviceData);
-        } catch (e) {
-          console.error('[recommendations/save] upsertService threw error:', e);
-          throw e;
-        }
-        serviceId = upsertResult.serviceId;
-        serviceDeduplication = {
-          action: upsertResult.action,
-          confidence: upsertResult.confidence,
-          reasoning: upsertResult.reasoning
-        };
-
-        console.log('Service deduplication result:', upsertResult);
-      } else {
-        console.log('[recommendations/save] Skipping service upsert: no phone/email identifier present. Raw input:', {
-          service_name,
-          service_phone,
-          service_email,
-          content_data_contact: cd?.contact_info,
-          content_data_phone: cd?.service_phone,
-          content_data_email: cd?.service_email
-        });
+      let extractedServiceType = derivedServiceType || extractServiceType(derivedServiceName || '', derivedBusinessName);
+      if (!extractedServiceType) {
+        extractedServiceType = inferTypeFromFreeText(cd?.specialities, cd?.category, description, derivedServiceName);
       }
+
+      console.log('[recommendations/save] service type resolution:', {
+        inputName: derivedServiceName,
+        inputBusinessName: derivedBusinessName,
+        payloadServiceType: derivedServiceType,
+        extractedServiceType,
+        inferredFrom: (!derivedServiceType && !extractServiceType(derivedServiceName || '', derivedBusinessName)) ? 'free_text' : 'name_business'
+      });
+
+      const serviceData = {
+        name: derivedServiceName || 'Unnamed Service',
+        phone_number: derivedPhone,
+        email: derivedEmail,
+        service_type: extractedServiceType || undefined,
+        business_name: derivedBusinessName,
+        address: derivedAddress,
+        website: derivedWebsite,
+        // normalized location fields for city filtering (prefer values from composer payload)
+        city_name: normalizedCityName,
+        city_slug: normalizedCitySlug,
+        admin1_name: normalizedAdmin1,
+        country_code: normalizedCountry,
+        metadata: combinedMetadata
+      };
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[recommendations/save] final serviceData to upsert:', serviceData);
+      }
+
+      let upsertResult;
+      try {
+        upsertResult = await upsertService(serviceData);
+      } catch (e) {
+        console.error('[recommendations/save] upsertService threw error:', e);
+        throw e;
+      }
+      serviceId = upsertResult.serviceId;
+      serviceDeduplication = {
+        action: upsertResult.action,
+        confidence: upsertResult.confidence,
+        reasoning: upsertResult.reasoning
+      };
+
+      console.log('Service deduplication result:', upsertResult);
     }
 
     // Step 2: Prepare content data based on type
@@ -409,13 +613,6 @@ router.post('/save', async (req, res) => {
       user_id
     });
     
-    console.log('[recommendations/save] inserting recommendation with:', {
-      user_id,
-      content_type: finalContentType,
-      place_id: placeId,
-      service_id: serviceId,
-      title: title || place_name || service_name
-    });
     const recommendationId = await insertRecommendation({
       user_id,
       content_type: finalContentType,
@@ -451,14 +648,7 @@ router.post('/save', async (req, res) => {
       service_deduplication: serviceDeduplication
     };
 
-    console.log('Recommendation saved successfully:', {
-      recommendation_id: recommendationId,
-      place_id: placeId,
-      service_id: serviceId,
-      content_type: finalContentType,
-      user_id,
-      service_deduplication: serviceDeduplication
-    });
+    
 
     // Return response in the format expected by the frontend API client
     res.status(201).json({
@@ -618,6 +808,7 @@ router.get('/place/:placeId', async (req, res) => {
       })
     );
 
+    
     res.json({
       success: true,
       data: transformedRecommendations,
@@ -870,7 +1061,7 @@ router.post('/search', async (req, res) => {
       });
     }
 
-    const { query, limit = 10, threshold = 0.7, groupIds, content_type } = req.body;
+    const { query, limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, groupIds, content_type, noSummary } = req.body;
 
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
       return res.status(400).json({
@@ -879,15 +1070,33 @@ router.post('/search', async (req, res) => {
       });
     }
 
-    console.log('Semantic search query:', query);
+    console.log('🔍 Semantic search query:', query);
+    console.log('🔍 Search parameters:', { limit, threshold, groupIds, content_type });
+
+    // Timings
+    const t0 = Date.now();
 
     // Generate embedding for the search query
     let searchEmbedding: number[];
     try {
-      searchEmbedding = await generateSearchEmbedding(query.trim());
-      console.log('Generated search embedding');
+      const qKey = query.trim();
+      const cached = (global as any)._mxEmbeddingCache.get(qKey) as { vec: number[]; ts: number } | undefined;
+      const now = Date.now();
+      if (cached && now - cached.ts < EMBED_TTL_MS) {
+        console.log('⚡ Using cached search embedding');
+        searchEmbedding = cached.vec;
+      } else {
+        console.log('🔍 Generating search embedding...');
+        searchEmbedding = await generateSearchEmbedding(qKey);
+        console.log('✅ Generated search embedding, length:', searchEmbedding.length);
+        (global as any)._mxEmbeddingCache.set(qKey, { vec: searchEmbedding, ts: now });
+        if ((global as any)._mxEmbeddingCache.size > 100) {
+          const firstKey = (global as any)._mxEmbeddingCache.keys().next().value;
+          (global as any)._mxEmbeddingCache.delete(firstKey);
+        }
+      }
     } catch (error) {
-      console.error('Failed to generate search embedding:', error);
+      console.error('❌ Failed to generate search embedding:', error);
       return res.status(500).json({
         success: false,
         message: 'Failed to process search query',
@@ -896,6 +1105,11 @@ router.post('/search', async (req, res) => {
     }
 
     // Search for similar recommendations
+    // Check if there are any recommendations in the database
+    const totalRecsResult = await pool.query('SELECT COUNT(*) as count FROM recommendations WHERE embedding IS NOT NULL');
+    
+    // Check if user has any followed users
+    const followedUsersResult = await pool.query('SELECT COUNT(*) as count FROM user_follows WHERE follower_id = $1', [currentUserId]);
     const similarRecommendations = await searchRecommendationsBySimilarity(
       searchEmbedding,
       limit,
@@ -904,12 +1118,47 @@ router.post('/search', async (req, res) => {
       currentUserId,
       content_type
     );
+    
 
-    console.log(`Found ${similarRecommendations.length} similar recommendations`);
+    // Use the similar recommendations for AI summary generation
+    const relevantRecommendations = similarRecommendations;
+
+    // Also fetch top matching questions and answers (pgvector ANN)
+    const qnaLimit = Math.max(5, Math.min(20, Math.floor((limit as number) / 2)));
+    const qna = await (async () => {
+      const client = await pool.connect();
+      try {
+        const vec = `[${searchEmbedding.join(',')}]`;
+        const followSql = `user_id IN (SELECT following_id FROM user_follows WHERE follower_id = $1)`;
+
+        const questionsSql = `
+          SELECT id, 'question' AS type, 1 - (embedding <=> $2::vector) AS score, text, user_id, created_at
+          FROM questions
+          WHERE embedding IS NOT NULL
+            AND ${followSql}
+          ORDER BY embedding <-> $2::vector
+          LIMIT $3`;
+        const qRes = await client.query(questionsSql, [currentUserId, vec, qnaLimit]);
+
+        const answersSql = `
+          SELECT id, 'answer' AS type, 1 - (embedding <=> $2::vector) AS score, description AS text, user_id, question_id, id AS recommendation_id, created_at
+          FROM recommendations
+          WHERE embedding IS NOT NULL
+            AND question_id IS NOT NULL
+            AND ${followSql}
+          ORDER BY embedding <-> $2::vector
+          LIMIT $3`;
+        const aRes = await client.query(answersSql, [currentUserId, vec, qnaLimit]);
+
+        return { questions: qRes.rows, answers: aRes.rows };
+      } finally {
+        client.release();
+      }
+    })();
 
     // Get detailed information for each recommendation
     const searchResults = await Promise.all(
-      similarRecommendations.map(async (recommendation) => {
+      relevantRecommendations.map(async (recommendation) => {
         // Get place information (if applicable)
         let placeInfo = {};
         if (recommendation.place_id) {
@@ -972,7 +1221,9 @@ router.post('/search', async (req, res) => {
 
     // Group results by place (for place-type recommendations) or by content type
     const groupedResults = new Map();
-    searchResults.forEach(result => {
+    
+    searchResults.forEach((result, index) => {
+      
       let groupKey: string;
       let groupInfo: any;
       
@@ -1018,8 +1269,13 @@ router.post('/search', async (req, res) => {
         };
       }
       
+      console.log(`🔍 Created group key: "${groupKey}" for result ${index + 1}`);
+      
       if (!groupedResults.has(groupKey)) {
         groupedResults.set(groupKey, groupInfo);
+        console.log(`🔍 Created new group: ${groupKey}`);
+      } else {
+        console.log(`🔍 Adding to existing group: ${groupKey}`);
       }
       
       const group = groupedResults.get(groupKey);
@@ -1038,10 +1294,21 @@ router.post('/search', async (req, res) => {
       });
       
       group.total_recommendations += 1;
+      const oldAvg = group.average_similarity;
       group.average_similarity = (
         (group.average_similarity * (group.total_recommendations - 1) + result.similarity) / 
         group.total_recommendations
       );
+      
+      // 🔍 DEBUG: Log grouping calculation
+      console.log(`🔍 [GROUPING DEBUG] Updated group ${groupKey}:`, {
+        old_average: oldAvg,
+        new_average: group.average_similarity,
+        match_percentage: Math.round(group.average_similarity * 100),
+        total_recommendations: group.total_recommendations,
+        added_similarity: result.similarity,
+        added_match_percentage: Math.round(result.similarity * 100)
+      });
     });
 
     // Convert to array and sort by average similarity
@@ -1049,36 +1316,46 @@ router.post('/search', async (req, res) => {
       .sort((a, b) => b.average_similarity - a.average_similarity)
       .slice(0, limit);
 
-    // Generate AI-powered summary based on the search results
+    const t4 = Date.now();
+    
+
+    // Generate AI-powered summary based on the search results (optional)
     let summary = '';
-    try {
-      const searchContext: SearchContext = {
-        query: query.trim(),
-        results: finalResults,
-        total_places: finalResults.filter(r => r.type === 'place').length,
-        total_recommendations: searchResults.length
-      };
-      
-      summary = await generateAISummary(searchContext);
-      console.log('🤖 AI Summary generated successfully');
-    } catch (error) {
-      console.error('❌ Failed to generate AI summary, using fallback:', error);
-      
-      // Fallback to simple summary
-      if (finalResults.length === 0) {
-        summary = `No relevant recommendations found for your search query. Try using different keywords or being more specific about what you're looking for.`;
-      } else {
-        const topResult = finalResults[0];
-        const topRecommendation = topResult.recommendations[0];
-        
-        if (topResult.average_similarity > 0.8) {
-          const locationInfo = topResult.type === 'place' ? `"${topResult.place_name}"` : `this ${topResult.content_type}`;
-          summary = `Based on ${topResult.total_recommendations} recommendation(s), ${locationInfo} seems to match your search. ${topRecommendation.description ? `Users say: "${topRecommendation.description.substring(0, 100)}..."` : ''}`;
-        } else if (topResult.average_similarity > 0.6) {
-          const locationInfo = topResult.type === 'place' ? `"${topResult.place_name}"` : `this ${topResult.content_type}`;
-          summary = `I found some potentially relevant recommendations. ${locationInfo} has ${topResult.total_recommendations} recommendation(s) that might be related to your search.`;
+    if (!noSummary) {
+      try {
+        // Build cache key from query + ordered recommendation ids per group
+        const resultKey = finalResults
+          .map(r => (r.recommendations || []).map((rec: any) => rec.recommendation_id).join(','))
+          .join('|');
+        const sKey = `${query.trim()}::${resultKey}`;
+        const cachedSummary = (global as any)._mxSummaryCache.get(sKey) as { text: string; ts: number } | undefined;
+        const nowS = Date.now();
+        if (cachedSummary && nowS - cachedSummary.ts < SUMMARY_TTL_MS) {
+          console.log('⚡ Using cached AI summary');
+          summary = cachedSummary.text;
         } else {
-          summary = `I found some recommendations that might be related to your search, though the match isn't very strong. Consider refining your query for better results.`;
+          const searchContext: SearchContext = {
+            query: query.trim(),
+            results: finalResults,
+            total_places: finalResults.filter(r => r.type === 'place').length,
+            total_recommendations: searchResults.length
+          };
+          const s0 = Date.now();
+          summary = await generateAISummary(searchContext, 'detailed');
+          const s1 = Date.now();
+          console.log(`✅ AI Summary generated successfully in ${s1 - s0}ms, length:`, summary.length);
+          console.log('✅ AI Summary preview:', summary.substring(0, 200) + '...');
+          (global as any)._mxSummaryCache.set(sKey, { text: summary, ts: nowS });
+          if ((global as any)._mxSummaryCache.size > 100) {
+            const firstKey = (global as any)._mxSummaryCache.keys().next().value;
+            (global as any)._mxSummaryCache.delete(firstKey);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to generate AI summary, using fallback:', error);
+        // Fallback simple summary
+        if (finalResults.length === 0) {
+          summary = `I couldn't find any relevant recommendations for "${query.trim()}" in your network.`;
         }
       }
     }
@@ -1089,6 +1366,7 @@ router.post('/search', async (req, res) => {
         query: query.trim(),
         summary,
         results: finalResults,
+        qna,
         total_groups: finalResults.length,
         total_recommendations: searchResults.length,
         search_metadata: {

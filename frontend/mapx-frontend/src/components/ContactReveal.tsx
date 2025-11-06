@@ -50,9 +50,9 @@ const ContactReveal: React.FC<ContactRevealProps> = ({ contact, className, align
         <div className={`absolute mt-2 w-60 rounded-lg border border-gray-200 bg-white shadow-lg p-3 text-sm text-gray-800 ${popoverSideClass}`}>
           {contact?.phone && (
             <div className="flex items-center justify-between py-1">
-              <div className="flex items-center gap-2 text-gray-700">
-                <Phone className="h-4 w-4" />
-                <span>{contact.phone}</span>
+              <div className="flex items-center gap-2 text-gray-700 min-w-0 flex-1">
+                <Phone className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">{contact.phone}</span>
               </div>
               <button
                 type="button"
@@ -64,7 +64,7 @@ const ContactReveal: React.FC<ContactRevealProps> = ({ contact, className, align
                     // no-op
                   }
                 }}
-                className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+                className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 flex-shrink-0 ml-2"
               >
                 Copy
               </button>
@@ -72,16 +72,24 @@ const ContactReveal: React.FC<ContactRevealProps> = ({ contact, className, align
           )}
           {contact?.email && (
             <div className="flex items-center justify-between py-1">
-              <div className="flex items-center gap-2 text-gray-700">
-                <Mail className="h-4 w-4" />
+              <div className="flex items-center gap-2 text-gray-700 min-w-0 flex-1">
+                <Mail className="h-4 w-4 flex-shrink-0" />
                 <span className="truncate">{contact.email}</span>
               </div>
-              <a
-                href={`mailto:${contact.email}`}
-                className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50"
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(contact.email || '');
+                    toast.success('Email copied to clipboard');
+                  } catch {
+                    // no-op
+                  }
+                }}
+                className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 flex-shrink-0 ml-2"
               >
-                Email
-              </a>
+                Copy
+              </button>
             </div>
           )}
           <div className="pt-2 text-[11px] text-muted-foreground">Contact details are private to this post. Click to copy.</div>

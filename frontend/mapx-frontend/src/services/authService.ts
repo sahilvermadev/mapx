@@ -1,4 +1,4 @@
-// frontend/mapx-frontend/src/services/authService.ts
+// frontend/recce_-frontend/src/services/authService.ts
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;

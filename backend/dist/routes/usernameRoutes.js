@@ -7,7 +7,6 @@ const express_1 = __importDefault(require("express"));
 const db_1 = __importDefault(require("../db"));
 const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
-// Note: Authentication is now handled by the JWT middleware in index.ts
 // Check if username is available
 router.get('/check/:username', async (req, res) => {
     try {

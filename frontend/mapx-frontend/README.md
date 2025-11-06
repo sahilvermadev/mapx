@@ -1,4 +1,4 @@
-# MapX Frontend
+# recce_ Frontend
 
 A React application with Google Maps integration for location-based recommendations.
 

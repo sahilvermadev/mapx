@@ -4,10 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const compression_1 = __importDefault(require("compression"));
 const cors_1 = __importDefault(require("cors"));
-const dotenv_1 = __importDefault(require("dotenv"));
+require("./config/env");
 const passport_1 = __importDefault(require("passport"));
-const path_1 = __importDefault(require("path"));
 const passport_2 = __importDefault(require("./config/passport"));
 const auth_1 = require("./middleware/auth");
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
@@ -21,8 +21,10 @@ const friendGroupRoutes_1 = __importDefault(require("./routes/friendGroupRoutes"
 const usernameRoutes_1 = __importDefault(require("./routes/usernameRoutes"));
 const notificationRoutes_1 = __importDefault(require("./routes/notificationRoutes"));
 const dbViewerRoutes_1 = __importDefault(require("./routes/dbViewerRoutes"));
-// Load .env file from the root directory (two levels up from backend/src)
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../.env') });
+const questionRoutes_1 = __importDefault(require("./routes/questionRoutes"));
+const publicPreviewRoutes_1 = __importDefault(require("./routes/publicPreviewRoutes"));
+const ogRoutes_1 = __importDefault(require("./routes/ogRoutes"));
+// env is loaded by ./config/env
 // Debug: Log environment variables (without sensitive values)
 console.log('🔧 Environment check:');
 console.log('  DATABASE_URL:', process.env.DATABASE_URL ? '✅ Set' : '❌ Not set');
@@ -43,12 +45,16 @@ app.use((0, cors_1.default)({
     origin: allowedOrigins,
     credentials: true
 }));
+app.use((0, compression_1.default)());
 app.use(express_1.default.json());
 // JWT-only authentication (no sessions)
 app.use(passport_1.default.initialize());
 (0, passport_2.default)();
 // OAuth routes (no JWT required)
 app.use('/auth', authRoutes_1.default);
+// Public, unauthenticated routes
+app.use('/api/public', publicPreviewRoutes_1.default);
+app.use('/share', ogRoutes_1.default);
 // All API routes require JWT authentication
 app.use('/api/recommendations', auth_1.authenticateJWT, recommendationRoutes_1.default);
 app.use('/api/ai-recommendation', auth_1.authenticateJWT, aiRecommendationRoutes_1.default);
@@ -60,6 +66,7 @@ app.use('/api/friend-groups', auth_1.authenticateJWT, friendGroupRoutes_1.defaul
 app.use('/api/username', auth_1.authenticateJWT, usernameRoutes_1.default);
 app.use('/api/notifications', auth_1.authenticateJWT, notificationRoutes_1.default);
 app.use('/api/db', auth_1.authenticateJWT, dbViewerRoutes_1.default);
+app.use('/api/questions', auth_1.authenticateJWT, questionRoutes_1.default);
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
 });

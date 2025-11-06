@@ -1,6 +1,6 @@
 # Service Deduplication System
 
-This document describes the service deduplication system implemented for the MapX recommendation platform. The system automatically deduplicates and links recommendations for the same service provider across users, even if they use slightly different names.
+This document describes the service deduplication system implemented for the recce_ recommendation platform. The system automatically deduplicates and links recommendations for the same service provider across users, even if they use slightly different names.
 
 ## 🎯 Core Objectives
 

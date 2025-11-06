@@ -12,11 +12,8 @@ exports.generateBatchEmbeddings = generateBatchEmbeddings;
 exports.calculateCosineSimilarity = calculateCosineSimilarity;
 exports.validateEmbedding = validateEmbedding;
 const openai_1 = __importDefault(require("openai"));
-const dotenv_1 = __importDefault(require("dotenv"));
-const path_1 = __importDefault(require("path"));
+require("../config/env");
 // NOTE: Avoid importing deprecated annotation types. Accept a flexible shape instead.
-// Load .env file from the root directory (two levels up from backend/src)
-dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../../.env') });
 // Initialize OpenAI client
 const openai = new openai_1.default({
     apiKey: process.env.OPENAI_API_KEY,
@@ -94,10 +91,13 @@ async function generateAnnotationEmbedding(annotationData) {
     return generateEmbedding(combinedText);
 }
 /**
- * Generate embedding from a simple text string (for search queries)
+ * Generate embedding from a search query, structured to match recommendation embeddings
  */
 async function generateSearchEmbedding(searchText) {
-    return generateEmbedding(searchText);
+    // Structure the search query to match the recommendation embedding format
+    // This helps the search query be more semantically similar to recommendation embeddings
+    const structuredQuery = `Looking for: ${searchText}. Search query for recommendations.`;
+    return generateEmbedding(structuredQuery);
 }
 /**
  * Generate embedding for recommendations, capturing rich context like title, description,

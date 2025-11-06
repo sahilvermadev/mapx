@@ -8,6 +8,11 @@ export interface ServiceData {
   business_name?: string;
   address?: string;
   website?: string;
+  // normalized location fields for city filtering
+  city_name?: string;
+  city_slug?: string;
+  admin1_name?: string;
+  country_code?: string;
   metadata?: Record<string, any>;
 }
 
@@ -20,6 +25,10 @@ export interface Service {
   business_name?: string;
   address?: string;
   website?: string;
+  city_name?: string;
+  city_slug?: string;
+  admin1_name?: string;
+  country_code?: string;
   metadata: Record<string, any>;
   created_at: Date;
   updated_at: Date;
@@ -144,8 +153,8 @@ export async function createService(serviceData: ServiceData): Promise<number> {
     const serviceResult = await client.query(
       `INSERT INTO services (
         phone_number, email, name, service_type, business_name, 
-        address, website, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        address, website, city_name, city_slug, admin1_name, country_code, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING id`,
       [
         normalizedPhone,
@@ -155,6 +164,10 @@ export async function createService(serviceData: ServiceData): Promise<number> {
         serviceData.business_name || null,
         serviceData.address || null,
         serviceData.website || null,
+        serviceData.city_name || null,
+        serviceData.city_slug || null,
+        serviceData.admin1_name || null,
+        serviceData.country_code || null,
         JSON.stringify(serviceData.metadata || {})
       ]
     );
@@ -221,6 +234,22 @@ export async function updateService(serviceId: number, updates: Partial<ServiceD
     if (updates.website !== undefined) {
       updateFields.push(`website = $${paramCount++}`);
       values.push(updates.website);
+    }
+    if (updates.city_name !== undefined) {
+      updateFields.push(`city_name = $${paramCount++}`);
+      values.push(updates.city_name);
+    }
+    if (updates.city_slug !== undefined) {
+      updateFields.push(`city_slug = $${paramCount++}`);
+      values.push(updates.city_slug);
+    }
+    if (updates.admin1_name !== undefined) {
+      updateFields.push(`admin1_name = $${paramCount++}`);
+      values.push(updates.admin1_name);
+    }
+    if (updates.country_code !== undefined) {
+      updateFields.push(`country_code = $${paramCount++}`);
+      values.push(updates.country_code);
     }
     if (updates.metadata !== undefined) {
       updateFields.push(`metadata = $${paramCount++}`);

@@ -7,8 +7,6 @@ const express_1 = __importDefault(require("express"));
 const social_1 = require("../db/social");
 const mentions_1 = require("../db/mentions");
 const router = express_1.default.Router();
-// Note: Authentication is now handled by the JWT middleware in index.ts
-// The requireAuth middleware is no longer needed
 /**
  * POST /api/social/follow/:userId
  * Follow a user

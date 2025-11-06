@@ -4,12 +4,17 @@ import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { blacklistToken, storeRefreshToken, validateRefreshToken, revokeRefreshToken, revokeAllUserTokens } from '../utils/redis';
 import { getUserIdFromRequest } from '../middleware/auth';
+import { createProfilePictureCorsMiddleware } from '../middleware/cors';
+import logger from '../utils/logger';
 import pool from '../db';
 
 const router = express.Router();
 
+// CORS middleware for profile picture endpoint
+const profilePictureCors = createProfilePictureCorsMiddleware();
+
 // Proxy endpoint for Google profile pictures
-router.get('/profile-picture', async (req, res) => {
+router.get('/profile-picture', profilePictureCors, async (req, res) => {
   const { url } = req.query;
   
   if (!url || typeof url !== 'string') {
@@ -19,26 +24,57 @@ router.get('/profile-picture', async (req, res) => {
   try {
     // Validate that it's a Google profile picture URL
     if (!url.includes('googleusercontent.com')) {
+      logger.warn('Invalid profile picture URL attempted', { url: url.substring(0, 100) });
       return res.status(400).json({ error: 'Invalid profile picture URL' });
     }
 
-    // Fetch the image from Google
+    // CRITICAL: Disable Express's automatic 304 handling by removing ETag support
+    // This ensures CORS headers are always sent, even for cached responses
+    res.removeHeader('ETag');
+    res.removeHeader('Last-Modified');
+    
+    // Disable Express's fresh check to force a full response with CORS headers
+    (req as any).headers['if-none-match'] = undefined;
+    (req as any).headers['if-modified-since'] = undefined;
+
+    // Fetch the image from Google with timeout
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
+      timeout: 10000, // 10 second timeout
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
     });
 
-    // Set appropriate headers
-    res.set('Content-Type', response.headers['content-type'] || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-    res.set('Access-Control-Allow-Origin', '*');
+    // Set ALL headers BEFORE sending response - order matters
+    const origin = req.headers.origin;
+    const allowedOrigins = process.env.ALLOWED_ORIGINS 
+      ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+      : ['http://localhost:5173'];
     
-    // Send the image data
+    // Set CORS headers FIRST
+    if (origin && (allowedOrigins.includes(origin) || origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    
+    // Set content and caching headers
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    res.setHeader('Vary', 'Origin'); // Vary by origin for proper caching
+    
+    // Send the image data - ensure headers are sent before data
     res.send(response.data);
-  } catch (error) {
-    console.error('Error proxying profile picture:', error);
+  } catch (error: any) {
+    logger.error('Error proxying profile picture', { 
+      error: error.message, 
+      url: url.substring(0, 100) // Log partial URL for debugging
+    });
     res.status(500).json({ error: 'Failed to load profile picture' });
   }
 });
@@ -92,9 +128,11 @@ router.get('/dev-login', async (req, res) => {
 
     // Redirect back to frontend with tokens
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/?accessToken=${accessToken}&refreshToken=${refreshToken}`);
-  } catch (error) {
-    console.error('Dev login error:', error);
+    const nextParam = typeof req.query.next === 'string' ? req.query.next : '';
+    const nextPart = nextParam ? `&next=${encodeURIComponent(nextParam)}` : '';
+    res.redirect(`${frontendUrl}/?accessToken=${accessToken}&refreshToken=${refreshToken}${nextPart}`);
+  } catch (error: any) {
+    logger.error('Dev login error', { error: error.message, stack: error.stack });
     res.status(500).json({ message: 'Development login failed' });
   }
 });
@@ -102,7 +140,15 @@ router.get('/dev-login', async (req, res) => {
 // GET /auth/google
 router.get(
   '/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
+  (req, _res, next) => {
+    (req as any)._mxNext = typeof req.query.next === 'string' ? req.query.next : '';
+    next();
+  },
+  (req, res, next) =>
+    (passport.authenticate('google', {
+      scope: ['profile', 'email'],
+      state: encodeURIComponent((req as any)._mxNext || ''),
+    }) as any)(req, res, next)
 );
 
 // GET /auth/google/callback
@@ -148,9 +194,12 @@ router.get(
       await storeRefreshToken(user.id, refreshToken, 604800); // 7 days
 
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      res.redirect(`${frontendUrl}/?accessToken=${accessToken}&refreshToken=${refreshToken}`);
-    } catch (error) {
-      console.error('OAuth callback error:', error);
+      const rawState = typeof req.query.state === 'string' ? req.query.state : '';
+      const nextParam = rawState ? decodeURIComponent(rawState) : '';
+      const nextPart = nextParam ? `&next=${encodeURIComponent(nextParam)}` : '';
+      res.redirect(`${frontendUrl}/?accessToken=${accessToken}&refreshToken=${refreshToken}${nextPart}`);
+    } catch (error: any) {
+      logger.error('OAuth callback error', { error: error.message, stack: error.stack });
       res.redirect('/auth/failure');
     }
   }
@@ -223,8 +272,8 @@ router.post('/refresh', async (req, res) => {
       expiresIn: 900 // 15 minutes in seconds
     });
 
-  } catch (error) {
-    console.error('Token refresh error:', error);
+  } catch (error: any) {
+    logger.error('Token refresh error', { error: error.message, stack: error.stack });
     res.status(401).json({ 
       success: false,
       error: 'Invalid refresh token' 
@@ -261,8 +310,8 @@ router.post('/logout', async (req, res) => {
       success: true,
       message: 'Logged out successfully' 
     });
-  } catch (error) {
-    console.error('Logout error:', error);
+  } catch (error: any) {
+    logger.error('Logout error', { error: error.message, stack: error.stack });
     res.status(500).json({ 
       success: false,
       error: 'Logout failed' 
@@ -289,8 +338,8 @@ router.post('/logout-all', async (req, res) => {
       success: true,
       message: 'Logged out from all devices successfully' 
     });
-  } catch (error) {
-    console.error('Logout all error:', error);
+  } catch (error: any) {
+    logger.error('Logout all error', { error: error.message, stack: error.stack });
     res.status(500).json({ 
       success: false,
       error: 'Logout all failed' 

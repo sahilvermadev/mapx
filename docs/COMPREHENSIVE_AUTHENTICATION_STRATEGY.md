@@ -436,7 +436,7 @@ FRONTEND_URL=http://localhost:5173
 services:
   redis:
     image: redis:7-alpine
-    container_name: mapx_redis_container
+    container_name: recce_redis_container
     ports:
       - "6379:6379"
     volumes:
@@ -504,7 +504,7 @@ services:
 #### **Required Environment Variables**
 ```bash
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/mapx
+DATABASE_URL=postgresql://user:password@localhost:5432/recce_
 
 # Redis (for token management)
 REDIS_URL=redis://localhost:6379
@@ -536,7 +536,7 @@ This enables development mode with mock OAuth.
 services:
   redis:
     image: redis:7-alpine
-    container_name: mapx_redis_container
+    container_name: recce_redis_container
     ports:
       - "6379:6379"
     volumes:
@@ -582,7 +582,7 @@ docker-compose up db redis
 Create a `.env` file in the project root:
 ```env
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/mapx
+DATABASE_URL=postgresql://user:password@localhost:5432/recce_
 
 # Redis
 REDIS_URL=redis://localhost:6379

@@ -173,6 +173,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const accessToken = urlParams.get('accessToken');
       const refreshToken = urlParams.get('refreshToken');
       const legacyToken = urlParams.get('token'); // Backward compatibility
+      const nextParam = urlParams.get('next');
       
       if (accessToken && refreshToken) {
         // Process new dual-token OAuth response
@@ -181,8 +182,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'SET_AUTHENTICATED', payload: { isAuth: true, user } });
         window.history.replaceState({}, '', window.location.pathname);
         
-        // Redirect immediately - no delays
-        window.location.href = '/feed';
+        // Redirect immediately - respect next param if present
+        window.location.href = nextParam || '/feed';
         return;
       } else if (legacyToken) {
         // Handle legacy single-token format (backward compatibility)
@@ -191,8 +192,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'SET_AUTHENTICATED', payload: { isAuth: true, user } });
         window.history.replaceState({}, '', window.location.pathname);
         
-        // Redirect immediately - no delays
-        window.location.href = '/feed';
+        // Redirect immediately - respect next param if present
+        window.location.href = nextParam || '/feed';
         return;
       }
       

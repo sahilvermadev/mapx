@@ -14,7 +14,7 @@ The location picker feature allows users to select precise locations using Googl
 - **AI Prompt**: Updated to instruct the AI to set `needsLocationPicker: true` for location-related fields
 - **Field Detection**: AI automatically detects when location, address, or place information is needed
 
-### 2. Location Picker Component (`frontend/mapx-frontend/src/components/LocationPicker.tsx`)
+### 2. Location Picker Component (`frontend/recce_-frontend/src/components/LocationPicker.tsx`)
 
 - **Google Maps Integration**: Uses Google Places API for location search
 - **Search Interface**: Provides autocomplete search for places and addresses
@@ -27,7 +27,7 @@ The location picker feature allows users to select precise locations using Googl
 - **Details Endpoint**: `/api/location/place/:placeId` - Get detailed place information
 - **Authentication**: Requires user authentication for all endpoints
 
-### 4. Recommendation Composer Integration (`frontend/mapx-frontend/src/components/RecommendationComposer.tsx`)
+### 4. Recommendation Composer Integration (`frontend/recce_-frontend/src/components/RecommendationComposer.tsx`)
 
 - **AI Detection**: Checks if current field needs location picker
 - **UI Integration**: Shows "📍 Pick Location" button when needed

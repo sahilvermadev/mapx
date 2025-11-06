@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient';
+import { SEARCH_CONFIG } from '../config/searchConfig';
 
 // Types matching your backend API
 export interface SaveRecommendationRequest {
@@ -30,8 +31,10 @@ export interface SaveRecommendationRequest {
 
 export interface SaveRecommendationResponse {
   success: boolean;
-  place_id: number;
-  annotation_id: number;
+  place_id?: number;
+  service_id?: number;
+  recommendation_id: number;
+  annotation_id?: number;
   message: string;
 }
 
@@ -182,6 +185,42 @@ export const recommendationsApi = {
   },
 
   /**
+   * Save a recommendation as an answer to a question
+   * Automatically links the recommendation to the question
+   */
+  async saveAnswer(questionId: number, data: SaveRecommendationRequest): Promise<SaveRecommendationResponse> {
+    // Get user ID from JWT token (no need to pass it in the request)
+    const user = apiClient.getCurrentUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+
+    const response = await apiClient.post<SaveRecommendationResponse>(`/questions/${questionId}/answers`, {
+      recommendation_payload: {
+        ...data,
+        user_id: user.id, // Automatically added from JWT
+      }
+    });
+    
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to save answer');
+    }
+    
+    return response.data;
+  },
+
+  /**
+   * Get a single recommendation (full post) by ID with social data
+   */
+  async getRecommendationById(recommendationId: number): Promise<any> {
+    const response = await apiClient.get(`/recommendations/${recommendationId}`);
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to fetch recommendation');
+    }
+    return response.data;
+  },
+
+  /**
    * Get recommendations for the current user
    */
   async getMyRecommendations(limit = 50, offset = 0): Promise<UserRecommendation[]> {
@@ -261,7 +300,7 @@ export const recommendationsApi = {
   /**
    * Perform semantic search for places and recommendations
    */
-  async semanticSearch(query: string, limit = 10, threshold = 0.7, groupIds?: number[], content_type?: string): Promise<SearchResponse> {
+  async semanticSearch(query: string, limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, groupIds?: number[], content_type?: string, noSummary?: boolean, summaryMode: 'fast' | 'detailed' = 'fast'): Promise<SearchResponse> {
     const requestBody: any = {
       query: query.trim(),
       limit,
@@ -276,6 +315,13 @@ export const recommendationsApi = {
       requestBody.content_type = content_type;
     }
     
+    if (noSummary) {
+      requestBody.noSummary = true;
+    }
+    
+    if (!noSummary) {
+      requestBody.summaryMode = summaryMode;
+    }
     const response = await apiClient.post<SearchResponse>('/recommendations/search', requestBody);
     
     if (!response.success || !response.data) {

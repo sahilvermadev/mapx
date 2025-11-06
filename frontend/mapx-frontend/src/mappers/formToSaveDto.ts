@@ -9,6 +9,10 @@ export interface LocationData {
   lat?: number;
   lng?: number;
   google_place_id?: string;
+  city_name?: string;
+  admin1_name?: string;
+  country_code?: string;
+  location_text?: string; // raw text such as "Goa" or "Delhi, India"
 }
 
 export interface BuildDtoInput {
@@ -45,7 +49,12 @@ function extractLocation(data: Record<string, any>): LocationData {
     address: data.location || data.location_address,
     lat: data.lat || data.location_lat,
     lng: data.lng || data.location_lng,
-    google_place_id: data.google_place_id || data.location_google_place_id
+    google_place_id: data.google_place_id || data.location_google_place_id,
+    // attempt to collect normalized fields if present in form/extracted data
+    city_name: data.city_name || data.city || data.location_city,
+    admin1_name: data.admin1_name || data.admin1 || data.state || data.location_admin1,
+    country_code: (data.country_code || data.country || data.location_country || '').toString().toUpperCase() || undefined,
+    location_text: typeof data.location === 'string' ? data.location : (typeof data.location_address === 'string' ? data.location_address : undefined),
   };
   return loc;
 }
@@ -55,6 +64,22 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
   const combined = { ...extractedData, ...fieldResponses } as Record<string, any>;
   const location = extractLocation(combined);
 
+  const toSlug = (s?: string) => (typeof s === 'string' && s.trim().length > 0 ? s.trim().toLowerCase().replace(/\s+/g, '-') : undefined);
+
+  // Derive a safe city name; NEVER fall back to the entity name.
+  const parseCityFromText = (text?: string): string | undefined => {
+    if (!text || typeof text !== 'string') return undefined;
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    // Take the first token before a comma; handles strings like "Goa" or "Mumbai, India"
+    const first = trimmed.split(',')[0]?.trim();
+    return first || undefined;
+  };
+  const inferredCityName = location.city_name
+    || combined.location_city
+    || combined.city
+    || combined.location_name
+    || parseCityFromText(location.location_text);
   const content_data: Record<string, any> = {
     place_name: location.name,
     address: location.address,
@@ -65,6 +90,17 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
     contact_info: combined.contact_info,
     specialities: combined.specialities,
     google_place_id: location.google_place_id,
+    // normalized location fields: included at root and under location for backend compatibility
+    city_name: inferredCityName || undefined,
+    city_slug: inferredCityName ? toSlug(inferredCityName) : undefined,
+    admin1_name: location.admin1_name,
+    country_code: location.country_code,
+    location: {
+      city_name: inferredCityName || undefined,
+      city_slug: inferredCityName ? toSlug(inferredCityName) : undefined,
+      admin1_name: location.admin1_name,
+      country_code: location.country_code,
+    },
     additional_details: { ...fieldResponses }
   };
 
@@ -88,7 +124,7 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
     description: formattedRecommendation,
     content_data,
     rating: rating || combined.rating || null,
-    visibility: 'public',
+    visibility: 'friends',
     labels: labels || [],
     user_id: currentUserId
   };

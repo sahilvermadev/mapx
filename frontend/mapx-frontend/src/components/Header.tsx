@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, Map, Users, Newspaper, LogOut, Plus, Loader2 } from 'lucide-react';
+import { User, Map, Users, Newspaper, LogOut, Plus, Loader2, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { 
@@ -33,10 +33,10 @@ const DISCOVER_LINK = '/friends';
 
 // Helper functions
 const getHeaderClasses = (variant: HeaderVariant): string => {
-  const baseClasses = 'sticky top-0 z-50 w-full border-b backdrop-blur supports-[backdrop-filter]:bg-background/60';
+  const baseClasses = 'sticky top-0 z-50 w-full backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-none';
   
   return variant === 'dark'
-    ? `${baseClasses} bg-black/80 border-white/20 text-white`
+    ? `${baseClasses} bg-black border-white/20 text-white`
     : `${baseClasses} bg-background/95 border-border`;
 };
 
@@ -81,13 +81,48 @@ const Header: React.FC<HeaderProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const buttonClasses = getButtonClasses(variant);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
-  const handleDiscoverButtonClick = () => navigate(DISCOVER_LINK);
-  const handleProfileButtonClick = () => navigate(`/profile/${currentUserId}`);
+  // Close mobile menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        mobileMenuOpen &&
+        mobileMenuRef.current &&
+        !mobileMenuRef.current.contains(event.target as Node) &&
+        menuButtonRef.current &&
+        !menuButtonRef.current.contains(event.target as Node)
+      ) {
+        setMobileMenuOpen(false);
+      }
+    };
+
+    if (mobileMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [mobileMenuOpen]);
+
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  const handleDiscoverButtonClick = () => {
+    navigate(DISCOVER_LINK);
+    setMobileMenuOpen(false);
+  };
+  const handleProfileButtonClick = () => {
+    navigate(`/profile/${currentUserId}`);
+    setMobileMenuOpen(false);
+  };
   const handleLogoutClick = () => {
     if (onLogout) {
       onLogout();
     }
+    setMobileMenuOpen(false);
   };
 
   const proxiedAvatarSrc = getProxiedProfilePicture(profilePictureUrl);
@@ -100,23 +135,47 @@ const Header: React.FC<HeaderProps> = ({
       : `${buttonClasses}`;
   };
 
+  const handleNavClick = (path: string) => {
+    navigate(path);
+    setMobileMenuOpen(false);
+  };
+
   
   return (
     <header className={getHeaderClasses(variant)}>
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-        <h1 className={getTitleClasses(variant)}>
-          {title}
-        </h1>
-        
-        <div className="flex items-center gap-2">
-          {isLoggingOut ? (
-            // Show loading state during logout
-            <div className="flex items-center gap-2 text-yellow-200">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Logging out...</span>
-            </div>
+      <div className="w-full px-3 md:px-6 h-16 flex items-center justify-between relative">
+        {/* Left: Title + Mobile Menu Button */}
+        <div className="flex items-center gap-2 md:gap-4">
+          {/* Mobile menu button */}
+          <Button
+            ref={menuButtonRef}
+            variant="ghost"
+            size="icon"
+            className={`md:hidden h-9 w-9 ${buttonClasses}`}
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label="Toggle menu"
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </Button>
+          
+          {currentUserId ? (
+            <button
+              onClick={() => navigate('/feed')}
+              className={`${getTitleClasses(variant)} cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0`}
+              aria-label="Go to feed"
+            >
+              {title}
+            </button>
           ) : (
-            <>
+            <h1 className={getTitleClasses(variant)}>
+              {title}
+            </h1>
+          )}
+        </div>
+
+        {/* Center: Primary nav - Desktop only */}
+        <div className="hidden md:flex items-center justify-center gap-2 absolute left-1/2 transform -translate-x-1/2">
               {/* Recommend */}
               <Button 
                 variant="ghost" 
@@ -149,22 +208,29 @@ const Header: React.FC<HeaderProps> = ({
                 <Map className="h-4 w-4" />
                 <span className="text-sm">Map</span>
               </Button>
+        </div>
 
-              {/* Notifications */}
+        {/* Right: Notifications + User */}
+        <div className="flex items-center justify-end gap-1 md:gap-2 min-w-0">
+          {isLoggingOut ? (
+            <div className="flex items-center gap-2 text-yellow-200">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="hidden sm:inline text-sm">Logging out...</span>
+            </div>
+          ) : (
+            <>
               {currentUserId && (
                 <NotificationsBell currentUserId={currentUserId} variant={variant} />
-              )}
-            </>
           )}
           
           {/* User menu - only show when not logging out */}
-          {!isLoggingOut && currentUserId && profilePictureUrl ? (
+              {currentUserId && profilePictureUrl ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ml-3 mr-0 ${buttonClasses}`} aria-label="Profile menu">
-                  <Avatar className="h-7 w-7 ">
+                <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ${buttonClasses}`} aria-label="Profile menu">
+                  <Avatar className="h-8 w-8 md:h-7 md:w-7">
                     <AvatarImage src={proxiedAvatarSrc} alt={displayName || 'Profile'} />
-                    <AvatarFallback>{getInitials(displayName || currentUserId || '?')}</AvatarFallback>
+                    <AvatarFallback className="text-xs">{getInitials(displayName || currentUserId || '?')}</AvatarFallback>
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
@@ -190,46 +256,129 @@ const Header: React.FC<HeaderProps> = ({
             </DropdownMenu>
           ) : (
             // Fallback to simple buttons if avatar is not available
-            !isLoggingOut && (
               <>
                 {showProfileButton && currentUserId && (
                   <Button 
                     variant="ghost" 
-                    size="sm" 
+                    size="icon"
+                    className={`${buttonClasses}`}
                     onClick={handleProfileButtonClick}
-                    className={buttonClasses}
+                    aria-label="Profile"
                   >
                     <User className="h-4 w-4" />
-                    <span className="text-sm">Profile</span>
+                    <span className="hidden md:inline text-sm ml-1">Profile</span>
                   </Button>
                 )}
                 <Button 
                   variant="ghost" 
-                  size="sm" 
+                  size="icon"
+                  className={`${getNavClasses('/friends')}`}
                   onClick={handleDiscoverButtonClick}
-                  className={getNavClasses('/friends')}
+                  aria-label="Friends"
                 >
                   <Users className="h-4 w-4" />
-                  <span className="text-sm">Friends</span>
+                  <span className="hidden md:inline text-sm ml-1">Friends</span>
                 </Button>
                 {showLogoutButton && onLogout && (
                   <Button 
                     variant="ghost" 
-                    size="sm" 
-                    onClick={handleLogoutClick}
+                    size="icon"
                     className={`${buttonClasses} text-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10`}
+                    onClick={handleLogoutClick}
+                    aria-label="Logout"
                   >
                     <LogOut className="h-4 w-4" />
-                    <span className="text-sm">Logout</span>
+                    <span className="hidden md:inline text-sm ml-1">Logout</span>
                   </Button>
                 )}
               </>
-            )
+              )}
+            </>
           )}
         </div>
       </div>
 
-      {/* Modal usage removed; composer now on its own route */}
+      {/* Mobile Navigation Menu */}
+      {mobileMenuOpen && (
+        <div 
+          ref={mobileMenuRef}
+          className={`md:hidden absolute top-16 left-0 right-0 z-50 border-t ${
+            variant === 'dark' ? 'bg-black border-white/20' : 'bg-background border-border'
+          } shadow-lg`}
+        >
+          <div className="px-4 py-3 space-y-2">
+            {/* Recommend */}
+            <Button
+              variant="ghost"
+              className={`w-full justify-start ${getNavClasses('/compose')}`}
+              onClick={() => handleNavClick('/compose')}
+            >
+              <Plus className="h-4 w-4 mr-3" />
+              Recommend
+            </Button>
+
+            {/* Feed */}
+            <Button
+              variant="ghost"
+              className={`w-full justify-start ${getNavClasses('/feed')}`}
+              onClick={() => handleNavClick('/feed')}
+            >
+              <Newspaper className="h-4 w-4 mr-3" />
+              Feed
+            </Button>
+
+            {/* Map */}
+            <Button
+              variant="ghost"
+              className={`w-full justify-start ${getNavClasses('/map')}`}
+              onClick={() => handleNavClick('/map')}
+            >
+              <Map className="h-4 w-4 mr-3" />
+              Map
+            </Button>
+
+            {/* Separator */}
+            <div className={`h-px my-2 ${variant === 'dark' ? 'bg-white/20' : 'bg-border'}`} />
+
+            {/* Profile */}
+            {showProfileButton && currentUserId && (
+              <Button
+                variant="ghost"
+                className={`w-full justify-start ${buttonClasses}`}
+                onClick={handleProfileButtonClick}
+              >
+                <User className="h-4 w-4 mr-3" />
+                My Profile
+              </Button>
+            )}
+
+            {/* Friends */}
+            <Button
+              variant="ghost"
+              className={`w-full justify-start ${getNavClasses('/friends')}`}
+              onClick={handleDiscoverButtonClick}
+            >
+              <Users className="h-4 w-4 mr-3" />
+              Friends
+            </Button>
+
+            {/* Logout */}
+            {showLogoutButton && onLogout && (
+              <>
+                <div className={`h-px my-2 ${variant === 'dark' ? 'bg-white/20' : 'bg-border'}`} />
+                <Button
+                  variant="ghost"
+                  className={`w-full justify-start ${buttonClasses} text-red-600 hover:text-red-500 hover:bg-red-500/10`}
+                  onClick={handleLogoutClick}
+                >
+                  <LogOut className="h-4 w-4 mr-3" />
+                  Logout
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 };

@@ -6,6 +6,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { MapPin, Star } from 'lucide-react';
 import ContactReveal from '@/components/ContactReveal';
 import { FaPlus } from 'react-icons/fa';
+import { ArrowLeft } from 'lucide-react';
 
 interface PreviewStepProps {
   currentUser: { displayName?: string; email?: string; profilePictureUrl?: string } | null | undefined;
@@ -25,6 +26,7 @@ interface PreviewStepProps {
   onCancelEdit: () => void;
   onSaveEdit: () => void;
   onApprove: () => void;
+  onBack: () => void;
   labels?: string[];
   onLabelsChange?: (labels: string[]) => void;
 }
@@ -47,6 +49,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
   onCancelEdit,
   onSaveEdit,
   onApprove,
+  onBack,
   labels = [],
   onLabelsChange
 }) => {
@@ -109,20 +112,30 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="space-y-6 py-6"
+      className="space-y-4 md:space-y-6 py-4 md:py-6"
     >
       <div className="max-w-3xl mx-auto space-y-4">
+        <div className="flex justify-start">
+          <Button
+            variant="ghost"
+            onClick={onBack}
+            aria-label="Back"
+            className="h-9 w-9 md:h-10 md:w-10 p-0 rounded-full text-foreground hover:bg-muted"
+          >
+            <ArrowLeft className="h-4 w-4 md:h-5 md:w-5" />
+          </Button>
+        </div>
 
-        <article className="w-full border-b border-border/50 pb-6 mb-6 relative">
+        <article className="w-full border-b border-border/50 pb-4 md:pb-6 mb-4 md:mb-6 relative">
           <div className="relative">
             {rating && (
-              <div className="absolute top-4 right-4 z-10">
-                <div className="flex flex-col items-end gap-1">
-                  <div className="flex items-center gap-1 px-2 py-1">
+              <div className="absolute top-3 right-3 md:top-4 md:right-4 z-10">
+                <div className="flex flex-col items-end gap-0.5 md:gap-1">
+                  <div className="flex items-center gap-0.5 md:gap-1 px-1.5 md:px-2 py-0.5 md:py-1">
                     {renderStars(rating || 0)}
                   </div>
                   {rating && (
-                    <div className="text-xs text-muted-foreground text-right">
+                    <div className="text-[10px] md:text-xs text-muted-foreground text-right">
                       {getRatingMessage(rating)}
                     </div>
                   )}
@@ -130,36 +143,36 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
               </div>
             )}
 
-            <div className="flex items-start gap-3 pr-24">
-              <Avatar className="h-12 w-12 flex-shrink-0">
+            <div className="flex items-start gap-2 md:gap-3 pr-20 md:pr-24">
+              <Avatar className="h-10 w-10 md:h-12 md:w-12 flex-shrink-0">
                 <AvatarImage src={getProxiedImageUrl(currentUser?.profilePictureUrl)} alt={currentUser?.displayName || 'You'} />
-                <AvatarFallback>{(currentUser?.displayName || 'You').split(' ').map(s => s[0]).join('').slice(0, 2)}</AvatarFallback>
+                <AvatarFallback className="text-xs md:text-sm">{(currentUser?.displayName || 'You').split(' ').map(s => s[0]).join('').slice(0, 2)}</AvatarFallback>
               </Avatar>
 
               <div className="flex-1 min-w-0">
-                <div className="mb-2">
-                  <span className="font-semibold text-sm">{currentUser?.displayName || 'You'}</span>
+                <div className="mb-1 md:mb-2">
+                  <span className="font-semibold text-xs md:text-sm">{currentUser?.displayName || 'You'}</span>
                   {placeName ? (
                     <>
-                      <span className="text-sm text-muted-foreground"> rated </span>
-                      <span className="font-semibold text-sm">{placeName}</span>
+                      <span className="text-xs md:text-sm text-muted-foreground"> rated </span>
+                      <span className="font-semibold text-xs md:text-sm">{placeName}</span>
                     </>
                   ) : (
                     <>
-                      <span className="text-sm text-muted-foreground"> shared </span>
-                      <span className="font-semibold text-sm">a recommendation</span>
+                      <span className="text-xs md:text-sm text-muted-foreground"> shared </span>
+                      <span className="font-semibold text-xs md:text-sm">a recommendation</span>
                     </>
                   )}
                 </div>
 
                 {placeAddress && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground mb-3 pr-24">
+                  <div className="flex items-center gap-1 text-[10px] md:text-xs text-muted-foreground mb-2 md:mb-3 pr-16 md:pr-20">
                     <MapPin className="h-3 w-3 flex-shrink-0" />
                     <span className="truncate">{placeAddress}</span>
                     {contentType === 'service' && (contact?.phone || contact?.email) && (
                       <ContactReveal
                         contact={contact}
-                        className="relative ml-2"
+                        className="relative ml-1 md:ml-2 flex-shrink-0"
                         buttonClassName="h-5 w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
                         iconClassName="h-3 w-3"
                         align="right"
@@ -169,36 +182,36 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                 )}
 
                 {description && (
-                  <div className="mb-3">
+                  <div className="mb-2 md:mb-3">
                     {/* <h4 className="font-semibold text-sm mb-1">Notes:</h4> */}
                     {isEditingDescription ? (
                       <Textarea
                         value={editedPreview}
                         onChange={(e) => onEditedPreviewChange(e.target.value)}
-                        className="min-h-[100px] text-sm resize-none border border-gray-200 rounded-lg focus:border-gray-400 focus:ring-0 bg-white px-3 py-2 text-gray-800"
+                        className="min-h-[80px] md:min-h-[100px] text-xs md:text-sm resize-none border border-gray-200 rounded-lg focus:border-gray-400 focus:ring-0 bg-white px-2 md:px-3 py-1.5 md:py-2 text-gray-800"
                         placeholder="Edit your recommendation..."
                       />
                     ) : (
-                      <p className="text-sm leading-relaxed">{description}</p>
+                      <p className="text-xs md:text-sm leading-relaxed">{description}</p>
                     )}
                   </div>
                 )}
 
                 {/* Labels Section */}
-                <div className="mb-3">
-                  <div className="flex items-center gap-2 flex-wrap">
+                <div className="mb-2 md:mb-3">
+                  <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
                     {/* AI-generated and user labels */}
                     {labels.map((label, index) => (
                       <span
                         key={index}
-                        className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200"
+                        className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200"
                       >
                         {label}
                         {onLabelsChange && (
                           <button
                             type="button"
                             onClick={() => removeLabel(label)}
-                            className="ml-1.5 text-yellow-600 hover:text-yellow-800 focus:outline-none transition-colors"
+                            className="ml-1 md:ml-1.5 text-yellow-600 hover:text-yellow-800 focus:outline-none transition-colors text-[10px] md:text-xs"
                             aria-label={`Remove ${label} label`}
                           >
                             ×
@@ -211,7 +224,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                     {showCustomInput ? (
                       <div className="inline-flex items-center gap-1">
                         <input
-                          className="px-2.5 py-1 rounded-full text-xs font-medium border-[1.5px] border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+                          className="px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium border-[1.5px] border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] md:focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
                           value={customLabel}
                           onChange={e => setCustomLabel(e.target.value)}
                           onKeyDown={e => {
@@ -237,7 +250,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                           type="button"
                           onClick={() => { addCustomLabel(); setShowCustomInput(false); }}
                           disabled={!customLabel.trim()}
-                          className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                           aria-label="Add label"
                         >
                           <FaPlus />
@@ -247,7 +260,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                       <button
                         type="button"
                         onClick={() => setShowCustomInput(true)}
-                        className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5"
+                        className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5"
                         aria-label="Add label"
                       >
                         <FaPlus />
@@ -262,31 +275,31 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
         </article>
 
         {!isEditingDescription && (
-          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-gray-800">How would you rate this?</h3>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 md:p-4 shadow-sm">
+            <div className="space-y-2 md:space-y-3">
+              <h3 className="text-xs md:text-sm font-medium text-gray-800">How would you rate this?</h3>
               <div className="flex justify-center">
-                <div className="flex items-center justify-center gap-2">
+                <div className="flex items-center justify-center gap-1.5 md:gap-2">
                   {[1,2,3,4,5].map(n => (
-                    <button key={n} type="button" onClick={() => onRatingChange(n)} className={`h-10 w-10 rounded-full flex items-center justify-center transition-all duration-200 hover:scale-110 ${rating && n <= rating ? 'text-yellow-400' : 'text-gray-300'}`}>★</button>
+                    <button key={n} type="button" onClick={() => onRatingChange(n)} className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center transition-all duration-200 hover:scale-110 text-base md:text-lg ${rating && n <= rating ? 'text-yellow-400' : 'text-gray-300'}`}>★</button>
                   ))}
-                  {rating && <span className="ml-3 text-sm font-medium text-gray-600">{rating}/5</span>}
+                  {rating && <span className="ml-2 md:ml-3 text-xs md:text-sm font-medium text-gray-600">{rating}/5</span>}
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        <div className="flex gap-3 justify-center">
+        <div className="flex flex-col sm:flex-row gap-2 md:gap-3 justify-center">
           {isEditingDescription ? (
             <>
-              <Button onClick={onCancelEdit} variant="outline" className="px-4 py-2 text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 rounded-md border border-gray-200 shadow-sm transition-colors duration-200">Cancel</Button>
-              <Button onClick={onSaveEdit} className="px-4 py-2 text-sm font-medium bg-gray-900 hover:bg-gray-800 text-white rounded-md border-0 shadow-sm transition-colors duration-200">Save Changes</Button>
+              <Button onClick={onCancelEdit} variant="outline" className="px-3 md:px-4 py-2 text-xs md:text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 rounded-md border border-gray-200 shadow-sm transition-colors duration-200 w-full sm:w-auto">Cancel</Button>
+              <Button onClick={onSaveEdit} className="px-3 md:px-4 py-2 text-xs md:text-sm font-medium bg-gray-900 hover:bg-gray-800 text-white rounded-md border-0 shadow-sm transition-colors duration-200 w-full sm:w-auto">Save Changes</Button>
             </>
           ) : (
             <>
-              <Button onClick={onEdit} className="px-4 py-2 text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 rounded-md border border-gray-200 shadow-sm transition-colors duration-200">Edit Text</Button>
-              <Button onClick={onApprove} className="px-6 py-2 text-sm font-medium bg-gray-900 hover:bg-gray-800 text-white rounded-md border-0 shadow-sm transition-colors duration-200">Post Recommendation</Button>
+              <Button onClick={onEdit} className="px-3 md:px-4 py-2 text-xs md:text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 rounded-md border border-gray-200 shadow-sm transition-colors duration-200 w-full sm:w-auto">Edit Text</Button>
+              <Button onClick={onApprove} className="px-4 md:px-6 py-2 text-xs md:text-sm font-medium bg-gray-900 hover:bg-gray-800 text-white rounded-md border-0 shadow-sm transition-colors duration-200 w-full sm:w-auto">Post Recommendation</Button>
             </>
           )}
         </div>

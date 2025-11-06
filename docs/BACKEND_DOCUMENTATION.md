@@ -1,4 +1,4 @@
-# MapX Backend Documentation
+# recce_ Backend Documentation
 
 ## Table of Contents
 
@@ -1305,7 +1305,7 @@ console.log('🐌 Slow query detected (250ms):', {
 
 ## Conclusion
 
-The MapX backend is a robust, scalable platform built with modern technologies and best practices. The combination of PostgreSQL with PostGIS and pgvector extensions, along with AI integration via OpenAI and Groq, provides a powerful foundation for location-based social recommendations.
+The recce_ backend is a robust, scalable platform built with modern technologies and best practices. The combination of PostgreSQL with PostGIS and pgvector extensions, along with AI integration via OpenAI and Groq, provides a powerful foundation for location-based social recommendations.
 
 The modular architecture, comprehensive documentation, and extensive testing strategy ensure maintainability and reliability. The system is designed to scale from development to production environments with proper security, monitoring, and performance optimization.
 

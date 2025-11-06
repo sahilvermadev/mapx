@@ -20,7 +20,7 @@ const router = express.Router();
  */
 router.post('/', async (req, res) => {
   try {
-    const { name, description, icon, visibility, memberIds } = req.body;
+    const { name, description, icon, memberIds } = req.body;
     const userId = (req as any).user.id;
 
     if (!name || !Array.isArray(memberIds)) {
@@ -34,7 +34,8 @@ router.post('/', async (req, res) => {
       name,
       description,
       icon,
-      visibility: visibility || 'private',
+      // All groups are private; ignore any client-provided visibility
+      visibility: 'private',
       memberIds
     };
 
@@ -114,7 +115,7 @@ router.put('/:id', async (req, res) => {
   try {
     const groupId = parseInt(req.params.id);
     const userId = (req as any).user.id;
-    const { name, description, icon, visibility } = req.body;
+    const { name, description, icon } = req.body;
 
     if (isNaN(groupId)) {
       return res.status(400).json({
@@ -126,8 +127,7 @@ router.put('/:id', async (req, res) => {
     const updateData: UpdateGroupData = {
       name,
       description,
-      icon,
-      visibility
+      icon
     };
 
     const group = await updateFriendGroup(groupId, updateData, userId);

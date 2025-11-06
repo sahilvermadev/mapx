@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { notificationsApi, type Notification } from '@/services/notificationsService';
+import { notificationsApi, notificationHelpers, type Notification } from '@/services/notificationsService';
 
 interface NotificationsBellProps {
   currentUserId?: string;
@@ -101,9 +101,12 @@ const NotificationsBell: React.FC<NotificationsBellProps> = ({ currentUserId, va
       console.error('Error marking notification as read:', err);
     }
     
-    // Navigate to post if it's a mention notification for a post
+    // Navigate based on notification type
     if (notification.type === 'mention' && notification.data?.content_id && notification.data?.content_type === 'post') {
       navigate(`/post/${notification.data.content_id}`);
+    } else if (notification.type === 'question_answered' && notification.data?.question_id) {
+      // Navigate to the question page
+      navigate(`/question/${notification.data.question_id}`);
     }
   };
 
@@ -140,14 +143,16 @@ const NotificationsBell: React.FC<NotificationsBellProps> = ({ currentUserId, va
             notifications.map((n) => (
               <DropdownMenuItem key={n.id} className={`flex items-start gap-2 py-2 cursor-pointer ${n.is_read ? '' : 'bg-accent/30'}`} onClick={() => handleNotificationClick(n)}>
                 <div className="mt-1">
-                  <span className="text-base">🔔</span>
+                  <span className="text-base">{notificationHelpers.getTypeIcon(n.type)}</span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm leading-snug text-foreground truncate">{n.message}</div>
-                  {n.data?.content_preview && (
-                    <div className="text-xs text-muted-foreground truncate">{n.data.content_preview}</div>
+                  {(n.data?.content_preview || n.data?.question_preview) && (
+                    <div className="text-xs text-muted-foreground truncate">
+                      {n.data.question_preview || n.data.content_preview}
+                    </div>
                   )}
-                  <div className="text-[10px] text-muted-foreground mt-0.5">{new Date(n.created_at).toLocaleString()}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">{notificationHelpers.formatRelativeTime(n)}</div>
                 </div>
               </DropdownMenuItem>
             ))

@@ -41,7 +41,6 @@ const recommendations_1 = require("../db/recommendations");
 const social_1 = require("../db/social");
 const db_1 = __importDefault(require("../db"));
 const router = express_1.default.Router();
-// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * GET /api/profile/:userId
  * Get user profile data
@@ -283,6 +282,29 @@ router.delete('/saved/:placeId', async (req, res) => {
             message: 'Failed to remove place from saved',
             error: error instanceof Error ? error.message : 'Unknown error'
         });
+    }
+});
+/**
+ * GET /api/profile/:userId/questions
+ * Get user's questions
+ */
+router.get('/:userId/questions', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { limit = 20, offset = 0 } = req.query;
+        const result = await db_1.default.query(`SELECT q.id, q.text, q.visibility, q.labels, q.metadata, q.created_at, q.updated_at,
+              q.answers_count, q.last_answer_at, q.last_answer_user_id,
+              u.display_name as user_name, u.profile_picture_url as user_picture
+       FROM questions q
+       JOIN users u ON u.id = q.user_id
+       WHERE q.user_id = $1
+       ORDER BY q.created_at DESC
+       LIMIT $2 OFFSET $3`, [userId, parseInt(limit), parseInt(offset)]);
+        return res.json({ success: true, data: result.rows });
+    }
+    catch (error) {
+        console.error('Error fetching user questions:', error);
+        return res.status(500).json({ success: false, error: 'Failed to fetch user questions' });
     }
 });
 exports.default = router;

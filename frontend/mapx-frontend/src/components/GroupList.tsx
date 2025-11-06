@@ -13,13 +13,15 @@ interface GroupListProps {
   onGroupSelect?: (groupId: number) => void;
   selectedGroupIds?: number[];
   showActions?: boolean;
+  onEditGroup?: (groupId: number) => void;
 }
 
 const GroupList: React.FC<GroupListProps> = ({
   currentUserId,
   onGroupSelect,
   selectedGroupIds = [],
-  showActions = true
+  showActions = true,
+  onEditGroup
 }) => {
   const [groups, setGroups] = useState<FriendGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,39 +105,33 @@ const GroupList: React.FC<GroupListProps> = ({
       {groups.map((group) => (
         <Card 
           key={group.id} 
-          className={`cursor-pointer transition-all hover:shadow-md ${
-            selectedGroupIds.includes(group.id) 
-              ? 'ring-2 ring-blue-500 bg-blue-50' 
-              : 'hover:bg-gray-50'
+          className={`cursor-pointer transition-transform rounded-md border-2 border-black bg-white shadow-[3px_3px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0_0_#000] ${
+            selectedGroupIds.includes(group.id) ? 'ring-2 ring-offset-2 ring-black' : ''
           }`}
           onClick={() => onGroupSelect?.(group.id)}
         >
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3 flex-1 min-w-0">
-                <div className="text-2xl">{group.icon || '👥'}</div>
+                <div className="flex items-center justify-center h-10 w-10 rounded-md border border-black bg-white/90 shadow-[1px_1px_0_0_#000] text-lg">
+                  {group.icon || '👥'}
+                </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="font-medium text-gray-900 truncate">
-                      {group.name}
-                    </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900 truncate">{group.name}</h3>
                     {group.role === 'admin' && (
-                      <Badge variant="secondary" className="text-xs">
-                        Admin
-                      </Badge>
+                      <span className="text-xs rounded-none border-2 border-black px-1.5 py-0.5 shadow-[1px_1px_0_0_#000] bg-white">Admin</span>
                     )}
                   </div>
                   {group.description && (
-                    <p className="text-sm text-gray-500 truncate mt-1">
-                      {group.description}
-                    </p>
+                    <p className="text-sm text-gray-600 truncate mt-1">{group.description}</p>
                   )}
-                  <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
-                    <span className="flex items-center space-x-1">
+                  <div className="flex items-center gap-3 mt-2 text-xs text-gray-600">
+                    <span className="flex items-center gap-1">
                       <Users className="h-3 w-3" />
                       <span>{group.member_count || 0} members</span>
                     </span>
-                    <span className="capitalize">{group.visibility}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-yellow-50 border border-yellow-200 capitalize">{group.visibility}</span>
                   </div>
                 </div>
               </div>
@@ -143,14 +139,14 @@ const GroupList: React.FC<GroupListProps> = ({
               {showActions && group.role === 'admin' && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-md border-2 border-black shadow-[1px_1px_0_0_#000]">
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEditGroup?.(group.id); }}>
                       <Edit className="h-4 w-4 mr-2" />
-                      Edit Group
+                      Edit Lens
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className="text-red-600 focus:text-red-600"
@@ -160,7 +156,7 @@ const GroupList: React.FC<GroupListProps> = ({
                       }}
                     >
                       <Trash2 className="h-4 w-4 mr-2" />
-                      Delete Group
+                      Delete Lens
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

@@ -1,10 +1,13 @@
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import RecommendationComposer from '@/components/RecommendationComposer';
 import { useAuth } from '@/auth';
 
 const RecommendationComposerPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
   const { user: currentUser, isAuthenticated, isChecking } = useAuth();
 
   useEffect(() => {
@@ -31,13 +34,27 @@ const RecommendationComposerPage: React.FC = () => {
     return null;
   }
 
+  // Get question context from navigation state
+  const questionContext = location.state?.questionContext;
+  const questionId = location.state?.questionId;
+
   return (
     <div className="min-h-[calc(100vh-64px)]">
       <RecommendationComposer
         isOpen={true}
         onClose={() => navigate(-1)}
-        onPostCreated={() => navigate('/feed')}
+        onPostCreated={() => {
+          // Invalidate feed queries to refresh the data
+          queryClient.invalidateQueries({ 
+            queryKey: ['feed'],
+            exact: false 
+          });
+          queryClient.invalidateQueries({ queryKey: ['profile'] });
+          navigate('/feed');
+        }}
         currentUserId={currentUser.id}
+        questionContext={questionContext}
+        questionId={questionId}
       />
     </div>
   );

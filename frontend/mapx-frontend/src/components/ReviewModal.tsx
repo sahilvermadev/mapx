@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
 import { FaMapMarkerAlt, FaExclamationTriangle, FaPlus } from 'react-icons/fa';
-import { Star } from 'lucide-react';
+import { Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 import { recommendationsApi, type SaveRecommendationRequest } from '../services/recommendationsApiService';
 import { useAuth } from '../auth';
 import { useMentions } from '@/hooks/useMentions';
 import { insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
+import { getReadableTextColor } from '@/utils/color';
 
 // Types
 export interface ReviewPayload {
@@ -139,6 +142,9 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  
+  // Mobile detection - initialize immediately
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
 
   // Mentions
   const { user } = useAuth();
@@ -146,6 +152,12 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   const notesRef = useRef<HTMLTextAreaElement | null>(null);
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number } | null>(null);
+  
+  // Theme support
+  const { theme } = useTheme();
+  const selectedTheme = THEMES[theme];
+  const accentColor = selectedTheme.accentColor;
+  const textOnAccent = getReadableTextColor(accentColor);
 
   // Validation
   const validationErrors = useMemo(() => {
@@ -269,7 +281,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
       if (onSuccess) {
         onSuccess({
           place_id: result.place_id,
-          annotation_id: result.annotation_id
+          annotation_id: result.recommendation_id
         });
       }
 
@@ -296,6 +308,46 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  // Check if mobile device
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const handleChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      setIsMobile(e.matches);
+    };
+    
+    handleChange(mediaQuery);
+    
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    } else {
+      mediaQuery.addListener(handleChange);
+      return () => mediaQuery.removeListener(handleChange);
+    }
+  }, []);
+
+  // Drag handlers for mobile swipe-to-close
+  const y = useMotionValue(0);
+  const opacity = useTransform(y, [0, 300], [1, 0]);
+  
+  const handleDragEnd = useCallback((event: any, info: any) => {
+    if (isMobile && info.offset.y > 100) {
+      onClose();
+    } else {
+      y.set(0);
+    }
+  }, [isMobile, onClose, y]);
+
+  // Prevent body scroll on mobile when modal is open
+  useEffect(() => {
+    if (isOpen && isMobile) {
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = '';
+      };
+    }
+  }, [isOpen, isMobile]);
 
   // Effects
   useEffect(() => {
@@ -330,10 +382,10 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
           type="button"
           onClick={() => handleToggleLabel(label)}
           disabled={isSubmitting}
-          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-colors border select-none ${
+          className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none shadow-sm ${
             labels.includes(label)
-              ? 'bg-yellow-50 text-yellow-800 border-yellow-200 hover:bg-yellow-100'
-              : 'bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900'
+              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
+              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
           } ${isSubmitting ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
         >
           {label}
@@ -346,10 +398,10 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
           type="button"
           onClick={() => handleToggleLabel(label)}
           disabled={isSubmitting}
-          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-colors border select-none ${
+          className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none shadow-sm ${
             labels.includes(label)
-              ? 'bg-yellow-50 text-yellow-800 border-yellow-200 hover:bg-yellow-100'
-              : 'bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900'
+              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
+              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
           } ${isSubmitting ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
         >
           {label}
@@ -359,7 +411,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
       {showCustomInput ? (
         <div className="inline-flex items-center gap-1">
           <input
-            className="px-2.5 py-1 rounded-full text-xs font-medium border-[1.5px] border-gray-200 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+            className="px-2.5 py-1 rounded-md text-xs font-medium border border-black/20 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:border-black focus:shadow-[2px_2px_0_0_#000] transition-all duration-200"
             value={customLabel}
             onChange={e => setCustomLabel(e.target.value)}
             onKeyDown={e => {
@@ -386,7 +438,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
             type="button"
             onClick={() => { addCustomLabel(); setShowCustomInput(false); }}
             disabled={isSubmitting || !customLabel.trim()}
-            className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 border border-black/20 bg-white text-gray-600 shadow-sm hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Add label"
           >
             <FaPlus />
@@ -397,7 +449,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
           type="button"
           onClick={() => setShowCustomInput(true)}
           disabled={isSubmitting}
-          className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 border border-black/20 bg-white text-gray-600 shadow-sm hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:opacity-40 disabled:cursor-not-allowed"
           aria-label="Add label"
         >
           <FaPlus />
@@ -412,7 +464,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
 
     return (
       <div 
-        className="fixed z-50 w-64 rounded-lg border border-gray-200 bg-white text-gray-900 shadow-lg" 
+        className="fixed z-50 w-64 rounded-md border-2 border-black bg-white text-gray-900 shadow-[4px_4px_0_0_#000]" 
         style={{
           top: (mentionPosition?.top || 0),
           left: (mentionPosition?.left || 0)
@@ -460,29 +512,60 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   const content = (
     <AnimatePresence>
       {isOpen && (
-        <motion.div 
-          className="fixed inset-0 bg-black/40 flex justify-center items-center z-[1000] p-4 backdrop-blur-sm" 
-          onMouseDown={onClose} 
-          initial={{ opacity: 0 }} 
-          animate={{ opacity: 1 }} 
-          exit={{ opacity: 0 }}
-        >
+        <>
+          {/* Backdrop overlay */}
+          <motion.div 
+            className="fixed inset-0 bg-black/50 z-[1000] md:bg-black/40 backdrop-blur-sm" 
+            onClick={onClose}
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+          />
+          
+          {/* Modal Content */}
           <motion.div
-            className="bg-white rounded-[20px] p-7 w-full max-w-[720px] max-h-[calc(100vh-32px)] overflow-y-auto relative border border-black/8 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] font-sans md:p-7 md:rounded-[20px] p-5 w-[calc(100vw-24px)] rounded-2xl sm:p-4 sm:w-[calc(100vw-16px)] sm:rounded-2xl"
+            className="
+              fixed bg-white z-[1001] overflow-y-auto font-sans
+              inset-x-0 bottom-0 rounded-t-2xl border-t-2 border-black shadow-[0_-8px_0_0_#000] max-h-[90vh]
+              md:inset-x-auto md:inset-y-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:bottom-auto md:w-full md:max-w-[720px] md:rounded-lg md:rounded-t-none md:border-t-0 md:border-2 md:shadow-[8px_8px_0_0_#000] md:max-h-[calc(100vh-32px)]
+            "
             onMouseDown={(e) => e.stopPropagation()}
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 40, opacity: 0 }}
+            initial={isMobile ? { y: '100%' } : { y: 40, opacity: 0 }}
+            animate={isMobile ? { y: 0 } : { y: 0, opacity: 1 }}
+            exit={isMobile ? { y: '100%' } : { y: 40, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+            drag={isMobile ? 'y' : false}
+            dragConstraints={isMobile ? { top: 0 } : {}}
+            dragElastic={isMobile ? 0.2 : 0}
+            onDragEnd={handleDragEnd}
+            style={isMobile ? { y, opacity } : {}}
             role="dialog" 
             aria-modal="true" 
             aria-label="Write a review"
           >
-            <h2 className="text-[22px] font-semibold text-gray-900 mb-8 tracking-[-0.02em] leading-[1.2] md:text-[22px] text-xl sm:text-lg">Share your take</h2>
+            {/* Drag handle for mobile */}
+            <div 
+              className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none md:hidden"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
+            </div>
+
+            {/* Close button - visible on mobile */}
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 md:top-6 md:right-6 h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm border-0 z-10 flex items-center justify-center transition-all"
+              aria-label="Close modal"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="p-4 md:p-7">
+              <h2 className="text-xl md:text-[22px] font-semibold text-gray-900 mb-6 md:mb-8 tracking-[-0.02em] leading-[1.2] pr-12">Share your take</h2>
             
             {placeData && (
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-5 flex items-center gap-3 sm:flex-col sm:text-center sm:gap-2.5 sm:p-3">
-                <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center text-white text-base flex-shrink-0 shadow-[0_4px_12px_rgba(59,130,246,0.2)] sm:w-8 sm:h-8 sm:text-sm">
+              <div className="bg-slate-50 border border-black/20 rounded-md p-4 mb-5 flex items-center gap-3 shadow-sm sm:flex-col sm:text-center sm:gap-2.5 sm:p-3">
+                <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-700 rounded-md border border-black/20 flex items-center justify-center text-white text-base flex-shrink-0 shadow-[2px_2px_0_0_#000] sm:w-8 sm:h-8 sm:text-sm">
                   <FaMapMarkerAlt />
                 </div>
                 <div>
@@ -492,7 +575,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
               </div>
             )}
 
-            <form className="flex flex-col gap-5 sm:gap-4" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+            <form className="flex flex-col gap-4 md:gap-5" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
               {/* Labels */}
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium text-gray-700 mb-2 block">
@@ -508,7 +591,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                 </label>
                 <textarea 
                   ref={notesRef}
-                  className="w-full p-3 rounded-lg border-[1.5px] border-gray-200 bg-white text-gray-900 text-sm font-inherit transition-all duration-200 box-border leading-[1.4] resize-y min-h-[70px] focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] focus:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50 placeholder:text-gray-400" 
+                  className="w-full p-3 rounded-md border border-black/20 bg-white text-gray-900 text-sm font-inherit transition-all duration-200 box-border leading-[1.4] resize-y min-h-[70px] focus:outline-none focus:border-black focus:shadow-[2px_2px_0_0_#000] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50 placeholder:text-gray-400" 
                   rows={4} 
                   value={notes} 
                   onChange={async e => {
@@ -536,7 +619,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                   Highlights
                 </label>
                 <input 
-                  className="w-full p-3 rounded-lg border-[1.5px] border-gray-200 bg-white text-gray-900 text-sm font-inherit transition-all duration-200 box-border leading-[1.4] focus:outline-none focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] focus:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50" 
+                  className="w-full p-3 rounded-md border border-black/20 bg-white text-gray-900 text-sm font-inherit transition-all duration-200 box-border leading-[1.4] focus:outline-none focus:border-black focus:shadow-[2px_2px_0_0_#000] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50" 
                   value={specialities} 
                   onChange={e => setSpecialities(e.target.value)} 
                   placeholder="e.g., Margherita pizza, Tiramisu, Live music" 
@@ -545,9 +628,9 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
               </div>
 
               {/* Rating and Price Range - Inline */}
-              <div className="!flex !flex-row items-center justify-between gap-8 sm:flex-col sm:items-start sm:gap-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-8">
                 {/* Price Range - First */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
                   <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
                     Price Range
                   </label>
@@ -585,13 +668,13 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                 </div>
 
                 {/* Rating - Second */}
-                <div className="flex items-center gap-3 -ml-4">
-                  <label className="text-sm font-medium text-gray-700 flex items-center gap-2 whitespace-nowrap">
+                <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+                  <label className="text-sm font-medium text-gray-700 flex items-center gap-2 whitespace-nowrap flex-shrink-0">
                     Rating
                     <span className="text-red-500">*</span>
                   </label>
                   
-                  <div className="flex items-center gap-0">
+                  <div className="flex items-center gap-0 flex-shrink-0">
                     {[1, 2, 3, 4, 5].map(star => (
                       <div key={star} className="relative group">
                         <Button
@@ -634,25 +717,27 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
 
               {/* Error display */}
               {submitError && (
-                <div className="bg-red-50 border-[1.5px] border-red-200 rounded-xl p-5 my-5 text-red-700 text-[15px] flex items-center gap-3 font-medium">
+                <div className="bg-red-50 border-2 border-red-300 rounded-md p-5 my-5 text-red-700 text-[15px] flex items-center gap-3 font-medium shadow-[2px_2px_0_0_#ef4444]">
                   <FaExclamationTriangle />
                   <strong>Error:</strong> {submitError}
                 </div>
               )}
               
               {/* Actions */}
-              <div className="flex justify-end mt-5 pt-5 border-t border-slate-100">
+              <div className="flex justify-end mt-5 pt-5 border-t-2 border-black/20">
                 <Button 
                   type="submit"
                   disabled={!isFormValid || isSubmitting}
-                  className="font-semibold"
+                  className="w-full md:w-auto font-semibold rounded-md border-2 border-black shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0"
+                  style={{ backgroundColor: accentColor, borderColor: '#000', color: textOnAccent }}
                 >
                   {isSubmitting ? 'Saving…' : 'Submit review'}
                 </Button>
               </div>
             </form>
+            </div>
           </motion.div>
-        </motion.div>
+        </>
       )}
     </AnimatePresence>
   );

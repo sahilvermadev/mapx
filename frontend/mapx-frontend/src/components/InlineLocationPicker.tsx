@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Loader } from '@googlemaps/js-api-loader';
 import { Search, MapPin, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +12,9 @@ interface InlineLocationPickerProps {
     lat: number;
     lng: number;
     google_place_id?: string;
+    city_name?: string;
+    admin1_name?: string;
+    country_code?: string;
   }) => void;
   onSkip: () => void;
 }
@@ -26,6 +30,10 @@ interface PlaceResult {
     };
   };
   types: string[];
+  address_components?: any[];
+  city_name?: string;
+  admin1_name?: string;
+  country_code?: string;
 }
 
 const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
@@ -39,25 +47,41 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const autocomplete = useRef<google.maps.places.Autocomplete | null>(null);
 
-  // Initialize Google Places Autocomplete
+  // Initialize Google Places Autocomplete (with loader fallback)
   useEffect(() => {
-    if (!searchInputRef.current || !window.google) {
-      return;
-    }
+    let cancelled = false;
 
-    // Clean up previous autocomplete
-    if (autocomplete.current) {
+    const init = async () => {
+      if (!searchInputRef.current) return;
+
+      // Ensure Google Maps JS API is loaded
+      if (!(window as any).google?.maps?.places?.Autocomplete) {
+        try {
+          const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY;
+          if (!apiKey) {
+            setError('Google Maps API key is not configured');
+            return;
+          }
+          const loader = new Loader({ apiKey, version: 'weekly', libraries: ['places'] });
+          await loader.load();
+        } catch (e) {
+          if (!cancelled) setError('Failed to load Google Maps Places library');
+          return;
+        }
+      }
+
+      if (cancelled || !searchInputRef.current) return;
+
+      // Clean up previous autocomplete
       autocomplete.current = null;
-    }
 
-    // Initialize autocomplete
-    console.log('🔍 InlineLocationPicker: Initializing autocomplete...');
-    autocomplete.current = new window.google.maps.places.Autocomplete(searchInputRef.current, {
-      types: ['establishment', 'geocode'],
-      fields: ['place_id', 'geometry', 'name', 'formatted_address', 'types', 'photos']
-    });
+      // Initialize autocomplete
+      autocomplete.current = new (window as any).google.maps.places.Autocomplete(searchInputRef.current, {
+        types: ['establishment', 'geocode'],
+        fields: ['place_id', 'geometry', 'name', 'formatted_address', 'types', 'photos', 'address_components']
+      });
 
-    autocomplete.current.addListener('place_changed', () => {
+      autocomplete.current.addListener('place_changed', () => {
       const place = autocomplete.current?.getPlace();
       if (place && place.geometry && place.place_id) {
         // Validate coordinates
@@ -77,6 +101,18 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
         const primaryType = getPrimaryGoogleType(place.types || []);
         console.log('Primary Google type:', primaryType);
         
+        // Derive admin fields from address_components if present
+        let city_name: string | undefined;
+        let admin1_name: string | undefined;
+        let country_code: string | undefined;
+        const comps: any[] = (place as any).address_components || [];
+        for (const c of comps) {
+          const types: string[] = c.types || [];
+          if (!city_name && (types.includes('locality') || types.includes('postal_town'))) city_name = c.long_name || c.short_name;
+          if (!admin1_name && types.includes('administrative_area_level_1')) admin1_name = c.long_name || c.short_name;
+          if (!country_code && types.includes('country')) country_code = (c.short_name || c.long_name || '').toUpperCase();
+        }
+        
         // Convert to our PlaceResult format
         const placeResult: PlaceResult = {
           place_id: place.place_id || '',
@@ -88,16 +124,24 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
               lng: lng
             }
           },
-          types: place.types || []
+          types: place.types || [],
+          address_components: comps,
+          city_name,
+          admin1_name,
+          country_code
         };
         
         setSelectedLocation(placeResult);
         setError(null);
       }
     });
+    };
+
+    init();
 
     // Cleanup function
     return () => {
+      cancelled = true;
       if (autocomplete.current) {
         autocomplete.current = null;
       }
@@ -118,7 +162,10 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
         address: selectedLocation.formatted_address,
         lat: selectedLocation.geometry.location.lat,
         lng: selectedLocation.geometry.location.lng,
-        google_place_id: selectedLocation.place_id
+        google_place_id: selectedLocation.place_id,
+        city_name: selectedLocation.city_name,
+        admin1_name: selectedLocation.admin1_name,
+        country_code: selectedLocation.country_code
       });
     }
   };
@@ -127,13 +174,13 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
     <div className="w-full max-w-2xl mx-auto space-y-6">
       {/* Search Section */}
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           ref={searchInputRef}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search for a place or address..."
-          className="pl-10 pr-4 py-3 text-lg"
+          className="pl-10 pr-4 py-3 text-base bg-transparent border border-border rounded-lg focus:border-foreground focus:ring-0"
         />
       </div>
       
@@ -145,32 +192,32 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
 
       {/* Selected Location Display */}
       {selectedLocation && (
-        <div className="p-4 border border-blue-500 bg-blue-50 rounded-lg">
+        <div className="p-4 md:p-5 rounded-xl border border-border bg-card/50 shadow-sm">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <MapPin className="h-4 w-4 text-blue-600" />
-                <h4 className="font-medium text-gray-900">
+              <div className="flex items-center gap-2 mb-1.5">
+                <MapPin className="h-4 w-4 text-foreground/70" />
+                <h4 className="font-medium text-foreground tracking-tight">
                   {selectedLocation.name}
                 </h4>
               </div>
-              <p className="text-sm text-gray-600 mb-2">
+              <p className="text-sm text-muted-foreground mb-2">
                 {selectedLocation.formatted_address}
               </p>
               {selectedLocation.types.length > 0 && (
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {selectedLocation.types.slice(0, 2).map((type, index) => (
                     <span
                       key={index}
-                      className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground"
                     >
-                      {type.replace(/_/g, ' ')}
+                      {getPrimaryGoogleType([type]).replace(/_/g, ' ')}
                     </span>
                   ))}
                 </div>
               )}
             </div>
-            <Check className="h-5 w-5 text-blue-600 flex-shrink-0 ml-3" />
+            <Check className="h-5 w-5 text-foreground/70 flex-shrink-0 ml-3" />
           </div>
         </div>
       )}
@@ -179,15 +226,15 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
       <div className="flex gap-3 justify-center">
         <Button
           onClick={onSkip}
-          variant="outline"
-          className="px-6 py-2"
+          variant="ghost"
+          className="h-10 px-3 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-muted"
         >
           Skip
         </Button>
         {selectedLocation && (
           <Button
             onClick={handleConfirmSelection}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700"
+            className="p-3 rounded-full bg-foreground text-background hover:opacity-90"
           >
             Select Location
           </Button>

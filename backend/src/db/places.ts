@@ -9,6 +9,13 @@ export interface PlaceData {
   lat?: number;
   lng?: number;
   metadata?: Record<string, any>;
+  // normalized fields (optional)
+  city_name?: string;
+  city_slug?: string;
+  admin1_name?: string;
+  country_code?: string;
+  primary_type?: string;
+  types?: string[];
 }
 
 export interface Place {
@@ -88,8 +95,15 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
         const updateResult = await client.query(
           `UPDATE places 
            SET name = $1, address = $2, category_id = $3, lat = $4, lng = $5, 
-               metadata = $6, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $7
+               metadata = $6,
+               city_name = COALESCE($7, city_name),
+               city_slug = COALESCE($8, city_slug),
+               admin1_name = COALESCE($9, admin1_name),
+               country_code = COALESCE($10, country_code),
+               primary_type = COALESCE($11, primary_type),
+               types = COALESCE($12, types),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $13
            RETURNING id`,
           [
             placeData.name,
@@ -98,6 +112,12 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
             placeData.lat,
             placeData.lng,
             JSON.stringify(placeData.metadata || {}),
+            placeData.city_name,
+            placeData.city_slug,
+            placeData.admin1_name,
+            placeData.country_code,
+            placeData.primary_type,
+            placeData.types,
             placeId
           ]
         );
@@ -108,8 +128,11 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
       } else {
         // Insert new place
         const insertResult = await client.query(
-          `INSERT INTO places (google_place_id, name, address, category_id, lat, lng, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO places (
+             google_place_id, name, address, category_id, lat, lng, metadata,
+             city_name, city_slug, admin1_name, country_code, primary_type, types
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`,
           [
             placeData.google_place_id,
@@ -118,7 +141,13 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
             categoryId,
             placeData.lat,
             placeData.lng,
-            JSON.stringify(placeData.metadata || {})
+            JSON.stringify(placeData.metadata || {}),
+            placeData.city_name,
+            placeData.city_slug,
+            placeData.admin1_name,
+            placeData.country_code,
+            placeData.primary_type,
+            placeData.types
           ]
         );
         
@@ -127,8 +156,11 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
     } else {
       // No google_place_id provided, always insert new place
       const insertResult = await client.query(
-        `INSERT INTO places (name, address, category_id, lat, lng, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO places (
+           name, address, category_id, lat, lng, metadata,
+           city_name, city_slug, admin1_name, country_code, primary_type, types
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`,
         [
           placeData.name,
@@ -136,7 +168,13 @@ export async function upsertPlace(placeData: PlaceData): Promise<number> {
           categoryId,
           placeData.lat,
           placeData.lng,
-          JSON.stringify(placeData.metadata || {})
+          JSON.stringify(placeData.metadata || {}),
+          placeData.city_name,
+          placeData.city_slug,
+          placeData.admin1_name,
+          placeData.country_code,
+          placeData.primary_type,
+          placeData.types
         ]
       );
       

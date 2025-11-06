@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaStar, FaEye, FaEyeSlash, FaTimes } from 'react-icons/fa';
 import type { FilterOptions } from '../services/profileService';
 import { COMMON_GOOGLE_PLACES_TYPES } from '../utils/placeTypes';
@@ -27,6 +27,11 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
   onClearGroups
 }) => {
   const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
+
+  // Sync localFilters when filters prop changes (e.g., when cleared externally)
+  useEffect(() => {
+    setLocalFilters(filters);
+  }, [filters]);
 
   const handleFilterChange = (key: keyof FilterOptions, value: any) => {
     const newFilters = { ...localFilters, [key]: value };

@@ -71,13 +71,18 @@ async function getUserFriendGroups(userId) {
     try {
         const result = await db_1.default.query(`SELECT 
         fg.*,
-        COUNT(fgm.user_id) as member_count,
-        CASE WHEN fgm.user_id IS NOT NULL THEN true ELSE false END as is_member,
-        fgm.role
+        COALESCE(mc.member_count, 0) AS member_count,
+        (um.user_id IS NOT NULL) AS is_member,
+        um.role
       FROM friend_groups fg
-      LEFT JOIN friend_group_members fgm ON fg.id = fgm.group_id AND fgm.user_id = $1
-      WHERE fg.created_by = $1 OR fgm.user_id = $1
-      GROUP BY fg.id, fg.name, fg.description, fg.icon, fg.created_by, fg.visibility, fg.created_at, fg.updated_at, fgm.user_id, fgm.role
+      LEFT JOIN (
+        SELECT group_id, COUNT(*) AS member_count
+        FROM friend_group_members
+        GROUP BY group_id
+      ) mc ON mc.group_id = fg.id
+      LEFT JOIN friend_group_members um
+        ON um.group_id = fg.id AND um.user_id = $1
+      WHERE fg.created_by = $1 OR um.user_id IS NOT NULL
       ORDER BY fg.created_at DESC`, [userId]);
         return result.rows;
     }
@@ -91,16 +96,22 @@ async function getUserFriendGroups(userId) {
  */
 async function getFriendGroupDetails(groupId, userId) {
     try {
-        // Get group info
+        // Get group info with accurate member count and membership state
         const groupResult = await db_1.default.query(`SELECT 
         fg.*,
-        COUNT(fgm.user_id) as member_count,
-        CASE WHEN fgm.user_id IS NOT NULL THEN true ELSE false END as is_member,
-        fgm.role
+        COALESCE(mc.member_count, 0) AS member_count,
+        (um.user_id IS NOT NULL) AS is_member,
+        um.role
       FROM friend_groups fg
-      LEFT JOIN friend_group_members fgm ON fg.id = fgm.group_id AND fgm.user_id = $2
-      WHERE fg.id = $1
-      GROUP BY fg.id, fg.name, fg.description, fg.icon, fg.created_by, fg.visibility, fg.created_at, fg.updated_at, fgm.user_id, fgm.role`, [groupId, userId]);
+      LEFT JOIN (
+        SELECT group_id, COUNT(*) AS member_count
+        FROM friend_group_members
+        WHERE group_id = $1
+        GROUP BY group_id
+      ) mc ON mc.group_id = fg.id
+      LEFT JOIN friend_group_members um
+        ON um.group_id = fg.id AND um.user_id = $2
+      WHERE fg.id = $1`, [groupId, userId]);
         if (groupResult.rows.length === 0) {
             throw new Error('Group not found');
         }

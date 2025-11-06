@@ -2,6 +2,9 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaMapMarkerAlt, FaStar, FaUsers, FaTags, FaCalendarAlt, FaTimes, FaSearch } from 'react-icons/fa';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import type { SearchResponse, SearchResult } from '../services/recommendationsApiService';
 import { formatAddress } from '../utils/addressFormatter';
 import './SearchResults.css';
@@ -117,7 +120,47 @@ const SearchResults: React.FC<SearchResultsProps> = ({
             <div className="search-summary">
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '12px' }}>
                 <span style={{ fontSize: '18px' }}>🤖</span>
-                <p style={{ margin: 0, flex: 1 }}>{searchResponse.summary}</p>
+                <div style={{ flex: 1 }}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                    components={{
+                      h1: ({ children }) => (
+                        <h1 className="text-xl font-bold text-gray-800 mb-3">{children}</h1>
+                      ),
+                      h2: ({ children }) => (
+                        <h2 className="text-lg font-semibold text-gray-700 mb-2">{children}</h2>
+                      ),
+                      h3: ({ children }) => (
+                        <h3 className="text-base font-medium text-gray-600 mb-2">{children}</h3>
+                      ),
+                      p: ({ children }) => (
+                        <p className="text-gray-700 leading-relaxed mb-3">{children}</p>
+                      ),
+                      ul: ({ children }) => (
+                        <ul className="list-disc list-inside space-y-1 text-gray-700 mb-3">{children}</ul>
+                      ),
+                      li: ({ children }) => (
+                        <li className="text-gray-700">{children}</li>
+                      ),
+                      strong: ({ children }) => (
+                        <strong className="font-semibold text-gray-900 bg-yellow-100 px-1 rounded">
+                          {children}
+                        </strong>
+                      ),
+                      em: ({ children }) => (
+                        <em className="italic text-gray-600">{children}</em>
+                      ),
+                      blockquote: ({ children }) => (
+                        <blockquote className="border-l-4 border-blue-500 pl-4 italic text-gray-600 bg-blue-50 py-2 rounded-r">
+                          {children}
+                        </blockquote>
+                      )
+                    }}
+                  >
+                    {searchResponse.summary}
+                  </ReactMarkdown>
+                </div>
               </div>
               <div className="search-stats">
                 <span>{searchResponse.total_places} places found</span>

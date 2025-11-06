@@ -37,7 +37,8 @@ export interface PrivacySettings {
 
 export interface FeedPost {
   recommendation_id: number;
-  place_id: number;
+  place_id?: number;
+  service_id?: number;
   description: string;
   rating: number;
   visit_date?: string;
@@ -48,11 +49,13 @@ export interface FeedPost {
   content_type?: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
   title?: string;
   content_data?: any;
-  place_name: string;
-  place_address: string;
-  place_lat: number;
-  place_lng: number;
+  place_name?: string;
+  place_address?: string;
+  place_lat?: number;
+  place_lng?: number;
   google_place_id?: string;
+  service_name?: string;
+  service_address?: string;
   user_id: string;
   user_name: string;
   user_picture?: string;

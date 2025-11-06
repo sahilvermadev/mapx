@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFeedPostsFromRecommendations, getFeedPostsFromGroups } from '../db/recommendations';
+import { getFeedPostsFromRecommendations, getFeedPostsFromGroups, getUnifiedFeedPosts } from '../db/recommendations';
 
 const router = express.Router();
 
@@ -10,39 +10,57 @@ const router = express.Router();
  */
 router.get('/', async (req, res) => {
   try {
-    console.log('=== FEED ENDPOINT ===');
-    console.log('feedRoutes - req.query:', req.query);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('=== FEED ENDPOINT ===');
+      console.log('feedRoutes - req.query:', req.query);
+    }
     
     const userId = (req as any).user.id;
     const limit = parseInt(req.query.limit as string) || 20;
-    const offset = parseInt(req.query.offset as string) || 0;
+    const cursorCreatedAt = (req.query.cursorCreatedAt as string) || undefined;
+    const cursorId = req.query.cursorId ? parseInt(req.query.cursorId as string) : undefined;
     const groupIds = req.query.groupIds ? 
       (req.query.groupIds as string).split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) : 
       [];
+    const category = (req.query.category as string) || undefined;
+    const citySlug = (req.query.city_slug as string) || undefined;
+    const countryCode = (req.query.country_code as string) || undefined;
+    const includeQna = (req.query.includeQna as string) === 'true';
     
-    console.log('feedRoutes - userId:', userId);
-    console.log('feedRoutes - limit:', limit);
-    console.log('feedRoutes - offset:', offset);
-    console.log('feedRoutes - groupIds:', groupIds);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('feedRoutes - userId:', userId);
+      console.log('feedRoutes - limit:', limit);
+      console.log('feedRoutes - cursorCreatedAt:', cursorCreatedAt);
+      console.log('feedRoutes - cursorId:', cursorId);
+      console.log('feedRoutes - groupIds:', groupIds);
+      console.log('feedRoutes - category:', category);
+    }
 
     let feedPosts;
-    if (groupIds.length > 0) {
-      console.log('feedRoutes - Calling getFeedPostsFromGroups');
-      feedPosts = await getFeedPostsFromGroups(userId, groupIds, limit, offset);
+    if (includeQna) {
+      if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - Calling getUnifiedFeedPosts');
+      feedPosts = await getUnifiedFeedPosts(userId, limit, cursorCreatedAt, cursorId, true, citySlug, countryCode);
+    } else if (groupIds.length > 0) {
+      if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - Calling getFeedPostsFromGroups');
+      feedPosts = await getFeedPostsFromGroups(userId, groupIds, limit, cursorCreatedAt, cursorId, category);
     } else {
-      console.log('feedRoutes - Calling getFeedPostsFromRecommendations');
-      feedPosts = await getFeedPostsFromRecommendations(userId, limit, offset);
+      if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - Calling getFeedPostsFromRecommendations');
+      feedPosts = await getFeedPostsFromRecommendations(userId, limit, cursorCreatedAt, cursorId, category, citySlug, countryCode);
     }
     
-    console.log('feedRoutes - feedPosts count:', feedPosts.length);
-    
+    if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - feedPosts count (raw):', feedPosts.length);
+    const hasNext = feedPosts.length > limit;
+    const data = hasNext ? feedPosts.slice(0, limit) : feedPosts;
+    const last = data[data.length - 1];
+    const nextCursor = hasNext && last ? { createdAt: last.created_at, id: last.id || last.recommendation_id } : null;
+
     res.json({
       success: true,
-      data: feedPosts,
+      data,
       pagination: {
         limit,
-        offset,
-        total: feedPosts.length // Note: This should be a separate count query in production
+        hasNext,
+        nextCursor
       }
     });
 
@@ -64,17 +82,22 @@ router.get('/friends', async (req, res) => {
   try {
     const userId = (req as any).user.id;
     const limit = parseInt(req.query.limit as string) || 20;
-    const offset = parseInt(req.query.offset as string) || 0;
+    const cursorCreatedAt = (req.query.cursorCreatedAt as string) || undefined;
+    const cursorId = req.query.cursorId ? parseInt(req.query.cursorId as string) : undefined;
 
-    const feedPosts = await getFeedPostsFromRecommendations(userId, limit, offset);
+    const feedPosts = await getFeedPostsFromRecommendations(userId, limit, cursorCreatedAt, cursorId);
+    const hasNext = feedPosts.length > limit;
+    const data = hasNext ? feedPosts.slice(0, limit) : feedPosts;
+    const last = data[data.length - 1];
+    const nextCursor = hasNext && last ? { createdAt: last.created_at, id: last.recommendation_id } : null;
     
     res.json({
       success: true,
-      data: feedPosts,
+      data,
       pagination: {
         limit,
-        offset,
-        total: feedPosts.length
+        hasNext,
+        nextCursor
       }
     });
 
@@ -97,25 +120,26 @@ router.get('/category/:category', async (req, res) => {
     const userId = (req as any).user.id;
     const category = req.params.category;
     const limit = parseInt(req.query.limit as string) || 20;
-    const offset = parseInt(req.query.offset as string) || 0;
+    const cursorCreatedAt = (req.query.cursorCreatedAt as string) || undefined;
+    const cursorId = req.query.cursorId ? parseInt(req.query.cursorId as string) : undefined;
 
     // For now, we'll get all feed posts and filter by category on the backend
     // In production, this should be done in the database query
-    const feedPosts = await getFeedPostsFromRecommendations(userId, limit * 2, offset); // Get more to filter
-    
-    const filteredPosts = feedPosts.filter(post => 
-      post.content_data?.category === category || 
-      post.place_name?.toLowerCase().includes(category.toLowerCase()) ||
-      post.content_type === category.toLowerCase()
-    ).slice(0, limit);
+    const feedPostsRaw = await getFeedPostsFromRecommendations(userId, limit + 1, cursorCreatedAt, cursorId, category);
+
+    const filteredPosts = feedPostsRaw; // already filtered in SQL now
+    const hasNext = filteredPosts.length > limit;
+    const data = hasNext ? filteredPosts.slice(0, limit) : filteredPosts;
+    const last = data[data.length - 1];
+    const nextCursor = hasNext && last ? { createdAt: last.created_at, id: last.recommendation_id } : null;
     
     res.json({
       success: true,
-      data: filteredPosts,
+      data,
       pagination: {
         limit,
-        offset,
-        total: filteredPosts.length
+        hasNext,
+        nextCursor
       }
     });
 

@@ -172,3 +172,73 @@ export async function createMentionNotifications(
     client.release();
   }
 }
+
+/**
+ * Create notification for question author when their question is answered
+ */
+export async function createQuestionAnswerNotification(
+  questionId: number,
+  answeredByUserId: string,
+  recommendationId: number
+): Promise<void> {
+  try {
+    // Get question details and author
+    const questionResult = await pool.query(
+      `SELECT q.user_id, q.text, u.display_name, u.username 
+       FROM questions q 
+       JOIN users u ON u.id = q.user_id 
+       WHERE q.id = $1`,
+      [questionId]
+    );
+    
+    if (questionResult.rows.length === 0) {
+      console.warn(`Question ${questionId} not found for notification`);
+      return;
+    }
+    
+    const question = questionResult.rows[0];
+    const questionAuthorId = question.user_id;
+    
+    // Don't notify if the question author is answering their own question
+    if (questionAuthorId === answeredByUserId) {
+      console.log(`Skipping notification - user ${answeredByUserId} answered their own question ${questionId}`);
+      return;
+    }
+    
+    // Get the answerer's details
+    const answererResult = await pool.query(
+      `SELECT display_name, username FROM users WHERE id = $1`,
+      [answeredByUserId]
+    );
+    
+    if (answererResult.rows.length === 0) {
+      console.warn(`Answerer ${answeredByUserId} not found for notification`);
+      return;
+    }
+    
+    const answerer = answererResult.rows[0];
+    const answererName = answerer.display_name || answerer.username || 'Someone';
+    
+    // Create notification
+    await pool.query(
+      `INSERT INTO notifications (user_id, type, message, data)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        questionAuthorId,
+        'question_answered',
+        `${answererName} answered your question`,
+        JSON.stringify({
+          question_id: questionId,
+          answered_by_user_id: answeredByUserId,
+          recommendation_id: recommendationId,
+          question_preview: question.text.substring(0, 100) + (question.text.length > 100 ? '...' : '')
+        })
+      ]
+    );
+    
+    console.log(`Created question answer notification for question ${questionId} to user ${questionAuthorId}`);
+  } catch (error) {
+    console.error('Failed to create question answer notification:', error);
+    // Don't fail the main operation if notification fails
+  }
+}

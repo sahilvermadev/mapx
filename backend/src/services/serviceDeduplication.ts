@@ -43,7 +43,19 @@ export async function upsertService(serviceData: ServiceData): Promise<UpsertSer
     throw new Error(`Invalid service data: ${validation.errors.join(', ')}`);
   }
   
-  const cleanedData = validation.cleaned;
+  // Keep validated identifiers and names, but also forward normalized location fields that validator ignores
+  const cleanedData = {
+    ...validation.cleaned,
+    // pass-through extras for location normalization
+    city_name: (serviceData as any).city_name,
+    city_slug: (serviceData as any).city_slug,
+    admin1_name: (serviceData as any).admin1_name,
+    country_code: (serviceData as any).country_code,
+    address: (serviceData as any).address,
+    website: (serviceData as any).website,
+    business_name: (serviceData as any).business_name,
+    service_type: validation.cleaned.service_type || (serviceData as any).service_type,
+  } as any;
   
   // Try to find existing service by phone number first (highest priority)
   let existingService: Service | null = null;
@@ -134,6 +146,24 @@ async function handleExistingService(
     
     if (newData.website && !existingService.website) {
       updates.website = newData.website;
+      hasUpdates = true;
+    }
+
+    // Fill normalized city fields if missing on existing or provided and different
+    if (newData.city_name && (!existingService.city_name || existingService.city_name !== newData.city_name)) {
+      (updates as any).city_name = newData.city_name;
+      hasUpdates = true;
+    }
+    if (newData.city_slug && (!existingService.city_slug || existingService.city_slug !== newData.city_slug)) {
+      (updates as any).city_slug = newData.city_slug;
+      hasUpdates = true;
+    }
+    if (newData.admin1_name && (!existingService.admin1_name || existingService.admin1_name !== newData.admin1_name)) {
+      (updates as any).admin1_name = newData.admin1_name;
+      hasUpdates = true;
+    }
+    if (newData.country_code && (!existingService.country_code || existingService.country_code !== newData.country_code)) {
+      (updates as any).country_code = newData.country_code;
       hasUpdates = true;
     }
     

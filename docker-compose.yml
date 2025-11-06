@@ -3,7 +3,7 @@
 services:
   db:
     image: vdauchy/postgis-vector:latest
-    container_name: mapx_db_container
+    container_name: recce_db_container
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
@@ -20,7 +20,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: mapx_redis_container
+    container_name: recce_redis_container
     ports:
       - "6379:6379"
     volumes:
@@ -31,9 +31,23 @@ services:
       timeout: 3s
       retries: 5
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: recce_pgadmin_container
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@recce.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+
   backend:
     build: ./backend
-    container_name: mapx_backend_container
+    container_name: recce_backend_container
     command: npm run dev # Assuming you have a 'dev' script in backend/package.json
     volumes:
       - ./backend:/app # Mount host code for hot-reloading
@@ -60,3 +74,4 @@ services:
 volumes:
   db_data:
   redis_data:
+  pgadmin_data:

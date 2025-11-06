@@ -1,7 +1,7 @@
-// backend/src/config/passport.ts
 import passport from 'passport';
 import { Strategy as GoogleStrategy, VerifyCallback } from 'passport-google-oauth20';
 import pool from '../db';
+import logger from '../utils/logger';
 
 function configurePassport() {
   const clientID = process.env.GOOGLE_CLIENT_ID as string;
@@ -15,8 +15,8 @@ function configurePassport() {
   }
 
   if (isDevelopmentMode) {
-    console.log('⚠️  Running in development mode with test OAuth credentials');
-    console.log('⚠️  OAuth will be bypassed for development purposes');
+    logger.warn('Running in development mode with test OAuth credentials');
+    logger.warn('OAuth will be bypassed for development purposes');
     
     // Create a mock strategy for development
     passport.use('google', new GoogleStrategy(
@@ -78,22 +78,25 @@ function configurePassport() {
           done: VerifyCallback
         ) => {
           try {
-            console.log('🔐 Google OAuth profile received:', {
+            logger.debug('Google OAuth profile received', {
               id: profile.id,
               displayName: profile.displayName,
-              emails: profile.emails,
-              photos: profile.photos,
-              profilePictureUrl: profile.photos?.[0]?.value
+              email: profile.emails?.[0]?.value,
+              hasPhotos: !!profile.photos?.length,
             });
 
             const existing = await pool.query('SELECT * FROM users WHERE google_id = $1', [profile.id]);
             let user = existing.rows[0];
 
             if (user) {
-              console.log('👤 Existing user found:', user.display_name);
+              logger.debug('Existing user found', { userId: user.id, displayName: user.display_name });
               await pool.query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
             } else {
-              console.log('🆕 Creating new user with profile picture:', profile.photos?.[0]?.value);
+              logger.info('Creating new user', { 
+                googleId: profile.id,
+                email: profile.emails?.[0]?.value,
+                displayName: profile.displayName
+              });
               const created = await pool.query(
                 `INSERT INTO users (google_id, email, display_name, profile_picture_url, username, username_set_at)
                  VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -107,12 +110,15 @@ function configurePassport() {
                 ]
               );
               user = created.rows[0];
-              console.log('✅ New user created:', user.display_name, 'Profile picture:', user.profile_picture_url);
+              logger.info('New user created', { userId: user.id, displayName: user.display_name });
             }
 
             done(null, user);
-          } catch (err) {
-            console.error('❌ Google OAuth error:', err);
+          } catch (err: any) {
+            logger.error('Google OAuth error', { 
+              error: err.message, 
+              stack: err.stack 
+            });
             done(err as Error, undefined);
           }
         }

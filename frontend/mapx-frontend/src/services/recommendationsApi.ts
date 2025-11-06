@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient';
+import { SEARCH_CONFIG } from '../config/searchConfig';
 
 // Types matching your backend API
 export interface SaveRecommendationRequest {
@@ -30,8 +31,10 @@ export interface SaveRecommendationRequest {
 
 export interface SaveRecommendationResponse {
   success: boolean;
-  place_id: number;
-  annotation_id: number;
+  place_id?: number;
+  service_id?: number;
+  recommendation_id: number;
+  annotation_id?: number;
   message: string;
 }
 
@@ -261,7 +264,7 @@ export const recommendationsApi = {
   /**
    * Perform semantic search for places and recommendations
    */
-  async semanticSearch(query: string, limit = 10, threshold = 0.7, groupIds?: number[], content_type?: string): Promise<SearchResponse> {
+  async semanticSearch(query: string, limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, groupIds?: number[], content_type?: string): Promise<SearchResponse> {
     const requestBody: any = {
       query: query.trim(),
       limit,

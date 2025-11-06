@@ -1,0 +1,271 @@
+import React, { useMemo, useState } from 'react';
+import { MapPin, Users, ListFilter, Search, Loader2 } from 'lucide-react';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import CitySearchPopover from './CitySearchPopover';
+
+export interface CitySummary {
+  id: string;
+  name: string;
+  country?: string;
+  tagline?: string;
+  recCount: number;
+  friendCount: number;
+  friendFaces: Array<{ id: string; name: string; photoUrl?: string }>; 
+  categories: Array<{ key: string; label: string; count?: number }>;
+}
+
+type Props = {
+  cities: CitySummary[];
+  selectedCityId?: string;
+  selectedCityName?: string;
+  selectedCategoryKeys: string[];
+  onSelectCity: (city?: { id?: string; name?: string }) => void;
+  onToggleCategory: (key: string) => void;
+  className?: string;
+  globalSummary?: CitySummary; // Used when no city is selected (Worldwide)
+  overrideCategories?: Array<{ key: string; label: string; count?: number }>; // Derived categories for current scope
+  variant?: 'feed' | 'profile'; // Variant to differentiate feed vs profile usage
+  searchValue?: string; // Search query value (for profile variant)
+  onSearchChange?: (query: string) => void; // Search query handler (for profile variant)
+  searchPlaceholder?: string; // Placeholder for search input
+  isSearching?: boolean; // Loading state for search (for profile variant)
+};
+
+const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+const CityFilterBar: React.FC<Props> = ({
+  cities,
+  selectedCityId,
+  selectedCityName,
+  selectedCategoryKeys,
+  onSelectCity,
+  onToggleCategory,
+  className = '',
+  globalSummary,
+  overrideCategories,
+  variant = 'feed', // Default to 'feed' for backward compatibility
+  searchValue,
+  onSearchChange,
+  searchPlaceholder = 'Search recommendations...',
+  isSearching = false,
+}) => {
+  const city = cities.find(c => c.id === selectedCityId);
+  const triggerLabel = selectedCityName || city?.name || 'Worldwide';
+  const summary = city || globalSummary;
+  
+  // Memoize categories to prevent unnecessary re-renders when summary object reference changes
+  // Only depend on the actual categories array, not the entire summary object
+  const summaryCategories = summary?.categories ?? [];
+  const categories = useMemo(() => (overrideCategories ?? summaryCategories), [overrideCategories, summaryCategories]);
+  const [query, setQuery] = useState('');
+  
+  // Only show selected categories as chips
+  // Use a stable reference to prevent re-renders when counts update
+  const selectedCategories = useMemo(() => {
+    return categories.filter(cat => selectedCategoryKeys.includes(cat.key));
+  }, [categories, selectedCategoryKeys]);
+  
+  // Create a map for O(1) category lookup instead of O(n) find operations
+  const categoriesMap = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; count?: number }>();
+    categories.forEach(cat => map.set(cat.key, cat));
+    return map;
+  }, [categories]);
+
+  // Memoize filtered categories for dropdown search
+  const filteredCategories = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return categories;
+    return categories.filter(c => c.label.toLowerCase().includes(normalizedQuery));
+  }, [categories, query]);
+
+  // Variant-specific styling (both variants currently use same styles)
+  const containerStyles = 'w-full bg-background border-2 border-black/20 shadow-[2px_2px_0_0_rgba(0,0,0,0.12)] rounded-md';
+
+  // Variant-specific tagline
+  const defaultTagline = variant === 'profile'
+    ? 'Explore your recommendations'
+    : 'See where your friends love to go';
+
+  // Show friend count/faces only for feed variant
+  const showFriendStats = variant === 'feed';
+
+  // Memoize available cities for CitySearchPopover to prevent unnecessary re-renders
+  const availableCities = useMemo(() => 
+    (cities || []).map(c => ({ id: c.id, name: c.name, country: c.country, recCount: c.recCount })),
+    [cities]
+  );
+
+  return (
+    <div className={`${containerStyles} ${className}`}>
+      <div className={`w-full px-2 sm:px-3 md:px-6 h-[56px] lg:h-[64px] flex items-center ${variant === 'profile' ? 'justify-between' : 'gap-2 sm:gap-4'}`}>
+        {/* Left: City selector + tagline */}
+        <div className={variant === 'profile' ? 'flex items-center gap-3 shrink-0' : 'flex-1 min-w-0 flex items-center gap-3'}>
+          <CitySearchPopover
+            triggerLabel={triggerLabel}
+            onSelect={(c) => onSelectCity({ id: c.id, name: c.name })}
+            availableCities={availableCities}
+          />
+          {variant !== 'profile' && (
+            <div className="hidden md:flex flex-col min-w-0">
+              <div className="text-sm text-muted-foreground truncate">
+                {city?.tagline || defaultTagline}
+              </div>
+              {city?.country && (
+                <div className="text-xs text-muted-foreground/70">{city.country}</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Middle: Stats + faces (feed variant) or Search bar (profile variant) */}
+        {showFriendStats && (
+          <div className="hidden lg:flex items-center gap-5 px-4 border-l border-black/15">
+            <div className="flex items-center gap-2 text-sm text-foreground/80">
+              <MapPin className="h-4 w-4 opacity-70" />
+              <span>{summary?.recCount ?? 0}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-foreground/80">
+              <Users className="h-4 w-4 opacity-70" />
+              <span>{summary?.friendCount ?? 0}</span>
+            </div>
+            <div className="flex -space-x-2">
+              {(summary?.friendFaces ?? []).slice(0, 4).map(f => (
+                <Avatar key={f.id} className="h-7 w-7 ring-2 ring-white">
+                  <AvatarImage src={f.photoUrl} alt={f.name} />
+                  <AvatarFallback>{getInitials(f.name)}</AvatarFallback>
+                </Avatar>
+              ))}
+              {summary && (summary.friendFaces?.length || 0) > 4 && (
+                <div className="h-7 w-7 rounded-full bg-white/80 text-xs flex items-center justify-center ring-2 ring-white">
+                  +{(summary.friendFaces?.length || 0) - 4}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Search bar for profile variant */}
+        {variant === 'profile' && onSearchChange && (
+          <div className="flex-1 min-w-0 max-w-md hidden md:flex items-center justify-center px-4">
+            <div className="relative w-full max-w-full">
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 z-10 transition-opacity ${isSearching ? 'opacity-0' : 'text-muted-foreground'}`} />
+              {isSearching && (
+                <Loader2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground z-10 animate-spin" />
+              )}
+              <Input
+                type="text"
+                placeholder={searchPlaceholder}
+                value={searchValue || ''}
+                onChange={(e) => onSearchChange(e.target.value)}
+                className="pl-10 h-9 w-full rounded-full border-2 border-black/20 bg-white shadow-[1px_1px_0_0_rgba(0,0,0,0.08)] focus:shadow-[2px_2px_0_0_rgba(0,0,0,0.12)] focus:border-black/30 transition-all font-medium min-w-0"
+                disabled={isSearching}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Right: Selected category chips + Categories menu */}
+        <div className={variant === 'profile' ? 'flex items-center gap-2 min-w-0' : 'flex items-center gap-2 justify-end flex-1 min-w-0'}>
+          {/* Selected category chips - flexible width container on mobile */}
+          <div className={`flex items-center gap-2 overflow-x-auto overflow-y-hidden ${variant === 'profile' ? 'flex-1 min-w-0 max-w-[calc(100%-3rem)] sm:max-w-[calc(100%-5rem)] md:max-w-none md:w-[200px] lg:w-[250px]' : 'w-[200px] sm:w-[250px] md:w-[300px]'} [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]`}>
+            <div className="flex items-center gap-2 flex-nowrap">
+              {selectedCategories.map(cat => {
+                // Use map for O(1) lookup instead of O(n) find
+                const categoryData = categoriesMap.get(cat.key);
+                const count = categoryData?.count ?? cat.count;
+                return (
+                  <Button
+                    key={cat.key}
+                    size="sm"
+                    variant="default"
+                    className="h-8 rounded-full px-3 sm:px-4 text-xs sm:text-sm border-2 bg-black text-white border-black shadow-[2px_2px_0_0_rgba(0,0,0,0.15)] shrink-0 font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                    onClick={() => onToggleCategory(cat.key)}
+                  >
+                    <span>{cat.label}</span>
+                    {typeof count === 'number' && (
+                      <span className="ml-2 px-2 py-0.5 text-[10px] sm:text-xs rounded-full bg-white/20 transition-opacity">
+                        {count}
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Categories dropdown with search showing ALL categories */}
+          {categories.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  aria-label="All categories"
+                  size="sm"
+                  variant="secondary"
+                  className="h-8 w-8 sm:w-auto rounded-full bg-white border-2 border-black/20 shadow-[1px_1px_0_0_rgba(0,0,0,0.08)] px-0 sm:px-2 text-xs sm:text-sm flex items-center justify-center font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none flex-shrink-0"
+                >
+                  <ListFilter className="h-4 w-4" />
+                  {categories.length > 0 && (
+                    <span className="hidden sm:inline ml-2 px-2 py-0.5 text-xs rounded-full bg-black/5">{categories.length}</span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[90vw] max-w-[360px] p-2">
+                <DropdownMenuLabel>All Categories</DropdownMenuLabel>
+                <div className="p-1">
+                  <Input
+                    placeholder="Search categories..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </div>
+                <DropdownMenuSeparator />
+                <div className="max-h-[60vh] overflow-y-auto pr-1" role="listbox" aria-label="All categories">
+                  {filteredCategories.map(cat => {
+                      const active = selectedCategoryKeys.includes(cat.key);
+                      return (
+                        <DropdownMenuItem key={cat.key} onSelect={() => onToggleCategory(cat.key)} className="cursor-pointer">
+                          <div className={`inline-flex items-center gap-2 ${active ? 'font-medium' : ''}`}>
+                            <span className={`inline-block h-2 w-2 rounded-full ${active ? 'bg-black' : 'bg-gray-300'}`} />
+                            <span>{cat.label}</span>
+                            {typeof cat.count === 'number' && (
+                              <Badge variant={active ? 'secondary' : 'outline'} className="ml-1 h-5 px-1 text-xs">
+                                {cat.count}
+                              </Badge>
+                            )}
+                          </div>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  {filteredCategories.length === 0 && (
+                    <div className="py-6 text-center text-sm text-muted-foreground">No categories found.</div>
+                  )}
+                </div>
+                {selectedCategoryKeys.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <div className="px-2 py-1">
+                      <Button variant="ghost" size="sm" className="w-full" onClick={() => {
+                        selectedCategoryKeys.forEach(k => onToggleCategory(k));
+                      }}>
+                        Clear filters
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default CityFilterBar;
+
+

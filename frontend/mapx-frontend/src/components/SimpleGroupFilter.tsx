@@ -55,7 +55,7 @@ const SimpleGroupFilter: React.FC<SimpleGroupFilterProps> = ({
 
   return (
     <div className={`flex flex-wrap gap-3 ${className}`}>
-      {/* Group buttons */}
+      {/* Lens buttons */}
       {groups.map((group) => {
         const isSelected = selectedGroupIds.includes(group.id);
         return (

@@ -1,11 +1,11 @@
-import { generateAnnotationEmbedding, generateRecommendationEmbedding } from '../utils/embeddings';
+import { generateAnnotationEmbedding, generateRecommendationEmbedding, generateSearchEmbedding } from '../utils/embeddings';
 import { getPlaceById, getUserById } from '../db/places';
 import { getServiceById } from '../db/services';
 import pool from '../db';
 
 export interface EmbeddingTask {
   id: string;
-  type: 'annotation' | 'recommendation';
+  type: 'annotation' | 'recommendation' | 'question';
   recordId: number;
   data: any;
   retryCount: number;
@@ -40,7 +40,7 @@ class EmbeddingQueue {
    * Add a task to the embedding queue
    */
   async enqueue(
-    type: 'annotation' | 'recommendation',
+    type: 'annotation' | 'recommendation' | 'question',
     recordId: number,
     data: any,
     priority: 'high' | 'normal' | 'low' = 'normal'
@@ -140,25 +140,31 @@ class EmbeddingQueue {
         address: service?.address
       };
 
-      // Generate embedding (different strategy for recommendations vs annotations)
-      const embedding = task.type === 'recommendation'
-        ? await generateRecommendationEmbedding({
-            content_type: enhancedData.content_type,
-            title: enhancedData.title,
-            description: enhancedData.description,
-            labels: enhancedData.labels,
-            rating: enhancedData.rating,
-            place_name: enhancedData.place_name,
-            place_address: enhancedData.place_address,
-            service_name: enhancedData.service_name,
-            service_type: enhancedData.service_type,
-            business_name: enhancedData.business_name,
-            address: enhancedData.address,
-            user_name: enhancedData.user_name,
-            content_data: enhancedData.content_data,
-            metadata: enhancedData.metadata,
-          })
-        : await generateAnnotationEmbedding(enhancedData);
+      // Generate embedding based on type
+      let embedding: number[];
+      if (task.type === 'recommendation') {
+        embedding = await generateRecommendationEmbedding({
+          content_type: enhancedData.content_type,
+          title: enhancedData.title,
+          description: enhancedData.description,
+          labels: enhancedData.labels,
+          rating: enhancedData.rating,
+          place_name: enhancedData.place_name,
+          place_address: enhancedData.place_address,
+          service_name: enhancedData.service_name,
+          service_type: enhancedData.service_type,
+          business_name: enhancedData.business_name,
+          address: enhancedData.address,
+          user_name: enhancedData.user_name,
+          content_data: enhancedData.content_data,
+          metadata: enhancedData.metadata,
+        });
+      } else if (task.type === 'question') {
+        const text = (task.data && task.data.text) || enhancedData.text || '';
+        embedding = await generateSearchEmbedding(text);
+      } else {
+        embedding = await generateAnnotationEmbedding(enhancedData);
+      }
 
       // Update the record in database
       await this.updateRecordWithEmbedding(task.type, task.recordId, embedding);
@@ -190,13 +196,16 @@ class EmbeddingQueue {
    * Get full record data from database
    */
   private async getFullRecordData(
-    type: 'annotation' | 'recommendation',
+    type: 'annotation' | 'recommendation' | 'question',
     recordId: number
   ): Promise<any> {
     const client = await pool.connect();
     
     try {
-      const table = type === 'annotation' ? 'annotations' : 'recommendations';
+      const table =
+        type === 'annotation' ? 'annotations'
+        : type === 'recommendation' ? 'recommendations'
+        : 'questions';
       const query = `SELECT * FROM ${table} WHERE id = $1`;
       
       const result = await client.query(query, [recordId]);
@@ -219,14 +228,17 @@ class EmbeddingQueue {
    * Update record with generated embedding
    */
   private async updateRecordWithEmbedding(
-    type: 'annotation' | 'recommendation',
+    type: 'annotation' | 'recommendation' | 'question',
     recordId: number,
     embedding: number[]
   ): Promise<void> {
     const client = await pool.connect();
     
     try {
-      const table = type === 'annotation' ? 'annotations' : 'recommendations';
+      const table =
+        type === 'annotation' ? 'annotations'
+        : type === 'recommendation' ? 'recommendations'
+        : 'questions';
       const query = `
         UPDATE ${table} 
         SET embedding = $1, updated_at = CURRENT_TIMESTAMP 

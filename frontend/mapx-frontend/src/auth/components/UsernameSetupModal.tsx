@@ -33,7 +33,11 @@ const UsernameSetupModal: React.FC<UsernameSetupModalProps> = ({ onClose, onComp
     const timeoutId = setTimeout(async () => {
       setIsChecking(true);
       try {
-        const response = await fetch(`http://localhost:5000/api/username/check/${encodeURIComponent(username)}`);
+        const response = await fetch(`http://localhost:5000/api/username/check/${encodeURIComponent(username)}`, {
+          headers: {
+            'Authorization': `Bearer ${apiClient.getToken()}`
+          }
+        });
         const result = await response.json();
         setCheckResult(result);
       } catch (err) {

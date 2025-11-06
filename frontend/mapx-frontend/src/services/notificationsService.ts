@@ -17,6 +17,11 @@ export interface NotificationData {
   content_id?: number;
   content_type?: 'post' | 'comment';
   content_preview?: string;
+  // Question answer notification fields
+  question_id?: number;
+  answered_by_user_id?: string;
+  recommendation_id?: number;
+  question_preview?: string;
 }
 
 export interface PaginationInfo {
@@ -93,6 +98,8 @@ export const notificationHelpers = {
         return 'Comment';
       case 'follow':
         return 'Follow';
+      case 'question_answered':
+        return 'Question Answered';
       default:
         return 'Notification';
     }
@@ -111,6 +118,8 @@ export const notificationHelpers = {
         return '💬';
       case 'follow':
         return '👤';
+      case 'question_answered':
+        return '❓';
       default:
         return '🔔';
     }

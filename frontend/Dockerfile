@@ -1,28 +1,40 @@
-# Use an official Node.js runtime for building the React app
+# Production Dockerfile for Frontend
+
+# Build stage
 FROM node:20-alpine as build
 
 WORKDIR /app
 
-COPY package*.json ./
+# Copy package files from mapx-frontend subdirectory
+COPY mapx-frontend/package*.json ./
+RUN npm ci
 
-RUN npm install
+# Copy source code from mapx-frontend
+COPY mapx-frontend/ .
 
-COPY . .
+# Build-time API base URL for the frontend. Default to "/api" to match nginx proxy.
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-# Build the React app
+# Build the React app (production mode)
 RUN npm run build
 
-# Use a lightweight web server (like Nginx) to serve the static built files
+# Production stage
 FROM nginx:alpine
 
-# Copy custom nginx config (if needed, otherwise default is fine for MVP)
-# COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy the built React app to Nginx's public directory
-COPY --from=build /app/build /usr/share/nginx/html
+# Note: Vite outputs to 'dist', not 'build'
+COPY --from=build /app/dist /usr/share/nginx/html
 
 # Expose the default Nginx port
 EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost/health || exit 1
 
 # Command to start Nginx
 CMD ["nginx", "-g", "daemon off;"]

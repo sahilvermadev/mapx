@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '../../components/ui/button';
 import { X } from 'lucide-react';
 
 interface LoginModalProps {
   onClose: () => void;
+  next?: string;
 }
 
-const LoginModal: React.FC<LoginModalProps> = ({ onClose }) => {
+const LoginModal: React.FC<LoginModalProps> = ({ onClose, next }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   // Handle ESC key to close modal
@@ -27,7 +29,9 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose }) => {
     try {
       // Simulate a brief loading state for better UX
       await new Promise(resolve => setTimeout(resolve, 500));
-      window.location.href = 'http://localhost:5000/auth/google';
+      const backendBase = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5000';
+      const nextParam = next ? `?next=${encodeURIComponent(next)}` : '';
+      window.location.href = `${backendBase}/auth/google${nextParam}`;
     } catch (error) {
       console.error('Login error:', error);
       setIsLoading(false);
@@ -35,10 +39,10 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose }) => {
   };
 
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-5"
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-5"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -86,7 +90,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose }) => {
           </div>
         </motion.div>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

@@ -1,284 +1,120 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { Check } from 'lucide-react';
 import { useAuth } from '@/auth';
-import { insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
-import { aiClient } from '@/services/aiClient';
-import { buildSaveRecommendationDto } from '@/mappers/formToSaveDto';
-import { recommendationsApi } from '@/services/recommendationsApi';
-import { useMentions } from '@/hooks/useMentions';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
+import { getReadableTextColor } from '@/utils/color';
+import { insertPlainMention } from '@/utils/mentions';
+import { useRecommendationComposer } from '@/hooks/useRecommendationComposer';
+import { useMentionHandler } from '@/hooks/useMentionHandler';
+import WritingStep from '@/components/composer/steps/WritingStep';
 import AnalyzingStep from '@/components/composer/steps/AnalyzingStep';
 import CompletingStep from '@/components/composer/steps/CompletingStep';
 import PreviewStep from '@/components/composer/steps/PreviewStep';
-
-// Computes caret pixel coordinates for accurate @mention picker anchoring
-const getCaretGlobalPosition = (textarea: HTMLTextAreaElement, position: number) => {
-  const style = window.getComputedStyle(textarea);
-  const div = document.createElement('div');
-  const span = document.createElement('span');
-  const properties = [
-    'borderLeftWidth','borderTopWidth','borderRightWidth','borderBottomWidth',
-    'fontFamily','fontSize','fontWeight','fontStyle','letterSpacing','textTransform','textAlign','textIndent',
-    'whiteSpace','wordBreak','wordWrap','overflowWrap','paddingLeft','paddingTop','paddingRight','paddingBottom',
-    'lineHeight','width'
-  ];
-  div.style.position = 'absolute';
-  div.style.visibility = 'hidden';
-  div.style.whiteSpace = 'pre-wrap';
-  div.style.wordWrap = 'break-word';
-  properties.forEach(prop => { (div.style as any)[prop] = (style as any)[prop]; });
-  div.style.width = style.width;
-  const value = textarea.value;
-  const textBefore = value.substring(0, position);
-  const textAfter = value.substring(position) || '.';
-  div.textContent = textBefore;
-  span.textContent = textAfter;
-  div.appendChild(span);
-  document.body.appendChild(div);
-  const taRect = textarea.getBoundingClientRect();
-  const divRect = div.getBoundingClientRect();
-  const spanRect = span.getBoundingClientRect();
-  const left = Math.min(taRect.left + (spanRect.left - divRect.left), taRect.right - 4);
-  const top = taRect.top + (spanRect.top - divRect.top);
-  const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-  document.body.removeChild(div);
-  return { left: left + window.scrollX, top: top + window.scrollY + lineHeight, lineHeight };
-};
+import MentionMenu from '@/components/MentionMenu';
 
 interface RecommendationComposerProps {
   isOpen: boolean;
   onClose: () => void;
   onPostCreated: () => void;
   currentUserId: string;
-}
-
-interface ExtractedData {
-  name?: string;
-  description?: string;
-  location?: string;
-  category?: string;
-  rating?: number;
-  lat?: number;
-  lng?: number;
-  contact_info?: {
-    phone?: string;
-    email?: string;
-  };
-  specialities?: string[];
-  best_times?: string;
-  tips?: string;
-  type?: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
-  // Location picker fields
-  location_name?: string;
-  location_address?: string;
-  location_lat?: number;
-  location_lng?: number;
-  location_google_place_id?: string;
-  google_place_id?: string;
-  [key: string]: any; // Allow additional dynamic fields
-}
-
-interface MissingField {
-  field: string;
-  question: string;
-  required: boolean;
-  needsLocationPicker?: boolean;
+  questionContext?: string;
+  questionId?: number;
 }
 
 const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   isOpen,
-  onClose,
   onPostCreated,
-  currentUserId
+  currentUserId,
+  questionContext,
+  questionId
 }) => {
-  const [text, setText] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [extractedData, setExtractedData] = useState<ExtractedData>({});
-  const [missingFields, setMissingFields] = useState<MissingField[]>([]);
-  const [currentStep, setCurrentStep] = useState<'writing' | 'analyzing' | 'completing' | 'preview' | 'complete'>('writing');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
-  const [fieldResponses, setFieldResponses] = useState<Record<string, any>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [labels, setLabels] = useState<string[]>([]);
-  // Mentions state
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]);
-  const [showMentionMenu, setShowMentionMenu] = useState(false);
-  const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number } | null>(null);
-  // Track selection if needed for future use (currently unused)
-  // const [cursorPos, setCursorPos] = useState<number>(0);
-  // Mentions mapping is handled via useMentions hook
-  const mentions = useMentions();
-  
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const previewTextareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   
   const { user: currentUser } = useAuth();
-
-  // Auto-focus textarea when opened
-  useEffect(() => {
-    if (isOpen && textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  }, [isOpen]);
+  
+  // Celebration animation state
+  const [showCelebration, setShowCelebration] = useState(false);
+  
+  // Theme support
+  const { theme } = useTheme();
+  const selectedTheme = THEMES[theme];
+  const accentColor = selectedTheme.accentColor;
+  const textOnAccent = getReadableTextColor(accentColor);
+  
+  // Use the custom hooks for state management
+  const composer = useRecommendationComposer(currentUserId, questionId);
+  const mentionHandler = useMentionHandler(currentUserId);
 
   // Auto-focus input when completing step is shown
   useEffect(() => {
-    if (currentStep === 'completing' && inputRef.current) {
+    if (composer.currentStep === 'completing' && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [currentStep]);
+  }, [composer.currentStep]);
 
-  // Reset state when opening
+  // Initialize component when opened
   useEffect(() => {
-    if (isOpen) {
-      setText('');
-      setExtractedData({});
-      setMissingFields([]);
-      setCurrentStep('writing');
-      setCurrentFieldIndex(0);
-      setFieldResponses({});
-      setError(null);
-      setMentionQuery(null);
-      setMentionSuggestions([]);
-      setShowMentionMenu(false);
-      setMentionPosition(null);
+    if (!isOpen) return;
+    
+    console.log('RecommendationComposer opened, questionContext:', questionContext, 'questionId:', questionId);
+    
+    // Reset all state including celebration
+    composer.reset();
+    setShowCelebration(false);
+    
+    // Check for question context from props or location.state
+    const contextToUse = questionContext || composer.location.state?.questionContext;
+    composer.initializeWithQuestion(contextToUse);
+  }, [isOpen, questionContext, questionId]);
+
+  // Auto-focus textarea when opened (but only for writing step)
+  useEffect(() => {
+    if (isOpen && composer.currentStep === 'writing' && textareaRef.current) {
+      textareaRef.current.focus();
     }
-  }, [isOpen]);
+  }, [isOpen, composer.currentStep]);
 
   // Fetch mention suggestions
   useEffect(() => {
     let active = true;
     const run = async () => {
-      if (!mentionQuery || mentionQuery.length < 1) {
-        if (active) setMentionSuggestions([]);
+      if (!mentionHandler.mentionQuery || mentionHandler.mentionQuery.length < 1) {
+        if (active) mentionHandler.fetchSuggestions('');
         return;
       }
-      const list = await mentions.suggest(mentionQuery, currentUserId);
-      if (active) setMentionSuggestions(list);
+      await mentionHandler.fetchSuggestions(mentionHandler.mentionQuery);
     };
     run();
     return () => { active = false; };
-  }, [mentionQuery, currentUserId]);
+  }, [mentionHandler.mentionQuery]);
 
-  // Helper function to ensure description starts with "I want to recommend a "
-  const ensureRecommendationPrefix = (description: string): string => {
-    const prefix = "I want to recommend a ";
-    if (!description.toLowerCase().startsWith(prefix.toLowerCase())) {
-      return prefix + description;
-    }
-    return description;
+  // Handle text change with mention detection
+  const handleTextChange = (value: string) => {
+    mentionHandler.handleTextChange(value, textareaRef, composer.setText);
+    if (composer.error) composer.setError(null);
   };
 
-  const handleAnalyze = async () => {
-    if (!text.trim()) {
-      setError('Please enter some text before continuing.');
-      return;
-    }
-
-    if (text.trim().length < 5) {
-      setError('Please enter at least 5 characters for your recommendation.');
-      return;
-    }
-
-    setError(null);
-    setIsAnalyzing(true);
-    setCurrentStep('analyzing');
-
-    try {
-      // Ensure the text sent to AI includes the recommendation prefix
-      const processedText = ensureRecommendationPrefix(text);
-      
-      // Call the AI analyze via client
-      const analysis = await aiClient.analyze(processedText);
-        
-        // Check if the text is gibberish or invalid
-        if (analysis.isGibberish || !analysis.isValid) {
-          setError('Please provide a meaningful recommendation. The text you entered doesn\'t seem to contain useful information.');
-          setCurrentStep('writing');
-          return;
-        }
-
-        // Ensure description starts with "I want to recommend a "
-        const processedExtractedData = {
-          ...analysis.extractedData,
-          // Map AI contentType -> local "type" field used by submit flow
-          type: analysis.contentType,
-          // Keep a canonical contentType field as well for downstream consumers (e.g., formatter)
-          contentType: analysis.contentType,
-          description: ensureRecommendationPrefix(analysis.extractedData.description || processedText)
-        };
-
-        // Set processed extracted data and missing fields from AI analysis
-        setExtractedData(processedExtractedData);
-        setMissingFields(analysis.missingFields);
-        
-        // If no missing fields, go directly to preview
-        if (analysis.missingFields.length === 0) {
-          setCurrentStep('preview');
-        } else {
-          setCurrentStep('completing');
-      }
-    } catch (error) {
-      console.error('Error analyzing text:', error);
-      setError(error instanceof Error ? error.message : 'Sorry, there was an error analyzing your recommendation. Please try again.');
-      setCurrentStep('writing');
-    } finally {
-      setIsAnalyzing(false);
-    }
+  // Handle text selection for mention positioning
+  const handleTextSelection = (newPos: number) => {
+    mentionHandler.handleTextSelection(textareaRef, newPos);
   };
 
+  // Handle mention selection
+  const handleMentionSelect = (user: any) => {
+    mentionHandler.handleMentionSelect(user, composer.text, textareaRef, composer.setText);
+  };
 
+  // Handle field response
   const handleFieldResponse = async (field: string, response: any) => {
-    if (typeof response === 'string') {
-      if (!response.trim()) return;
-    } else if (response == null) {
-      return;
-    }
-
-    try {
-      // If contact_info is an object { phone, email }, bypass AI validation and save directly
-      if (field === 'contact_info' && typeof response === 'object') {
-        const cleaned = {
-          phone: response.phone ? String(response.phone).replace(/\D/g, '') : undefined,
-          email: response.email ? String(response.email).trim().toLowerCase() : undefined
-        };
-        setFieldResponses(prev => ({ ...prev, [field]: cleaned }));
-        setExtractedData(prev => ({ ...prev, [field]: cleaned }));
-        moveToNextField();
-        return;
-      }
-
-      // Validate the response with AI (string path)
-      const validation = await aiClient.validate(
-        missingFields[currentFieldIndex]?.question || '',
-        String(response),
-        field
-      );
-      
-      if (!validation.isValid) {
-        alert(validation.feedback || 'Please provide a more specific answer.');
-        return;
-      }
-
-      // Use the extracted value from AI validation
-      const extractedValue = validation.extractedValue || String(response);
-      setFieldResponses(prev => ({ ...prev, [field]: extractedValue }));
-      setExtractedData(prev => ({ ...prev, [field]: extractedValue }));
-      moveToNextField();
-    } catch (error) {
-      console.error('Error validating response:', error);
-      // Fallback: accept input as-is
-      setFieldResponses(prev => ({ ...prev, [field]: response }));
-      setExtractedData(prev => ({ ...prev, [field]: response }));
-      
-      moveToNextField();
-    }
+    await composer.handleFieldResponse(field, response);
   };
 
+  // Handle location selection
   const handleLocationSelected = (location: {
     name: string;
     address: string;
@@ -286,279 +122,111 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     lng: number;
     google_place_id?: string;
   }) => {
-    const field = missingFields[currentFieldIndex]?.field;
-    if (!field) return;
-    
-    const locationText = `${location.name}, ${location.address}`;
-    
-    // Store the location data in extracted data
-    setExtractedData(prev => ({
-      ...prev,
-      [field]: locationText,
-      [`${field}_lat`]: location.lat,
-      [`${field}_lng`]: location.lng,
-      [`${field}_google_place_id`]: location.google_place_id,
-      [`${field}_name`]: location.name,
-      [`${field}_address`]: location.address
-    }));
-
-    // Store the display text in field responses
-    setFieldResponses(prev => ({ ...prev, [field]: locationText }));
-    
-    // Move to next field
-    moveToNextField();
+    composer.handleLocationSelected(location);
   };
 
+  // Handle skip field
   const handleSkipField = () => {
-    // Mark the field as skipped (don't add to fieldResponses)
-    // Just move to the next field
-    moveToNextField();
+    composer.handleSkipField();
   };
 
-  const moveToNextField = () => {
-    if (currentFieldIndex < missingFields.length - 1) {
-      setCurrentFieldIndex(prev => prev + 1);
-    } else {
-      // All fields completed - go to preview
-      setCurrentStep('preview');
-    }
-  };
-
-  const handleApprovePreview = () => {
-    setCurrentStep('complete');
-    handleSubmit();
-  };
-
-  const handleEditPreview = () => {
-    setIsEditingDescription(true);
-    const currentText = formattedPreview || formatRecommendationTextSync(extractedData, fieldResponses);
-    setEditedPreview(formatTextForEditing(currentText));
-  };
-
-  const handleSaveEdit = () => {
-    setFormattedPreview(editedPreview);
-    setIsEditingDescription(false);
-  };
-
-  const handleCancelEdit = () => {
-    setIsEditingDescription(false);
-    setEditedPreview('');
-  };
-
-  // Deprecated: star rating inline UI moved into PreviewStep
-
-  const handleSubmit = async () => {
-    setIsSubmitting(true);
-    
-    try {
-      // Use the edited preview if available, otherwise create formatted recommendation text
-      // Before formatting/saving, convert any @username occurrences to stable @[id:name] tokens
-      const textWithTokens = convertUsernamesToTokens(text, mentions.getMapping());
-      const baseFormatted = editedPreview || formattedPreview || await formatRecommendationText(extractedData, fieldResponses);
-      const formattedRecommendation = convertUsernamesToTokens(baseFormatted, mentions.getMapping());
+  // Handle approve preview
+  const handleApprovePreview = async () => {
+    const success = await composer.handleSubmit(mentionHandler.getMapping);
+    if (success) {
+      setShowCelebration(true);
+      toast.success('Recommendation posted!');
       
-      // Combine original text with field responses
-      const finalData = {
-        ...extractedData,
-        ...fieldResponses,
-        originalText: textWithTokens,
-        formattedText: formattedRecommendation,
-        // Ensure we have the content type from the AI analysis
-        type: extractedData.type || 'place',
-        contentType: (extractedData as any).contentType || extractedData.type || 'place'
-      };
-      
-      // Map extracted data to the format expected by the backend (new recommendations API)
-      const contentType = (finalData.type as ('place' | 'service' | 'tip' | 'contact' | 'unclear')) || 'place';
-
-      // contentData now constructed in DTO mapper
-
-      const requestBody = buildSaveRecommendationDto({
-        contentType,
-        extractedData: finalData,
-        fieldResponses,
-        formattedRecommendation,
-        rating,
-        currentUserId,
-        labels
-      });
-      
-      const result = await recommendationsApi.saveRecommendation(requestBody as any);
-      
-      if (result && (result as any).recommendation_id) {
+      // Navigate directly after celebration animation completes
+      // Don't close celebration - let navigation unmount the component
+      // This prevents the flash back to preview screen
+      setTimeout(() => {
         onPostCreated();
-        onClose();
-      } else {
-        throw new Error('Failed to save recommendation');
-      }
-    } catch (error) {
-      alert('Sorry, there was an error saving your recommendation. Please try again.');
-    } finally {
-      setIsSubmitting(false);
+      }, 1800); // Slightly shorter than celebration duration to ensure smooth transition
     }
   };
 
+  // Handle edit preview
+  const handleEditPreview = () => {
+    composer.setIsEditingDescription(true);
+    const currentText = composer.formattedPreview || composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses);
+    composer.setEditedPreview(currentText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim());
+  };
+
+  // Handle save edit
+  const handleSaveEdit = () => {
+    composer.setFormattedPreview(composer.editedPreview);
+    composer.setIsEditingDescription(false);
+  };
+
+  // Handle cancel edit
+  const handleCancelEdit = () => {
+    composer.setIsEditingDescription(false);
+    composer.setEditedPreview('');
+  };
+
+  // Generate/refresh LLM-formatted preview whenever entering preview, or when data has changed
+  useEffect(() => {
+    if (composer.currentStep !== 'preview' || composer.isFormattingPreview) return;
+
+    composer.setIsFormattingPreview(true);
+
+    const generatePreview = async () => {
+      try {
+        const llmFormatted = await composer.formatRecommendationText(composer.extractedData, composer.fieldResponses);
+        if (llmFormatted) {
+          composer.setFormattedPreview(llmFormatted);
+        }
+      } catch (error) {
+        console.error('Error generating LLM preview:', error);
+        composer.setFormattedPreview(composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses));
+      } finally {
+        composer.setIsFormattingPreview(false);
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      if (composer.isFormattingPreview) {
+        composer.setFormattedPreview(composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses));
+        composer.setIsFormattingPreview(false);
+      }
+    }, 25000);
+
+    generatePreview();
+    return () => clearTimeout(timeoutId);
+  }, [composer.currentStep, composer.extractedData, composer.fieldResponses]);
+
+  // Update labels when consolidated data changes
+  useEffect(() => {
+    if (composer.currentStep === 'preview') {
+      const consolidated = { ...composer.extractedData, ...composer.fieldResponses };
+      const newLabels = Array.isArray(consolidated.specialities)
+        ? consolidated.specialities
+        : consolidated.specialities
+        ? [consolidated.specialities]
+        : [];
+      composer.setLabels(newLabels);
+    }
+  }, [composer.currentStep]);
 
   const renderWritingStep = () => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="text-left space-y-8 py-8"
-    >
-      <div className="max-w-3xl mx-auto space-y-8">
-        <h1 className="text-4xl font-light text-black leading-tight">
-          What would you like to recommend?
-        </h1>
-
-        {error && (
-          <div className="text-center">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-red-700">
-              <span className="text-sm font-medium">{error}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setError(null)}
-                className="h-6 w-6 p-0 text-red-700 hover:bg-red-100"
-              >
-                ×
-              </Button>
-            </div>
-          </div>
-        )}
-
-        <div className="relative">
-        <Textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => {
-            const v = e.target.value;
-            setText(v);
-            // detect @mention
-            const pos = (e.target as HTMLTextAreaElement).selectionStart || v.length;
-            // track selection if needed
-            const left = v.slice(0, pos);
-            const at = left.lastIndexOf('@');
-              if (at >= 0 && (at === 0 || /\s|[([{-]/.test(left[at - 1] || ''))) {
-              const query = left.slice(at + 1);
-              if (/^[\w.\-]{0,30}$/.test(query)) {
-                setMentionQuery(query);
-                setShowMentionMenu(true);
-                if (textareaRef.current) {
-                  const el = textareaRef.current;
-                  const caret = getCaretGlobalPosition(el, at + 1);
-                  const pickerWidth = 256;
-                  const pickerHeight = 200;
-                  let top = caret.top + 4;
-                  let leftPx = caret.left;
-                  if (top + pickerHeight > window.innerHeight + window.scrollY) {
-                    top = caret.top - pickerHeight - 8;
-                  }
-                  if (leftPx + pickerWidth > window.innerWidth + window.scrollX) {
-                    leftPx = window.innerWidth + window.scrollX - pickerWidth - 8;
-                  }
-                  if (leftPx < 8 + window.scrollX) leftPx = 8 + window.scrollX;
-                  setMentionPosition({ top, left: leftPx });
-                }
-              } else {
-                setShowMentionMenu(false);
-                setMentionQuery(null);
-              }
-            } else {
-              setShowMentionMenu(false);
-              setMentionQuery(null);
-            }
-            if (error) setError(null);
-          }}
-          onSelect={(e) => {
-            const el = e.target as HTMLTextAreaElement;
-            const newPos = el.selectionStart || 0;
-            if (showMentionMenu && textareaRef.current) {
-              const textBeforeCursor = (el.value || '').substring(0, newPos);
-              const lastAtIndex = textBeforeCursor.lastIndexOf('@');
-              if (lastAtIndex !== -1) {
-                const after = textBeforeCursor.substring(lastAtIndex + 1);
-                if (/^[\w.\-]{0,30}$/.test(after)) {
-                  const caret = getCaretGlobalPosition(textareaRef.current, newPos);
-                  const pickerWidth = 256;
-                  const pickerHeight = 200;
-                  let top = caret.top + 4;
-                  let leftPx = caret.left;
-                  if (top + pickerHeight > window.innerHeight + window.scrollY) top = caret.top - pickerHeight - 8;
-                  if (leftPx + pickerWidth > window.innerWidth + window.scrollX) leftPx = window.innerWidth + window.scrollX - pickerWidth - 8;
-                  if (leftPx < 8 + window.scrollX) leftPx = 8 + window.scrollX;
-                  setMentionPosition({ top, left: leftPx });
-                }
-              }
-            }
-          }}
-          placeholder="Tell us about a new spot, service, or tip..."
-          className="min-h-[200px] text-2xl resize-none border-none border-b border-gray-300 rounded-none focus:border-0 focus:border-b focus:border-gray-500 focus:ring-0 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-white px-0 text-black placeholder:text-gray-400 text-left"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                handleAnalyze();
-              }
-            }}
-          />
-          {showMentionMenu && mentionSuggestions.length > 0 && (
-            <div className="fixed z-50 w-64 rounded-md border bg-popover text-popover-foreground shadow-md" style={{ top: mentionPosition?.top || 0, left: mentionPosition?.left || 0 }}>
-              {mentionSuggestions.map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent"
-                  onClick={() => {
-                    const sel = textareaRef.current;
-                    if (!sel) return;
-                    const cursor = sel.selectionStart || text.length;
-                    const uname = (u.username || '').toLowerCase() || (u.display_name || u.user_name || '').toLowerCase().replace(/\s+/g, '');
-                    const { text: nt, newCursor } = insertPlainMention(text, cursor, uname);
-                    // remember mapping for conversion on submit
-                    const display = u.display_name || u.user_name || uname;
-                    mentions.rememberMapping(uname, { id: u.id, displayName: display });
-                    setText(nt);
-                    setShowMentionMenu(false);
-                    setMentionQuery(null);
-                    setMentionPosition(null);
-                    requestAnimationFrame(() => {
-                      sel.focus();
-                      sel.setSelectionRange(newCursor, newCursor);
-                    });
-                  }}
-                >
-                  {u.profile_picture_url && (
-                    <img src={u.profile_picture_url} className="h-6 w-6 rounded-full" />
-                  )}
-                  <div className="flex flex-col text-left">
-                    <span className="text-sm font-medium">{u.display_name || u.user_name}</span>
-                    {u.username && (
-                      <span className="text-xs text-muted-foreground">@{u.username}</span>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        <div className="flex justify-center">
-          <Button
-            onClick={handleAnalyze}
-            disabled={!text.trim() || isAnalyzing}
-            className="px-8 py-3 text-lg font-medium bg-black hover:bg-gray-800 text-white rounded-lg border-0 shadow-sm disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
-          >
-            {isAnalyzing ? (
-              <>
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mr-3" />
-                Analyzing...
-              </>
-            ) : (
-              'Continue'
-            )}
-          </Button>
-        </div>
-      </div>
-    </motion.div>
+    <WritingStep
+      error={composer.error}
+      text={composer.text}
+      textareaRef={textareaRef}
+      onChange={handleTextChange}
+      onContinue={composer.handleAnalyze}
+      onClearError={() => composer.setError(null)}
+      onTextSelection={handleTextSelection}
+      mentionMenu={
+        <MentionMenu
+          show={mentionHandler.showMentionMenu}
+          suggestions={mentionHandler.mentionSuggestions}
+          position={mentionHandler.mentionPosition}
+          onSelect={handleMentionSelect}
+        />
+      }
+    />
   );
 
   const renderAnalyzingStep = () => (
@@ -567,226 +235,62 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
 
   const renderCompletingStep = () => (
     <CompletingStep
-      missingFields={missingFields}
-      currentFieldIndex={currentFieldIndex}
+      missingFields={composer.missingFields}
+      currentFieldIndex={composer.currentFieldIndex}
       textareaRef={textareaRef}
+      fieldResponses={composer.fieldResponses}
       onFieldResponse={handleFieldResponse}
       onLocationSelected={handleLocationSelected}
       onSkipField={handleSkipField}
-      isSubmitting={isSubmitting}
-      onSubmit={handleSubmit}
+      onBack={composer.goBack}
+      isSubmitting={composer.isSubmitting}
+      onSubmit={async () => {
+        const success = await composer.handleSubmit(mentionHandler.getMapping);
+        if (success) {
+          setShowCelebration(true);
+          toast.success('Recommendation posted!');
+          
+          // Navigate directly after celebration animation completes
+          // Don't close celebration - let navigation unmount the component
+          // This prevents the flash back to preview screen
+          setTimeout(() => {
+            onPostCreated();
+          }, 1800); // Slightly shorter than celebration duration to ensure smooth transition
+        }
+      }}
     />
   );
 
-  const generateLLMFormattedPost = async (consolidated: any) => {
-    try {
-      const formatted = await aiClient.format(consolidated, text);
-      return formatted;
-    } catch (error) {
-      console.warn('LLM formatting failed, using fallback:', error);
-      return null;
-    }
-  };
-
-  const formatRecommendationTextSync = (data: ExtractedData, fieldResponses: Record<string, string>) => {
-    try {
-      const consolidated = { ...data, ...fieldResponses };
-      
-      // Manual formatting: concise natural language, no emojis, no fluff
-      const name = consolidated.name || consolidated.location_name || 'This place';
-      const locationLine = consolidated.location || consolidated.location_address || '';
-      const contactInfo = typeof consolidated.contact_info === 'string' 
-        ? { phone: consolidated.contact_info }
-        : (consolidated.contact_info || {});
-      const phone = contactInfo.phone || fieldResponses.phone || '';
-      const email = contactInfo.email || fieldResponses.email || '';
-      const category = consolidated.category || '';
-      const pricing = consolidated.pricing || fieldResponses.pricing || fieldResponses.price || '';
-      const qualities = [fieldResponses.trustworthy, fieldResponses.affordable, fieldResponses.reliable]
-        .filter(Boolean)
-        .join(', ');
-
-      const lines: string[] = [];
-      lines.push(`${name}${category ? ` — ${category}` : ''}.`);
-      if (locationLine) lines.push(`Address: ${locationLine}.`);
-      if (pricing) lines.push(`Pricing: ${pricing}.`);
-      if (qualities) lines.push(`Notes: ${qualities}.`);
-      if (phone || email) {
-        const parts = [] as string[];
-        if (phone) parts.push(`Phone ${phone}`);
-        if (email) parts.push(`Email ${email}`);
-        lines.push(`Contact: ${parts.join(', ')}.`);
-      }
-      if (consolidated.best_times) lines.push(`Best time: ${consolidated.best_times}.`);
-      if (consolidated.tips) lines.push(`Tip: ${consolidated.tips}.`);
-      if (consolidated.specialities) {
-        const specialities = Array.isArray(consolidated.specialities) ? consolidated.specialities : [consolidated.specialities];
-        if (specialities.length > 0) lines.push(`specialities: ${specialities.join(', ')}.`);
-      }
-      if (consolidated.rating) lines.push(`Rating: ${consolidated.rating}/5.`);
-
-      return lines.join('\n');
-    } catch (error) {
-      // Fallback to original text if formatting fails
-      return text || 'Recommendation shared';
-    }
-  };
-
-  // Helper function to convert formatted text to continuous paragraph for editing
-  const formatTextForEditing = (formattedText: string) => {
-    return formattedText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-  };
-
-  const formatRecommendationText = async (data: ExtractedData, fieldResponses: Record<string, string>) => {
-    try {
-      const consolidated = { ...data, ...fieldResponses };
-      
-      // Try to use LLM to create a well-written post
-      try {
-        const llmFormatted = await generateLLMFormattedPost(consolidated);
-        if (llmFormatted) {
-          return llmFormatted;
-        }
-      } catch (error) {
-        // Fall back silently
-      }
-      
-      // Fallback to manual formatting
-      return formatRecommendationTextSync(data, fieldResponses);
-    } catch (error) {
-      // Fallback to original text if formatting fails
-      return text || 'Recommendation shared';
-    }
-  };
-
-
-  const [formattedPreview, setFormattedPreview] = useState<string>('');
-  const [isFormattingPreview, setIsFormattingPreview] = useState(false);
-  // Removed local isEditingPreview; PreviewStep owns editing state via props
-  const [editedPreview, setEditedPreview] = useState<string>('');
-  const [isEditingDescription, setIsEditingDescription] = useState(false);
-  const [rating, setRating] = useState<number | null>(null);
-
-  // Helper functions for preview (matching FeedPost component)
-
-  // Moved to PreviewStep
-
-  // Moved to PreviewStep
-
-  // Moved to PreviewStep
-
-  // Reset formatted preview when leaving preview step
-  useEffect(() => {
-    if (currentStep !== 'preview') {
-      setFormattedPreview('');
-      setIsFormattingPreview(false);
-      setIsEditingDescription(false);
-      setEditedPreview('');
-      setRating(null);
-    }
-  }, [currentStep]);
-
-  // Generate LLM-formatted preview when reaching preview step
-  useEffect(() => {
-    if (currentStep === 'preview' && !formattedPreview && !isFormattingPreview) {
-      setIsFormattingPreview(true);
-      
-      const generatePreview = async () => {
-        try {
-          const llmFormatted = await generateLLMFormattedPost({ ...extractedData, ...fieldResponses });
-          if (llmFormatted) {
-            setFormattedPreview(llmFormatted);
-          }
-        } catch (error) {
-          console.error('Error generating LLM preview:', error);
-          // Set fallback formatted text to prevent infinite retries
-          setFormattedPreview(formatRecommendationTextSync(extractedData, fieldResponses));
-        } finally {
-          setIsFormattingPreview(false);
-        }
-      };
-      
-      // Add timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
-        if (isFormattingPreview) {
-          console.log('LLM formatting timeout, using fallback');
-          setFormattedPreview(formatRecommendationTextSync(extractedData, fieldResponses));
-          setIsFormattingPreview(false);
-        }
-      }, 25000); // 25 second timeout (longer than AI client timeout)
-      
-      generatePreview();
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [currentStep]); // Only depend on currentStep to avoid infinite loop
-
-  // Update labels when consolidated data changes
-  useEffect(() => {
-    if (currentStep === 'preview') {
-      const consolidated = { ...extractedData, ...fieldResponses };
-      const newLabels = Array.isArray(consolidated.specialities)
-        ? consolidated.specialities
-        : consolidated.specialities
-        ? [consolidated.specialities]
-        : [];
-      setLabels(newLabels);
-    }
-  }, [currentStep, extractedData, fieldResponses]);
-
   const renderPreviewStep = () => {
-    const consolidated = { ...extractedData, ...fieldResponses };
+    const consolidated = { ...composer.extractedData, ...composer.fieldResponses };
     
-    // Extract data for preview
     const placeName = consolidated.name || consolidated.location_name || consolidated.title;
     const placeAddress = consolidated.location || consolidated.location_address;
-    const description = formattedPreview || formatRecommendationTextSync(extractedData, fieldResponses);
+    const description = composer.formattedPreview || composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses);
     const contentType = (consolidated.contentType || consolidated.type) as any;
     const contact = consolidated.contact_info || consolidated.contact || null;
     
-    // Generate labels from specialities (same logic as in formToSaveDto.ts)
-    const currentLabels = Array.isArray(consolidated.specialities)
-      ? consolidated.specialities
-      : consolidated.specialities
-      ? [consolidated.specialities]
-      : [];
-    const previewMentionMenu = (isEditingDescription && showMentionMenu && mentionSuggestions.length > 0) ? (
-          <div className="fixed z-50 w-64 rounded-md border bg-popover text-popover-foreground shadow-md" style={{ top: mentionPosition?.top || 0, left: mentionPosition?.left || 0 }}>
-            {mentionSuggestions.map((u) => (
-              <button
-                key={u.id}
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent"
-                onClick={() => {
+    const previewMentionMenu = (composer.isEditingDescription && mentionHandler.showMentionMenu && mentionHandler.mentionSuggestions.length > 0) ? (
+      <MentionMenu
+        show={mentionHandler.showMentionMenu}
+        suggestions={mentionHandler.mentionSuggestions}
+        position={mentionHandler.mentionPosition}
+        onSelect={(user) => {
                   const sel = previewTextareaRef.current;
                   if (!sel) return;
-                  const cursor = sel.selectionStart || editedPreview.length;
-                  const uname = (u.username || '').toLowerCase() || (u.display_name || u.user_name || '').toLowerCase().replace(/\s+/g, '');
-                  const { text: nt, newCursor } = insertPlainMention(editedPreview, cursor, uname);
-                  const display = u.display_name || u.user_name || uname;
-              mentions.rememberMapping(uname, { id: u.id, displayName: display });
-                  setEditedPreview(nt);
-                  setShowMentionMenu(false);
-                  setMentionQuery(null);
-                  setMentionPosition(null);
+          const cursor = sel.selectionStart || composer.editedPreview.length;
+          const uname = (user.username || '').toLowerCase() || (user.display_name || user.user_name || '').toLowerCase().replace(/\s+/g, '');
+          const { text: nt, newCursor } = insertPlainMention(composer.editedPreview, cursor, uname);
+          const display = user.display_name || user.user_name || uname;
+          mentionHandler.getMapping()[uname] = { id: user.id, displayName: display };
+          composer.setEditedPreview(nt);
+          mentionHandler.closeMentionMenu();
                   requestAnimationFrame(() => {
                     sel.focus();
                     sel.setSelectionRange(newCursor, newCursor);
                   });
                 }}
-              >
-                {u.profile_picture_url && (
-                  <img src={u.profile_picture_url} className="h-6 w-6 rounded-full" />
-                )}
-                <div className="flex flex-col text-left">
-                  <span className="text-sm font-medium">{u.display_name || u.user_name}</span>
-                  {u.username && (
-                    <span className="text-xs text-muted-foreground">@{u.username}</span>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
+      />
     ) : null;
 
     return (
@@ -797,68 +301,189 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         description={description}
         contentType={contentType}
         contact={contact}
-        isEditingDescription={isEditingDescription}
-        editedPreview={editedPreview}
-        onEditedPreviewChange={setEditedPreview}
-        showMentionMenu={showMentionMenu}
+        isEditingDescription={composer.isEditingDescription}
+        editedPreview={composer.editedPreview}
+        onEditedPreviewChange={composer.setEditedPreview}
+        showMentionMenu={mentionHandler.showMentionMenu}
         mentionMenu={previewMentionMenu}
-        rating={rating}
-        onRatingChange={setRating}
+        rating={composer.rating}
+        onRatingChange={composer.setRating}
         onEdit={handleEditPreview}
         onCancelEdit={handleCancelEdit}
         onSaveEdit={handleSaveEdit}
         onApprove={handleApprovePreview}
-        labels={labels}
-        onLabelsChange={setLabels}
+        onBack={composer.goBack}
+        labels={composer.labels}
+        onLabelsChange={composer.setLabels}
       />
     );
   };
 
-  const renderCompleteStep = () => (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      className="text-center space-y-8 py-8"
-    >
-      <div className="max-w-3xl mx-auto space-y-8">
-        <div className="flex justify-center text-green-600 text-5xl">✓</div>
-        
-        <h1 className="text-4xl font-light text-black leading-tight">
-          Recommendation posted!
-        </h1>
-      </div>
-    </motion.div>
-  );
 
-  return (
+  // Neobrutalist celebration animation component
+  const CelebrationOverlay = () => (
     <AnimatePresence>
-      {isOpen && (
+      {showCelebration && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-40 bg-white pt-16"
+          className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+        >
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-white"
+          />
+          
+          {/* Celebration Content - Neobrutalist Style */}
+          <div className="relative z-10 flex flex-col items-center gap-8">
+            {/* Main Success Card */}
+            <motion.div
+              initial={{ scale: 0, y: 50 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.8, y: -20, opacity: 0 }}
+              transition={{ 
+                type: 'spring',
+                stiffness: 300,
+                damping: 20
+              }}
+              className="relative rounded-lg border-4 border-black bg-white p-6 md:p-8 shadow-[8px_8px_0_0_#000] md:shadow-[12px_12px_0_0_#000]"
+              style={{ backgroundColor: accentColor, borderColor: '#000' }}
+            >
+              {/* Checkmark Container */}
+              <motion.div
+                initial={{ scale: 0, rotate: -90 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ 
+                  delay: 0.2,
+                  type: 'spring',
+                  stiffness: 300,
+                  damping: 15
+                }}
+                className="w-16 h-16 md:w-20 md:h-20 rounded-lg border-4 border-black bg-white shadow-[3px_3px_0_0_#000] md:shadow-[4px_4px_0_0_#000] flex items-center justify-center mb-4 md:mb-6 mx-auto"
+              >
+                <Check className="h-8 w-8 md:h-12 md:w-12 text-black" strokeWidth={4} />
+              </motion.div>
+              
+              {/* Success Message */}
+              <motion.h2
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.4 }}
+                className="text-3xl md:text-5xl font-black text-center mb-2 md:mb-3 tracking-tight"
+                style={{ color: textOnAccent }}
+              >
+                POSTED!
+              </motion.h2>
+              
+              <motion.p
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.5 }}
+                className="text-sm md:text-lg font-bold text-center"
+                style={{ color: textOnAccent, opacity: 0.9 }}
+              >
+                Your recommendation is live
+              </motion.p>
+            </motion.div>
+            
+            {/* Geometric decorative shapes - brutalist style */}
+            {[...Array(12)].map((_, i) => {
+              const angle = (i * 360) / 12;
+              const radius = 100;
+              const x = Math.cos((angle * Math.PI) / 180) * radius;
+              const y = Math.sin((angle * Math.PI) / 180) * radius;
+              const size = Math.random() * 16 + 12;
+              const colors = [accentColor, '#000', '#fbbf24', '#ef4444'];
+              const shapeColor = colors[Math.floor(Math.random() * colors.length)];
+              
+              return (
+                <motion.div
+                  key={i}
+                  initial={{ 
+                    scale: 0,
+                    x: 0,
+                    y: 0,
+                    rotate: 0,
+                    opacity: 0
+                  }}
+                  animate={{ 
+                    scale: [0, 1.2, 1],
+                    x: x,
+                    y: y,
+                    rotate: [0, 180, 360],
+                    opacity: [0, 1, 0.8, 0]
+                  }}
+                  transition={{ 
+                    delay: 0.3 + i * 0.05,
+                    duration: 1.2,
+                    ease: 'easeOut'
+                  }}
+                  className="absolute rounded-lg border-2 border-black"
+                  style={{
+                    width: `${size}px`,
+                    height: `${size}px`,
+                    backgroundColor: shapeColor === '#000' ? '#000' : shapeColor,
+                    borderColor: '#000',
+                    boxShadow: '3px 3px 0 0 #000'
+                  }}
+                />
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  return (
+    <>
+      <AnimatePresence>
+        {isOpen && !showCelebration && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ 
+              opacity: 0,
+              scale: 0.95,
+              transition: { duration: 0.3, ease: 'easeInOut' }
+            }}
+            className="fixed inset-0 z-40 pt-16"
+            style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}
         >
           <div className="h-full flex flex-col">
-            {/* Main Content */}
             <div className="flex-1 overflow-y-auto">
-              <div className="h-full flex items-center justify-center p-12">
-                <div className="w-full max-w-4xl">
+              <div className="h-full flex items-center justify-center p-4 md:p-12">
+                  <motion.div
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ 
+                      y: -20, 
+                      opacity: 0,
+                      scale: 0.95,
+                      transition: { duration: 0.2 }
+                    }}
+                    className="w-full max-w-4xl rounded-lg border-2 border-black bg-white p-4 md:p-6 lg:p-8 shadow-[6px_6px_0_0_#000]"
+                  >
                   <AnimatePresence mode="wait">
-                    {currentStep === 'writing' && renderWritingStep()}
-                    {currentStep === 'analyzing' && renderAnalyzingStep()}
-                    {currentStep === 'completing' && renderCompletingStep()}
-                    {currentStep === 'preview' && renderPreviewStep()}
-                    {currentStep === 'complete' && renderCompleteStep()}
+                    {composer.currentStep === 'writing' && renderWritingStep()}
+                    {composer.currentStep === 'analyzing' && renderAnalyzingStep()}
+                    {composer.currentStep === 'completing' && renderCompletingStep()}
+                    {composer.currentStep === 'preview' && renderPreviewStep()}
                   </AnimatePresence>
-                </div>
+                  </motion.div>
               </div>
             </div>
           </div>
         </motion.div>
       )}
     </AnimatePresence>
+      
+      <CelebrationOverlay />
+    </>
   );
 };
 

@@ -6,23 +6,43 @@ import { recommendationsApi, type SearchResponse } from '@/services/recommendati
 interface FeedAISearchProps {
   isAuthenticated: boolean;
   onResults?: (response: SearchResponse | null) => void;
+  onCleared?: () => void; // called when query is cleared
 }
 
-const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults }) => {
+const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults, onCleared }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, setResponse] = useState<SearchResponse | null>(null);
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!query.trim() || !isAuthenticated) return;
+  const handleSearch = async (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (!query.trim() || !isAuthenticated) {
+      return;
+    }
+    
     setLoading(true);
     setError(null);
+    
     try {
-      const res = await recommendationsApi.semanticSearch(query.trim());
+      // First get fast results without summary
+      const res = await recommendationsApi.semanticSearch(query.trim(), undefined, undefined, undefined, undefined, true);
       setResponse(res);
       onResults?.(res);
+      
+      // Then fetch with fast summary for better UX
+      try {
+        const resWithSummary = await recommendationsApi.semanticSearch(query.trim(), undefined, undefined, undefined, undefined, false, 'fast');
+        setResponse(resWithSummary);
+        onResults?.(resWithSummary);
+      } catch (summaryError) {
+        console.warn('Failed to fetch AI summary:', summaryError);
+        // Keep the fast results even if summary fails
+      }
     } catch (err) {
       setError('Search failed. Please try again.');
       setResponse(null);
@@ -35,7 +55,14 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults 
   return (
     <div className="w-full">
       {/* Pill search bar */}
-      <div className="w-full">
+      <form 
+        className="w-full"
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleSearch(e);
+        }}
+      >
         <div className="rounded-full bg-white border border-gray-200 text-foreground h-14 px-6 flex items-center gap-3 shadow-sm">
 
           <input
@@ -47,11 +74,16 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults 
               setQuery(v);
               if (v.trim() === '') {
                 setResponse(null);
-                onResults?.(null);
+                // Notify parent that input was cleared; do not treat as a failed search
+                onCleared?.();
               }
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSearch();
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSearch(e);
+              }
             }}
             disabled={!isAuthenticated || loading}
             className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm"
@@ -74,7 +106,11 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults 
             size="icon"
             className="h-10 w-10 rounded-full bg-black text-white hover:bg-black/90"
             disabled={!query.trim() || loading || !isAuthenticated}
-            onClick={() => handleSearch()}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleSearch();
+            }}
             aria-label="Send"
           >
             {loading ? (
@@ -84,7 +120,7 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults 
             )}
           </Button>
         </div>
-      </div>
+      </form>
 
       {error && (
         <div className="text-sm text-destructive mt-2">{error}</div>

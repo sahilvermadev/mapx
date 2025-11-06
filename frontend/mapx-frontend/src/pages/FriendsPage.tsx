@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Users, Plus, UserPlus, UserCheck, UserX, Users2 } from 'lucide-react';
+import { Search, Users, Plus, UserPlus, UserCheck, UserX, Users2, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,6 +10,9 @@ import { socialApi, type User } from '@/services/socialService';
 import { useAuth } from '@/auth';
 import GroupCreator from '@/components/GroupCreator';
 import GroupList from '@/components/GroupList';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
+import { getReadableTextColor } from '@/utils/color';
 
 const FriendsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -22,8 +25,16 @@ const FriendsPage: React.FC = () => {
   const [followingLoading, setFollowingLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showGroupCreator, setShowGroupCreator] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<number | undefined>(undefined);
+  const [groupsRefreshKey, setGroupsRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<'friends' | 'groups'>('friends');
   const [activeFriendsTab, setActiveFriendsTab] = useState<'following' | 'followers' | 'search'>('following');
+  const { theme } = useTheme();
+
+  // Get accent color from current theme (reactive to theme changes)
+  const selectedTheme = THEMES[theme];
+  const accentColor = selectedTheme.accentColor;
+  const textOnAccent = getReadableTextColor(accentColor);
 
   useEffect(() => {
     // Only redirect if auth check is complete and user is not authenticated
@@ -220,26 +231,26 @@ const FriendsPage: React.FC = () => {
 
 
   const renderUserCard = (user: User) => (
-    <Card key={user.id} className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow" onClick={() => navigate(`/profile/${user.id}`)}>
-      <CardContent className="p-6">
-        <div className="flex items-center gap-4">
-          <Avatar className="h-12 w-12 bg-gray-200">
+    <Card key={user.id} className="bg-white rounded-md border-2 border-black shadow-[3px_3px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0_0_#000] transition-all" onClick={() => navigate(`/profile/${user.id}`)}>
+      <CardContent className="p-4 md:p-6">
+        <div className="flex items-start gap-3 md:gap-4">
+          <Avatar className="h-10 w-10 md:h-12 md:w-12 bg-gray-200 flex-shrink-0">
             <AvatarImage src={user.profile_picture_url} alt={user.display_name} />
-            <AvatarFallback className="bg-gray-200 text-gray-600 font-medium">
+            <AvatarFallback className="bg-gray-200 text-gray-600 font-medium text-xs md:text-sm">
               {getInitials(user.display_name)}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-gray-900 truncate">{user.display_name}</h3>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-1">
+              <h3 className="font-semibold text-sm md:text-base text-gray-900 truncate">{user.display_name}</h3>
               {user.is_following && (
-                <span className="text-sm text-gray-600">Following</span>
+                <span className="text-xs md:text-sm text-gray-600">Following</span>
               )}
             </div>
-            <p className="text-sm text-gray-500 truncate mb-2">
+            <p className="text-xs md:text-sm text-gray-500 truncate mb-1 md:mb-2">
               {user.email}
             </p>
-            <div className="flex items-center gap-4 text-xs text-gray-500">
+            <div className="flex items-center gap-3 md:gap-4 text-[10px] md:text-xs text-gray-500">
               <span>{user.followers_count || 0} followers</span>
               <span>{user.following_count || 0} following</span>
             </div>
@@ -247,7 +258,8 @@ const FriendsPage: React.FC = () => {
           <Button
             variant={user.is_following ? 'outline' : 'default'}
             size="sm"
-            className={user.is_following ? 'border-gray-300 text-gray-700 hover:bg-red-50 hover:text-red-600 hover:border-red-200' : 'bg-yellow-600 hover:bg-yellow-700 text-white'}
+            className={`rounded-md border border-black shadow-[1px_1px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex-shrink-0 text-xs md:text-sm h-8 md:h-9 px-2 md:px-3`}
+            style={user.is_following ? {} : { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent }}
             onClick={(e) => {
               e.stopPropagation(); // Prevent card click when clicking button
               user.is_following ? unfollow(user.id) : follow(user.id);
@@ -255,13 +267,13 @@ const FriendsPage: React.FC = () => {
           >
             {user.is_following ? (
               <>
-                <UserX className="h-4 w-4 mr-1" />
-                Unfollow
+                <UserX className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1" />
+                <span className="hidden sm:inline">Unfollow</span>
               </>
             ) : (
               <>
-                <UserPlus className="h-4 w-4 mr-1" />
-                Follow
+                <UserPlus className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1" />
+                <span className="hidden sm:inline">Follow</span>
               </>
             )}
           </Button>
@@ -272,7 +284,7 @@ const FriendsPage: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="min-h-[calc(100vh-64px)] bg-background">
+      <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-4xl mx-auto space-y-8">
             {/* Header Skeleton */}
@@ -331,80 +343,71 @@ const FriendsPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-background">
+    <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
       {/* Content Section */}
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto space-y-8">
+      <div className="container mx-auto px-4 py-4 md:py-8">
+        <div className="max-w-4xl mx-auto space-y-4 md:space-y-8">
           {/* Header Section */}
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold text-gray-900">Friends</h1>
-            <p className="text-gray-600">Search for people to follow, view followers, or manage groups.</p>
+          <div className="space-y-1 md:space-y-2">
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Friends</h1>
+            <p className="text-sm md:text-base text-gray-600">Search for people to follow, view followers, or manage your Lenses.</p>
           </div>
 
           {/* Main Navigation Pills */}
-          <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant={activeTab === 'friends' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setActiveTab('friends')}
-              className={`flex items-center space-x-2 ${
-                activeTab === 'friends' 
-                  ? 'bg-yellow-600 hover:bg-yellow-700 text-white' 
-                  : 'hover:bg-gray-200'
-              }`}
+              className={`flex items-center gap-1.5 md:gap-2 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap`}
+              style={activeTab === 'friends' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
             >
-              <Users className="h-4 w-4" />
+              <Users className="h-3.5 w-3.5 md:h-4 md:w-4" />
               <span>Friends</span>
             </Button>
             <Button
               variant={activeTab === 'groups' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setActiveTab('groups')}
-              className={`flex items-center space-x-2 ${
-                activeTab === 'groups' 
-                  ? 'bg-yellow-600 hover:bg-yellow-700 text-white' 
-                  : 'hover:bg-gray-200'
-              }`}
+              className={`flex items-center gap-1.5 md:gap-2 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap`}
+              style={activeTab === 'groups' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
             >
-              <UserPlus className="h-4 w-4" />
-              <span>Groups</span>
+              <UserPlus className="h-3.5 w-3.5 md:h-4 md:w-4" />
+              <span>Lenses</span>
             </Button>
           </div>
 
           {/* Friends Tab Content */}
           {activeTab === 'friends' && (
-            <div className="space-y-6">
+            <div className="space-y-4 md:space-y-6">
               {/* Search bar with counts */}
-              <div className="flex items-center gap-4">
-                <div className="relative flex-1">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 md:gap-4">
+                <div className="relative flex-1 w-full">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
                     type="text"
                     placeholder="Search by name or email"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 w-full"
+                    className="pl-10 w-full rounded-md border border-black/30 shadow-sm focus:shadow-md transition-shadow h-9 md:h-10"
                   />
                 </div>
                 
                 {/* Counts next to search bar */}
-                <div className="flex space-x-4 text-sm text-gray-600 whitespace-nowrap">
+                <div className="flex space-x-3 md:space-x-4 text-xs md:text-sm text-gray-600 whitespace-nowrap">
                   <span>Following {following.length}</span>
                   <span>Followers {followers.length}</span>
                 </div>
               </div>
 
               {/* Full-width sub-navigation */}
-              <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-full">
+              <div className="flex gap-2 w-full">
                 <Button
                   variant={activeFriendsTab === 'following' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setActiveFriendsTab('following')}
-                  className={`flex-1 ${
-                    activeFriendsTab === 'following' 
-                      ? 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-sm' 
-                      : 'hover:bg-gray-200'
-                  }`}
+                  className={`flex-1 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
+                  style={activeFriendsTab === 'following' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
                 >
                   Following
                 </Button>
@@ -412,11 +415,8 @@ const FriendsPage: React.FC = () => {
                   variant={activeFriendsTab === 'followers' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setActiveFriendsTab('followers')}
-                  className={`flex-1 ${
-                    activeFriendsTab === 'followers' 
-                      ? 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-sm' 
-                      : 'hover:bg-gray-200'
-                  }`}
+                  className={`flex-1 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
+                  style={activeFriendsTab === 'followers' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
                 >
                   Followers
                 </Button>
@@ -424,11 +424,8 @@ const FriendsPage: React.FC = () => {
                   variant={activeFriendsTab === 'search' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setActiveFriendsTab('search')}
-                  className={`flex-1 ${
-                    activeFriendsTab === 'search' 
-                      ? 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-sm' 
-                      : 'hover:bg-gray-200'
-                  }`}
+                  className={`flex-1 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
+                  style={activeFriendsTab === 'search' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
                 >
                   Search
                 </Button>
@@ -556,31 +553,37 @@ const FriendsPage: React.FC = () => {
             </div>
           )}
 
-          {/* Groups Tab Content */}
+          {/* Lenses Tab Content */}
           {activeTab === 'groups' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold flex items-center gap-2">
-                    <UserPlus className="h-6 w-6" />
-                    Friend Groups
+            <div className="space-y-4 md:space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 md:gap-4">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-xl md:text-2xl font-semibold flex items-center gap-1.5 md:gap-2">
+                    <Filter className="h-5 w-5 md:h-6 md:w-6" />
+                    Your Lenses
                   </h2>
-                  <p className="text-gray-600 mt-1">
-                    Create and manage groups to share recommendations with specific friends
+                  <p className="text-sm md:text-base text-gray-600 mt-1">
+                    Create and manage personal Lenses (lists of people) to filter your feed
                   </p>
                 </div>
                 <Button
                   onClick={() => setShowGroupCreator(true)}
-                  className="bg-yellow-600 hover:bg-yellow-700 text-white"
+                  className="rounded-md border-2 border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap flex-shrink-0 w-full sm:w-auto"
+                  style={{ backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent }}
                 >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Group
+                  <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5 md:mr-2" />
+                  Create Lens
                 </Button>
               </div>
               
               <GroupList
+                key={groupsRefreshKey}
                 currentUserId={currentUser.id}
                 showActions={true}
+                onEditGroup={(groupId) => {
+                  setEditingGroupId(groupId);
+                  setShowGroupCreator(true);
+                }}
               />
             </div>
           )}
@@ -590,12 +593,19 @@ const FriendsPage: React.FC = () => {
       {/* Group Creator Modal */}
       <GroupCreator
         isOpen={showGroupCreator}
-        onClose={() => setShowGroupCreator(false)}
+        onClose={() => { setShowGroupCreator(false); setEditingGroupId(undefined); }}
         onGroupCreated={() => {
           // Refresh groups list if needed
           setShowGroupCreator(false);
+          setGroupsRefreshKey(k => k + 1);
+        }}
+        onGroupUpdated={() => {
+          setShowGroupCreator(false);
+          setEditingGroupId(undefined);
+          setGroupsRefreshKey(k => k + 1);
         }}
         currentUserId={currentUser.id}
+        editingGroupId={editingGroupId}
       />
     </div>
   );

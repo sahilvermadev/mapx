@@ -1,5 +1,5 @@
 {
-  "name": "mapx-backend",
+  "name": "recce_-backend",
   "version": "1.0.0",
   "description": "Backend for Map App",
   "main": "src/index.js",
@@ -11,8 +11,11 @@
     "migrate:create": "node-pg-migrate create"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.67.0",
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "@types/axios": "^0.9.36",
+    "@types/helmet": "^0.0.48",
+    "@types/multer": "^2.0.0",
     "axios": "^1.11.0",
     "bcrypt": "^5.1.1",
     "compression": "^1.8.1",
@@ -24,12 +27,17 @@
     "express-rate-limit": "^8.1.0",
     "express-session": "^1.18.2",
     "groq-sdk": "^0.30.0",
+    "helmet": "^8.1.0",
+    "joi": "^18.0.1",
     "jsonwebtoken": "^9.0.2",
-    "openai": "^5.12.2",
+    "multer": "^2.0.2",
+    "openai": "^5.23.2",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "pg": "^8.11.3",
-    "redis": "^5.8.3"
+    "redis": "^5.8.3",
+    "winston": "^3.18.3",
+    "node-pg-migrate": "^8.0.3"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
@@ -43,9 +51,10 @@
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.16",
     "@types/pg": "^8.15.4",
-    "node-pg-migrate": "^8.0.3",
+    "@types/uuid": "^10.0.0",
     "nodemon": "^3.0.1",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "uuid": "^13.0.0"
   }
 }

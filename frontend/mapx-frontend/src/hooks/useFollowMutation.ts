@@ -22,7 +22,11 @@ export const useFollowMutation = (currentUserId: string) => {
     },
     onSuccess: () => {
       // Invalidate and refetch both feed and suggested users
-      queryClient.invalidateQueries({ queryKey: ['feed', currentUserId] });
+      // Use partial matching to invalidate all feed queries for this user
+      queryClient.invalidateQueries({ 
+        queryKey: ['feed', currentUserId],
+        exact: false 
+      });
       queryClient.invalidateQueries({ queryKey: ['suggestedUsers', currentUserId] });
     },
     onError: (error) => {

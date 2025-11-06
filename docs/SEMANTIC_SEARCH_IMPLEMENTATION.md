@@ -1,8 +1,8 @@
-# MapX Semantic Search Implementation
+# recce_ Semantic Search Implementation
 
 ## Overview
 
-This document describes the implementation of semantic search functionality in MapX, which allows users to search for places using natural language queries like "What's the best cafe with wifi that I can work in Hauz Khas?"
+This document describes the implementation of semantic search functionality in recce_, which allows users to search for places using natural language queries like "What's the best cafe with wifi that I can work in Hauz Khas?"
 
 ## Architecture
 
@@ -190,7 +190,7 @@ ALTER TABLE annotations ADD COLUMN embedding VECTOR(1536);
 ## Testing
 
 ### Test File
-Use `frontend/mapx-frontend/test-semantic-search.html` to test the API directly.
+Use `frontend/recce_-frontend/test-semantic-search.html` to test the API directly.
 
 ### Example Test Queries
 1. "best cafe with wifi in Hauz Khas"

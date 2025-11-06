@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronLeft, ChevronRight, Star, Heart, Bookmark, Share2, MapPin } from 'lucide-react';
+import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
+import { X, ChevronLeft, ChevronRight, Star, Heart, Bookmark, Share2, MapPin, MessageCircle } from 'lucide-react';
 import ReviewModal, { type ReviewPayload } from './ReviewModal';
-import { recommendationsApi } from '../services/recommendationsApiService';
+import { recommendationsApi, type PlaceRecommendation } from '../services/recommendationsApiService';
 import { formatGoogleTypeForDisplay } from '../utils/placeTypes';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,10 @@ import { CardTitle } from '@/components/ui/card';
 import ReviewItemSkeleton from '@/components/skeletons/ReviewItemSkeleton';
 import './ContentCard.css';
 import { renderWithMentions } from '@/utils/mentions';
+import { socialApi, type Comment } from '../services/social';
+import { useAuth } from '../auth';
+import LoginModal from '../auth/components/LoginModal';
+import { Input } from '@/components/ui/input';
 
 export interface PlaceDetails {
   id: string;
@@ -26,6 +30,11 @@ export interface PlaceDetails {
   google_place_id?: string;
 }
 
+// Constants
+const MAX_COMMENTS_HEIGHT = 'max-h-48';
+const DEFAULT_REVIEWS_LIMIT = 10;
+const SKELETON_COUNT = 3;
+
 // Real review type from API
 interface RealReview {
   id: number;
@@ -36,6 +45,24 @@ interface RealReview {
   rating?: number;
   created_at: string;
   content_data?: Record<string, any>;
+  likes_count?: number;
+  comments_count?: number;
+  is_liked_by_current_user?: boolean;
+}
+
+// Helper type for review state management
+interface ReviewLikeState {
+  count: number;
+  isLiked: boolean;
+}
+
+// Helper type for review comments state
+interface ReviewCommentsState {
+  comments: Comment[];
+  isLoading: boolean;
+  isSubmitting: boolean;
+  newComment: string;
+  showComments: boolean;
 }
 
 interface ContentCardProps {
@@ -77,6 +104,21 @@ const getInitials = (name: string): string =>
     .toUpperCase()
     .slice(0, 2);
 
+// Helper function to transform API recommendation to RealReview
+const transformRecommendationToReview = (rec: PlaceRecommendation & { likes_count?: number; comments_count?: number; is_liked_by_current_user?: boolean }): RealReview => ({
+  id: rec.id,
+  user_name: rec.user_name,
+  user_picture: rec.user_picture || null,
+  title: rec.title,
+  notes: rec.description,
+  rating: rec.rating,
+  created_at: rec.created_at,
+  content_data: rec.content_data,
+  likes_count: rec.likes_count || 0,
+  comments_count: rec.comments_count || 0,
+  is_liked_by_current_user: rec.is_liked_by_current_user || false,
+});
+
 const ContentCard: React.FC<ContentCardProps> = ({
   place,
   onClose,
@@ -84,6 +126,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
   onShare,
 }) => {
   const navigate = useNavigate();
+  const { user: currentUser, isAuthenticated } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [realReviews, setRealReviews] = useState<RealReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
@@ -91,13 +134,48 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [networkAverageRating, setNetworkAverageRating] = useState<number | null>(null);
   const [networkRatingCount, setNetworkRatingCount] = useState<number>(0);
+  
+  // Consolidated state for likes and comments per review
+  const [reviewLikes, setReviewLikes] = useState<Record<number, ReviewLikeState>>({});
+  const [reviewCommentsState, setReviewCommentsState] = useState<Record<number, ReviewCommentsState>>({});
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  // Initialize mobile detection immediately to avoid flash
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+
+  // Memoized values
+  const totalImages = useMemo(() => place.images?.length || 0, [place.images]);
+  const currentUserId = useMemo(() => currentUser?.id || '', [currentUser?.id]);
+
+  // Check if mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Drag handlers for mobile swipe-to-close
+  const y = useMotionValue(0);
+  const opacity = useTransform(y, [0, 300], [1, 0]);
+  
+  const handleDragEnd = useCallback((event: any, info: any) => {
+    if (isMobile && info.offset.y > 100) {
+      onClose();
+    } else {
+      // Reset position if not dragged enough
+      y.set(0);
+    }
+  }, [isMobile, onClose, y]);
 
   // Fetch real recommendations when component mounts
   useEffect(() => {
     const fetchReviews = async () => {
       if (!place.google_place_id) {
         setReviewsLoading(false);
-        setReviewsError('No Google Place ID available');
+        setReviewsError('This location was added manually and doesn\'t have Google Place data. Reviews are only available for places found through Google Places.');
+        setRealReviews([]);
         return;
       }
 
@@ -116,21 +194,21 @@ const ContentCard: React.FC<ContentCardProps> = ({
         }
 
         // Now get recommendations using the database place ID
-        const recommendations = await recommendationsApi.getPlaceRecommendations(placeInfo.id, 'friends', 10);
+        const recommendations = await recommendationsApi.getPlaceRecommendations(placeInfo.id, 'friends', DEFAULT_REVIEWS_LIMIT);
         
         // Transform API data to our review format
-        const reviews: RealReview[] = recommendations.map(rec => ({
-            id: rec.id,
-            user_name: rec.user_name,
-            user_picture: (rec as any).user_picture || null,
-            title: rec.title,
-            notes: rec.description, // Map description to notes for display
-            rating: rec.rating,
-            created_at: rec.created_at,
-            content_data: rec.content_data // Include content_data for additional info
-        }));
-
+        const reviews: RealReview[] = recommendations.map(transformRecommendationToReview);
         setRealReviews(reviews);
+        
+        // Initialize likes state for all reviews
+        const initialLikes: Record<number, ReviewLikeState> = {};
+        reviews.forEach(review => {
+          initialLikes[review.id] = {
+            count: review.likes_count || 0,
+            isLiked: review.is_liked_by_current_user || false
+          };
+        });
+        setReviewLikes(initialLikes);
 
         // Fetch consolidated network-only rating
         try {
@@ -151,12 +229,29 @@ const ContentCard: React.FC<ContentCardProps> = ({
     fetchReviews();
   }, [place.google_place_id]);
 
-  const totalImages = place.images?.length || 0;
+  // Helper function to initialize comments state for a review
+  const getCommentsState = useCallback((reviewId: number): ReviewCommentsState => {
+    return reviewCommentsState[reviewId] || {
+      comments: [],
+      isLoading: false,
+      isSubmitting: false,
+      newComment: '',
+      showComments: false,
+    };
+  }, [reviewCommentsState]);
 
-  const handleSubmitReview = (payload: ReviewPayload) => {
+  // Helper function to update comments state for a review
+  const updateCommentsState = useCallback((reviewId: number, updates: Partial<ReviewCommentsState>) => {
+    setReviewCommentsState(prev => ({
+      ...prev,
+      [reviewId]: { ...getCommentsState(reviewId), ...updates }
+    }));
+  }, [getCommentsState]);
+
+  const handleSubmitReview = useCallback((payload: ReviewPayload) => {
     console.log('Review submitted:', payload);
     // This is now handled by the ReviewModal internally
-  };
+  }, []);
 
   const handleReviewSuccess = (result: { place_id: number; annotation_id: number }) => {
     console.log('Review saved successfully:', result);
@@ -168,20 +263,20 @@ const ContentCard: React.FC<ContentCardProps> = ({
         const placeInfo = await recommendationsApi.getPlaceByGoogleId(place.google_place_id);
         if (!placeInfo) return;
 
-        const recommendations = await recommendationsApi.getPlaceRecommendations(placeInfo.id, 'friends', 10);
+        const recommendations = await recommendationsApi.getPlaceRecommendations(placeInfo.id, 'friends', DEFAULT_REVIEWS_LIMIT);
         
-        const reviews: RealReview[] = recommendations.map(rec => ({
-          id: rec.id,
-          user_name: rec.user_name,
-          user_picture: (rec as any).user_picture || null,
-          title: rec.title,
-          notes: rec.description, // Map description to notes for display
-          rating: rec.rating,
-          created_at: rec.created_at,
-          content_data: rec.content_data // Include content_data for additional info
-        }));
-
+        const reviews: RealReview[] = recommendations.map(transformRecommendationToReview);
         setRealReviews(reviews);
+        
+        // Update likes state for all reviews
+        const updatedLikes: Record<number, ReviewLikeState> = {};
+        reviews.forEach(review => {
+          updatedLikes[review.id] = {
+            count: review.likes_count || 0,
+            isLiked: review.is_liked_by_current_user || false
+          };
+        });
+        setReviewLikes(prev => ({ ...prev, ...updatedLikes }));
 
         // Refresh network consolidated rating as well
         try {
@@ -204,10 +299,172 @@ const ContentCard: React.FC<ContentCardProps> = ({
     // You can add UI feedback here, like showing an error toast
   };
 
+  // Handle like/unlike for a review
+  const handleLike = useCallback(async (reviewId: number) => {
+    if (!isAuthenticated || !currentUser) {
+      setShowLoginModal(true);
+      return;
+    }
+
+    const currentLikeState = reviewLikes[reviewId] || { count: 0, isLiked: false };
+    const newIsLiked = !currentLikeState.isLiked;
+
+    // Optimistic update
+    setReviewLikes(prev => ({
+      ...prev,
+      [reviewId]: {
+        count: newIsLiked ? currentLikeState.count + 1 : Math.max(0, currentLikeState.count - 1),
+        isLiked: newIsLiked
+      }
+    }));
+
+    try {
+      const response = newIsLiked
+        ? await socialApi.likeAnnotation(reviewId, currentUserId)
+        : await socialApi.unlikeAnnotation(reviewId, currentUserId);
+      
+      if (!response.success) {
+        // Rollback on failure
+        setReviewLikes(prev => ({
+          ...prev,
+          [reviewId]: currentLikeState
+        }));
+        console.error('Failed to toggle like:', response.error);
+      }
+    } catch (error) {
+      // Rollback on error
+      setReviewLikes(prev => ({
+        ...prev,
+        [reviewId]: currentLikeState
+      }));
+      console.error('Failed to toggle like:', error);
+    }
+  }, [isAuthenticated, currentUser, currentUserId, reviewLikes]);
+
+  // Handle toggle comments for a review
+  const handleToggleComments = useCallback(async (reviewId: number) => {
+    if (!isAuthenticated || !currentUser) {
+      setShowLoginModal(true);
+      return;
+    }
+
+    const currentState = getCommentsState(reviewId);
+    const isShowing = currentState.showComments;
+    const newShowState = !isShowing;
+
+    // Update show state
+    updateCommentsState(reviewId, { showComments: newShowState });
+
+    // Load comments if showing for the first time and not already loaded
+    if (newShowState && currentState.comments.length === 0 && !currentState.isLoading) {
+      updateCommentsState(reviewId, { isLoading: true });
+      
+      try {
+        const response = await socialApi.getComments(reviewId, currentUserId);
+        if (response.success && response.data) {
+          updateCommentsState(reviewId, {
+            comments: response.data,
+            isLoading: false
+          });
+        } else {
+          updateCommentsState(reviewId, {
+            comments: [],
+            isLoading: false
+          });
+          console.error('Failed to load comments:', response.error);
+        }
+      } catch (error) {
+        console.error('Failed to load comments:', error);
+        updateCommentsState(reviewId, {
+          comments: [],
+          isLoading: false
+        });
+      }
+    }
+  }, [isAuthenticated, currentUser, currentUserId, getCommentsState, updateCommentsState]);
+
+  // Handle add comment
+  const handleAddComment = useCallback(async (reviewId: number, e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const currentState = getCommentsState(reviewId);
+    const commentText = currentState.newComment.trim();
+    
+    if (!commentText || !currentUser || currentState.isSubmitting) return;
+
+    updateCommentsState(reviewId, { isSubmitting: true });
+    
+    try {
+      const response = await socialApi.addComment(reviewId, currentUserId, commentText);
+      if (response.success && response.data) {
+        // Optimistic update
+        updateCommentsState(reviewId, {
+          comments: [response.data, ...currentState.comments],
+          newComment: '',
+          isSubmitting: false
+        });
+        
+        // Update comment count in review
+        setRealReviews(prev => prev.map(review => 
+          review.id === reviewId 
+            ? { ...review, comments_count: (review.comments_count || 0) + 1 }
+            : review
+        ));
+      } else {
+        updateCommentsState(reviewId, { isSubmitting: false });
+        console.error('Failed to add comment:', response.error);
+      }
+    } catch (error) {
+      updateCommentsState(reviewId, { isSubmitting: false });
+      console.error('Failed to add comment:', error);
+    }
+  }, [currentUser, currentUserId, getCommentsState, updateCommentsState]);
+
+  // Handle delete comment
+  const handleDeleteComment = useCallback(async (reviewId: number, commentId: number) => {
+    if (!currentUser) return;
+
+    const currentState = getCommentsState(reviewId);
+    
+    // Optimistic update
+    updateCommentsState(reviewId, {
+      comments: currentState.comments.filter(c => c.id !== commentId)
+    });
+    
+    // Update comment count optimistically
+    setRealReviews(prev => prev.map(review => 
+      review.id === reviewId 
+        ? { ...review, comments_count: Math.max(0, (review.comments_count || 0) - 1) }
+        : review
+    ));
+
+    try {
+      const response = await socialApi.deleteComment(commentId, currentUserId);
+      if (!response.success) {
+        // Rollback on failure
+        updateCommentsState(reviewId, { comments: currentState.comments });
+        setRealReviews(prev => prev.map(review => 
+          review.id === reviewId 
+            ? { ...review, comments_count: (review.comments_count || 0) + 1 }
+            : review
+        ));
+        console.error('Failed to delete comment:', response.error);
+      }
+    } catch (error) {
+      // Rollback on error
+      updateCommentsState(reviewId, { comments: currentState.comments });
+      setRealReviews(prev => prev.map(review => 
+        review.id === reviewId 
+          ? { ...review, comments_count: (review.comments_count || 0) + 1 }
+          : review
+      ));
+      console.error('Failed to delete comment:', error);
+    }
+  }, [currentUser, currentUserId, getCommentsState, updateCommentsState]);
+
 
   // Render components
   const renderImageGallery = () => (
-    <div className="relative w-full h-72 overflow-hidden">
+    <div className="relative w-full h-64 md:h-72 overflow-hidden border-b-2 border-black">
       {place.images && place.images.length > 0 ? (
         <>
           <img 
@@ -221,7 +478,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
             variant="secondary"
             size="icon"
             onClick={onClose}
-            className="absolute top-4 right-4 h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm border-0"
+            className="absolute top-2 right-2 md:top-4 md:right-4 h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm border-0 z-10"
           >
             <X className="h-5 w-5" />
           </Button>
@@ -276,7 +533,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
             variant="secondary"
             size="icon"
             onClick={onClose}
-            className="absolute top-4 right-4 h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm border-0"
+            className="absolute top-2 right-2 md:top-4 md:right-4 h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm border-0 z-10"
           >
             <X className="h-5 w-5" />
           </Button>
@@ -307,7 +564,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
         <span className="leading-relaxed">{place.address}</span>
       </div>
       {place.category && place.category !== 'point_of_interest' && (
-        <Badge variant="secondary" className="w-fit bg-gray-100 text-gray-700 border-gray-200 font-medium">
+        <Badge variant="secondary" className="w-fit rounded-md border border-black/20 bg-white text-gray-700 font-medium shadow-[1px_1px_0_0_#000]">
           {formatGoogleTypeForDisplay(place.category)}
         </Badge>
       )}
@@ -317,7 +574,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const renderReviewItem = (review: RealReview, index: number) => (
     <motion.div
       key={review.id}
-      className="group flex gap-3 p-3 rounded-lg hover:bg-gray-50/50 transition-all duration-200 border border-transparent hover:border-gray-100"
+      className="group flex gap-3 p-3 rounded-md border border-black/20 hover:border-black/40 bg-white hover:bg-gray-50/50 transition-all duration-200 shadow-sm hover:shadow-[2px_2px_0_0_#000]"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
@@ -327,7 +584,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
         ease: 'easeOut'
       }}
     >
-      <Avatar className="h-8 w-8 ring-1 ring-gray-100">
+      <Avatar className="h-8 w-8 border border-black/20">
         {review.user_picture ? (
           <img
             src={review.user_picture}
@@ -410,23 +667,128 @@ const ContentCard: React.FC<ContentCardProps> = ({
         {/* Review Actions */}
         <div className="flex items-center gap-3 pt-1">
           <button 
-            className="flex items-center gap-1.5 text-gray-500 hover:text-red-500 transition-colors duration-200 text-xs font-medium"
-            onClick={() => console.log('Like review:', review.id)}
+            className={`flex items-center gap-1.5 transition-colors duration-200 text-xs font-medium px-2 py-1 rounded-md border border-transparent ${
+              (reviewLikes[review.id]?.isLiked || false)
+                ? 'text-red-500 bg-red-50 border-red-200'
+                : 'text-gray-500 hover:text-red-500 hover:border-red-200 hover:bg-red-50'
+            }`}
+            onClick={() => handleLike(review.id)}
           >
-            <Heart className="h-3.5 w-3.5" />
-            <span>Like</span>
+            <Heart className={`h-3.5 w-3.5 ${(reviewLikes[review.id]?.isLiked || false) ? 'fill-current' : ''}`} />
+            <span>{(reviewLikes[review.id]?.count || 0) > 0 ? reviewLikes[review.id]?.count : 'Like'}</span>
           </button>
           
           <button 
-            className="flex items-center gap-1.5 text-gray-500 hover:text-blue-500 transition-colors duration-200 text-xs font-medium"
-            onClick={() => console.log('Reply to review:', review.id)}
+            className="flex items-center gap-1.5 text-gray-500 hover:text-blue-500 transition-colors duration-200 text-xs font-medium px-2 py-1 rounded-md border border-transparent hover:border-blue-200 hover:bg-blue-50"
+            onClick={() => handleToggleComments(review.id)}
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-            </svg>
-            <span>Reply</span>
+            <MessageCircle className="h-3.5 w-3.5" />
+            <span>{getCommentsState(review.id).comments.length || review.comments_count || 0}</span>
           </button>
         </div>
+        
+        {/* Comments Section */}
+        {(() => {
+          const commentsState = getCommentsState(review.id);
+          if (!commentsState.showComments) return null;
+          
+          return (
+            <div className="mt-3 pt-3 border-t border-black/10">
+              {/* Loading state */}
+              {commentsState.isLoading && (
+                <div className="flex items-center justify-center py-4">
+                  <div className="text-xs text-gray-500">Loading comments...</div>
+                </div>
+              )}
+              
+              {/* Comments display */}
+              {!commentsState.isLoading && commentsState.comments.length > 0 && (
+                <div className={`space-y-2 mb-3 ${MAX_COMMENTS_HEIGHT} overflow-y-auto`}>
+                  {commentsState.comments.map(comment => (
+                  <div key={comment.id} className="flex items-start gap-2 text-xs">
+                    <Avatar className="h-5 w-5 flex-shrink-0 mt-0.5">
+                      {comment.user_picture ? (
+                        <img
+                          src={comment.user_picture}
+                          alt={comment.user_name || 'User'}
+                          className="h-5 w-5 rounded-full object-cover"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <AvatarFallback className="text-[10px] bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                          {getInitials(comment.user_name || 'U')}
+                        </AvatarFallback>
+                      )}
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-semibold text-gray-900">{comment.user_name || 'Anonymous User'}</span>
+                        <span className="text-gray-600">{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-gray-400">{formatDate(comment.created_at)}</span>
+                        {comment.user_id === currentUser?.id && (
+                          <button
+                            onClick={() => handleDeleteComment(review.id, comment.id)}
+                            className="text-gray-400 hover:text-red-500 text-xs"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* No comments message */}
+              {!commentsState.isLoading && commentsState.comments.length === 0 && (
+                <div className="text-center py-4">
+                  <p className="text-xs text-gray-500">No comments yet. Be the first to comment!</p>
+                </div>
+              )}
+              
+              {/* Comment form */}
+              {!commentsState.isLoading && currentUser && (
+                <form onSubmit={(e) => handleAddComment(review.id, e)} className="flex items-center gap-2 pt-2 border-t border-black/10">
+                  <Avatar className="h-6 w-6 flex-shrink-0">
+                    {currentUser.profilePictureUrl ? (
+                      <img
+                        src={currentUser.profilePictureUrl}
+                        alt={currentUser.displayName}
+                        className="h-6 w-6 rounded-full object-cover"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <AvatarFallback className="text-[10px] bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                        {getInitials(currentUser.displayName || 'U')}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
+                  <Input
+                    type="text"
+                    value={commentsState.newComment}
+                    onChange={(e) => updateCommentsState(review.id, { newComment: e.target.value })}
+                    placeholder="Add a comment..."
+                    className="flex-1 h-7 text-xs rounded-md border border-black/20"
+                    disabled={commentsState.isSubmitting}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="h-7 px-3 text-xs rounded-md border border-black bg-white text-gray-900 shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all disabled:opacity-50"
+                    disabled={!commentsState.newComment.trim() || commentsState.isSubmitting}
+                  >
+                    {commentsState.isSubmitting ? '...' : 'Post'}
+                  </Button>
+                </form>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </motion.div>
   );
@@ -436,7 +798,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Reviews ({realReviews.length})</h3>
         <button 
-          className="write-review-btn"
+          className="rounded-md border border-black bg-white text-gray-900 px-4 py-2 text-sm font-semibold shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
           onClick={() => setReviewOpen(true)}
         >
           Write a review
@@ -446,18 +808,22 @@ const ContentCard: React.FC<ContentCardProps> = ({
       <div className="space-y-3">
         {reviewsLoading ? (
           <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, i) => (
+            {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
               <ReviewItemSkeleton key={i} />
             ))}
           </div>
         ) : reviewsError ? (
-          <div className="p-6 text-center rounded-xl bg-red-50 border border-red-100">
-            <p className="text-red-600 font-medium">
-              Error loading reviews: {reviewsError}
+          <div className="p-6 text-center rounded-md border-2 border-amber-300 bg-amber-50 shadow-[2px_2px_0_0_#f59e0b]">
+            <div className="text-4xl mb-3 opacity-30">📍</div>
+            <p className="text-amber-700 font-medium mb-2">
+              Manual Location
+            </p>
+            <p className="text-amber-600 text-sm">
+              {reviewsError}
             </p>
           </div>
         ) : realReviews.length === 0 ? (
-          <div className="p-8 text-center rounded-xl bg-gray-50 border border-gray-100">
+          <div className="p-8 text-center rounded-md border border-black/20 bg-gray-50 shadow-sm">
             <div className="text-4xl mb-3 opacity-30">💬</div>
             <p className="text-gray-600 font-medium mb-2">No reviews yet</p>
             <p className="text-gray-500 text-sm">Be the first to review this place!</p>
@@ -473,70 +839,109 @@ const ContentCard: React.FC<ContentCardProps> = ({
 
 
   const renderSocialActions = () => (
-    <div className="flex gap-3 pt-6">
-      
-      <Button 
-        variant={place.isSaved ? "default" : "outline"}
-        size="sm"
-        onClick={onSave}
-        className={`flex-1 font-medium ${
-          place.isSaved 
-            ? "bg-blue-500 hover:bg-blue-600 text-white border-blue-500" 
-            : "text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
-        }`}
-      >
-        <Bookmark className={`h-4 w-4 ${place.isSaved ? 'fill-current' : ''}`} />
-        {place.isSaved ? 'Saved' : 'Save'}
-      </Button>
-      
-      <Button 
-        variant="outline"
-        size="sm"
-        onClick={onShare}
-        className="flex-1 font-medium text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
-      >
-        <Share2 className="h-4 w-4" />
-        Share
-      </Button>
-    </div>
+    // Commented out - not using save/share buttons yet
+    // <div className="flex gap-3 pt-6">
+    //   
+    //   <Button 
+    //     variant={place.isSaved ? "default" : "outline"}
+    //     size="sm"
+    //     onClick={onSave}
+    //     className={`flex-1 font-medium rounded-md border-2 border-black shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all ${
+    //       place.isSaved 
+    //         ? "bg-blue-500 hover:bg-blue-600 text-white" 
+    //         : "bg-white text-gray-900 hover:bg-gray-50"
+    //     }`}
+    //   >
+    //     <Bookmark className={`h-4 w-4 ${place.isSaved ? 'fill-current' : ''}`} />
+    //     {place.isSaved ? 'Saved' : 'Save'}
+    //   </Button>
+    //   
+    //   <Button 
+    //     variant="outline"
+    //     size="sm"
+    //     onClick={onShare}
+    //     className="flex-1 font-medium rounded-md border-2 border-black bg-white text-gray-900 shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all hover:bg-gray-50"
+    //   >
+    //     <Share2 className="h-4 w-4" />
+    //     Share
+    //   </Button>
+    // </div>
+    null
   );
 
   return (
-    <motion.div
-      className="fixed inset-y-0 left-0 w-96 bg-white border-r border-gray-200 shadow-2xl z-50 overflow-y-auto pt-16"
-      initial={{ x: '-100%' }}
-      animate={{ x: 0 }}
-      exit={{ x: '-100%' }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-    >
-      {renderImageGallery()}
-      
-      <div className="p-6 space-y-8">
-        {renderPlaceHeader()}
-        
-        <Separator className="bg-gray-100" />
-        
-        {renderReviewsSection()}
-        
-        {renderSocialActions()}
-      </div>
-
-      {/* Review Modal */}
-      <ReviewModal 
-        isOpen={reviewOpen} 
-        onClose={() => setReviewOpen(false)} 
-        onSubmit={handleSubmitReview}
-        placeData={{
-          name: place.name,
-          address: place.address,
-          latitude: place.latitude,
-          longitude: place.longitude,
-          google_place_id: place.google_place_id,
-        }}
-        onSuccess={handleReviewSuccess}
-        onError={handleReviewError}
+    <>
+      {/* Backdrop overlay for mobile */}
+      <motion.div
+        className="fixed inset-0 bg-black/50 z-40 md:hidden"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
       />
-    </motion.div>
+
+      {/* Content Card */}
+      <motion.div
+        className="
+          fixed bg-white z-50 overflow-y-auto
+          inset-x-0 bottom-0 rounded-t-2xl border-t-2 border-black shadow-[0_-8px_0_0_#000] max-h-[90vh]
+          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:shadow-[8px_0_0_0_#000] md:max-h-none md:pt-16
+        "
+        initial={isMobile ? { y: '100%' } : { x: '-100%' }}
+        animate={isMobile ? { y: 0 } : { x: 0 }}
+        exit={isMobile ? { y: '100%' } : { x: '-100%' }}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+        drag={isMobile ? 'y' : false}
+        dragConstraints={isMobile ? { top: 0 } : {}}
+        dragElastic={isMobile ? 0.2 : 0}
+        onDragEnd={handleDragEnd}
+        style={isMobile ? { y, opacity } : {}}
+      >
+        {/* Drag handle for mobile */}
+        <div 
+          className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none md:hidden"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
+        </div>
+
+        {renderImageGallery()}
+        
+        <div className="p-4 md:p-6 space-y-8">
+          {renderPlaceHeader()}
+          
+          <Separator className="bg-black/20" />
+          
+          {renderReviewsSection()}
+          
+          {renderSocialActions()}
+        </div>
+
+        {/* Review Modal */}
+        <ReviewModal 
+          isOpen={reviewOpen} 
+          onClose={() => setReviewOpen(false)} 
+          onSubmit={handleSubmitReview}
+          placeData={{
+            name: place.name,
+            address: place.address,
+            latitude: place.latitude,
+            longitude: place.longitude,
+            google_place_id: place.google_place_id,
+          }}
+          onSuccess={handleReviewSuccess}
+          onError={handleReviewError}
+        />
+        
+        {/* Login Modal */}
+        {showLoginModal && (
+          <LoginModal 
+            onClose={() => setShowLoginModal(false)} 
+            next={window.location.pathname + window.location.search}
+          />
+        )}
+      </motion.div>
+    </>
   );
 };
 

@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const friendGroups_1 = require("../db/friendGroups");
 const router = express_1.default.Router();
-// Note: Authentication is now handled by the JWT middleware in index.ts
 /**
  * POST /api/friend-groups
  * Create a new friend group

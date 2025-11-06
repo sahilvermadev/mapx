@@ -41,6 +41,9 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
           const rest = sorted.slice(1);
           const ratings = group.map(p => p.rating).filter((r): r is number => Boolean(r));
           const avg = ratings.length ? ratings.reduce((s, r) => s + r, 0) / ratings.length : 0;
+          
+          // Get search scores from attached data
+          const searchScores = group.map(p => (p as any).searchScore || (p as any).similarity || 0).filter(score => score > 0);
 
           const toggle = () => {
             setExpanded(prev => {
@@ -60,8 +63,24 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
 
           // Get the best post for display
           const displayPost = best;
-          const serviceName = meta?.title || displayPost?.place_name || 'Service Provider';
-          const location = meta?.subtitle || displayPost?.place_address;
+          
+          // Check if this is a question post - if so, skip grouping
+          // Questions typically have answers_count but no recommendation_id
+          if ((displayPost as any)?.answers_count !== undefined && !displayPost?.recommendation_id) {
+            return null; // Don't render question posts in groups
+          }
+          
+          // Get service name from multiple sources
+          const serviceName = meta?.title || 
+                             displayPost?.place_name || 
+                             displayPost?.title ||
+                             (displayPost?.content_data as any)?.service_name ||
+                             (displayPost?.content_data as any)?.place_name ||
+                             'Service Provider';
+          const location = meta?.subtitle || 
+                          displayPost?.place_address || 
+                          (displayPost?.content_data as any)?.service_address ||
+                          (displayPost?.content_data as any)?.address;
           
           // Extract labels from the post description or use default labels
           const getLabels = () => {
@@ -132,7 +151,19 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                       </div>
                     </div>
                     <Badge variant="secondary" className="bg-blue-50 text-blue-700 text-xs px-2 py-1 font-medium border-blue-200">
-                      {Math.round(avg * 100)}% match
+                      {(() => {
+                        // Calculate match percentage from search scores
+                        let matchPercentage = 0;
+                        if (searchScores.length > 0) {
+                          // Use the highest search score from the group
+                          matchPercentage = Math.round(Math.max(...searchScores) * 100);
+                        } else {
+                          // Fallback to rating-based calculation
+                          matchPercentage = Math.round(avg * 100);
+                        }
+                        
+                        return `${matchPercentage}% match`;
+                      })()}
                     </Badge>
                   </div>
 
@@ -207,7 +238,8 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                           size="sm"
                           onClick={async () => {
                             try {
-                              const url = `${window.location.origin}/post/${displayPost.recommendation_id}`;
+                              const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+                              const url = `${backendBase}/share/post/${displayPost.recommendation_id}`;
                               const shareData: ShareData = {
                                 title: displayPost.place_name || displayPost.title || 'Post',
                                 text: displayPost.description || 'Check out this post on RECCE',

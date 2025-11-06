@@ -1,9 +1,5 @@
 import Groq from 'groq-sdk';
-import dotenv from 'dotenv';
-import path from 'path';
-
-// Load .env file from the root directory
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+import '../config/env';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -50,6 +46,9 @@ export interface RecommendationQuestion {
 class RecommendationAI {
   async analyzeRecommendation(text: string): Promise<RecommendationAnalysis> {
     try {
+      // More sophisticated detection of question context
+      const isAnsweringQuestion = this.detectQuestionContext(text);
+      
       const prompt = `You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. Your job is to:
 
 1. Determine if the text is valid content (not gibberish, spam, or irrelevant)
@@ -58,6 +57,19 @@ class RecommendationAI {
 4. Identify what important information is missing and generate smart follow-up questions
 
 User's text: "${text}"
+
+${isAnsweringQuestion ? `
+CONTEXT: The user is answering a question from someone else. This text appears to be a question that someone is asking, and the user wants to provide a recommendation to answer it. 
+
+The follow-up questions should be SHORT and DIRECT, like form fields. Use concise, simple questions:
+- "What's the name?"
+- "Where is it located?"
+- "What's the contact info?"
+- "What makes it good?"
+- "Any tips or notes?"
+
+Avoid long explanations or phrases like "To give a complete answer" or "To help others understand".
+` : ''}
 
 Analyze this text and respond with a JSON object containing:
 
@@ -102,6 +114,12 @@ Guidelines:
 - Be specific and contextual in your questions
 - If the text is gibberish or irrelevant, set isValid to false and isGibberish to true
 - IMPORTANT: For location-related fields (location, address, place), set "needsLocationPicker": true to enable Google Maps location selection
+${isAnsweringQuestion ? `
+- IMPORTANT: Since this is answering a question, make follow-up questions SHORT and DIRECT like form fields
+- Use simple, concise questions that feel like filling out a form
+- Avoid long explanations or verbose phrasing
+- Focus on getting the essential information quickly
+` : ''}
 
 Respond with valid JSON only.`;
 
@@ -109,7 +127,7 @@ Respond with valid JSON only.`;
         messages: [
           {
             role: "system",
-            content: "You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. You must respond with valid JSON only. Be thorough in your analysis and generate helpful, contextual questions."
+            content: "You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. You must respond with valid JSON only. Be thorough in your analysis and generate helpful, contextual questions. When the user is answering a question, make follow-up questions SHORT and DIRECT like form fields."
           },
           {
             role: "user",
@@ -162,6 +180,9 @@ Respond with valid JSON only.`;
     conversationHistory: string[]
   ): Promise<RecommendationQuestion> {
     try {
+      // Check if this is part of answering a question using more sophisticated detection
+      const isAnsweringQuestion = this.detectQuestionContext(conversationHistory.join(' '));
+
       const prompt = `You are an intelligent AI assistant that generates contextual follow-up questions for a local knowledge sharing platform.
 
 Current information collected:
@@ -171,11 +192,27 @@ Content type: ${contentType}
 Missing field: ${missingField}
 Conversation history: ${conversationHistory.join(' | ')}
 
+${isAnsweringQuestion ? `
+CONTEXT: The user is answering a question from someone else. Your follow-up question should be SHORT and DIRECT, like a form field.
+
+Use concise, simple questions:
+- "What's the name?"
+- "Where is it located?"
+- "What's the contact info?"
+- "What makes it good?"
+- "Any tips or notes?"
+
+Avoid long explanations or verbose phrasing.
+` : ''}
+
 Generate a smart, contextual question to ask for the missing field. The question should:
 1. Be natural and conversational
 2. Provide context about why this information is important
 3. Give examples when helpful
 4. Be specific to the content type
+${isAnsweringQuestion ? `
+5. Be SHORT and DIRECT like a form field - avoid verbose explanations
+` : ''}
 
 Respond with JSON:
 {
@@ -189,7 +226,7 @@ Respond with JSON:
         messages: [
           {
             role: "system",
-            content: "You are an intelligent AI assistant that generates contextual follow-up questions. Respond with valid JSON only."
+            content: "You are an intelligent AI assistant that generates contextual follow-up questions. Respond with valid JSON only. When the user is answering a question, make questions SHORT and DIRECT like form fields."
           },
           {
             role: "user",
@@ -296,6 +333,31 @@ Respond with JSON:
         confidence: 0.5
       };
     }
+  }
+
+  private detectQuestionContext(text: string): boolean {
+    const lowerText = text.toLowerCase();
+    
+    // Check for question patterns
+    const questionIndicators = [
+      '?', 'what', 'where', 'when', 'why', 'how', 'which', 'who', 'can you', 'do you know',
+      'any recommendations', 'suggestions', 'advice', 'help with', 'looking for'
+    ];
+    
+    const hasQuestionIndicators = questionIndicators.some(indicator => lowerText.includes(indicator));
+    
+    // Check for question sentence structure
+    const questionWords = ['what', 'where', 'when', 'why', 'how', 'which', 'who'];
+    const startsWithQuestionWord = questionWords.some(word => lowerText.startsWith(word));
+    
+    // Check for question patterns in the text
+    const hasQuestionPattern = /\?/.test(text) || 
+                              /^(what|where|when|why|how|which|who|can|do|are|is|would|could|should)/i.test(text.trim());
+    
+    // Check if it looks like someone is asking for recommendations
+    const isAskingForRecommendations = /(recommend|suggest|know.*good|looking.*for|any.*good|best.*place|good.*restaurant|good.*service)/i.test(text);
+    
+    return hasQuestionIndicators || startsWithQuestionWord || hasQuestionPattern || isAskingForRecommendations;
   }
 
   private cleanJsonResponse(response: string): string {
@@ -427,6 +489,9 @@ STYLE:
 - If the ORIGINAL text contains first-person details (e.g., "treated my son"), paraphrase to neutral third-person without implying AI authorship (e.g., "treated a patient" or "completed a successful procedure"). Do not mention "the recommender".
 - Never invent details.
 - Do not include location or contact information; the UI shows those separately.
+${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
+- CONTEXT: This is answering a question. Make sure the recommendation directly addresses what was asked and provides a helpful answer.
+` : ''}
 
 DATA:
 ${baseData}
@@ -443,11 +508,14 @@ GOAL:
 
 STYLE:
 - Write 3–5 short sentences in third-person, using active voice.
-- Focus on vibe, what it’s good for, best times to go, and any practical tip provided (queues, noise level, must-try items).
+- Focus on vibe, what it's good for, best times to go, and any practical tip provided (queues, noise level, must-try items).
 - Avoid generic phrases like "recommended place" and avoid repeating the name more than once.
 - If the ORIGINAL text uses first-person anecdotes, paraphrase to neutral third-person (e.g., "I loved the quiet mornings" -> "Quiet in the mornings"). Do not mention "the recommender".
 - Keep language descriptive but utilitarian; no emojis or fluff. Never invent details.
 - Do not include location or contact information; the UI shows those separately.
+${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
+- CONTEXT: This is answering a question. Make sure the recommendation directly addresses what was asked and provides a helpful answer.
+` : ''}
 
 DATA:
 ${baseData}
@@ -465,6 +533,9 @@ STYLE:
 - Only use details that exist in the data (category, specialties, pricing, best time, tips). Never invent.
 - Convert any first-person statements from the ORIGINAL into neutral third-person without implying authorship or personal involvement. Avoid phrases like "I recommend" or "the recommender".
 - Do not include location or contact information; the UI surfaces those separately.
+${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
+- CONTEXT: This is answering a question. Make sure the recommendation directly addresses what was asked and provides a helpful answer.
+` : ''}
 
 DATA:
 ${baseData}

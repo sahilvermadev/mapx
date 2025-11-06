@@ -1,0 +1,158 @@
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Header as LandingHeader } from '@/components/landing/Header';
+import { Card } from '@/components/ui/card';
+import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
+import QuestionFeedPost from '@/components/QuestionFeedPost';
+import { apiClient } from '@/services/apiClient';
+import { useAuth } from '@/auth';
+
+const QuestionPage: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const { user: currentUser, isChecking, isAuthenticated } = useAuth();
+  const [question, setQuestion] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [bgReady, setBgReady] = useState(false);
+  const [followSuggestion, setFollowSuggestion] = useState<{ friendId: string; friendName: string } | null>(null);
+
+  useEffect(() => {
+    if (!id) {
+      setError('No question ID provided');
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const fetchPublic = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const { data: payload } = await apiClient.get(`/public/questions/${id}`);
+        const raw = payload && typeof payload === 'object' && (payload as any).data ? (payload as any).data : payload;
+        if (!raw) return;
+        if (!cancelled) setQuestion(raw);
+      } catch (e: any) {
+        const data = e?.response?.data;
+        if (!cancelled) setError(data?.error || 'Failed to load question');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    fetchPublic();
+
+    const fetchPrivate = async () => {
+      if (!isAuthenticated) return;
+      try {
+        const { data: payload } = await apiClient.get(`/questions/${id}`);
+        const raw = payload && typeof payload === 'object' && (payload as any).data ? (payload as any).data : payload;
+        if (raw && !cancelled) setQuestion(raw);
+      } catch {}
+    };
+    fetchPrivate();
+    return () => { cancelled = true; };
+  }, [id, isAuthenticated]);
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = '/src/assets/post-page-bg.jpg';
+    img.onload = () => setBgReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const params = new URLSearchParams(window.location.search);
+    const friendId = params.get('friendId');
+    const friendName = params.get('friendName');
+    if (friendId && friendName) {
+      setFollowSuggestion({ friendId, friendName });
+    }
+  }, [isAuthenticated]);
+
+  if (isChecking) {
+    return null;
+  }
+
+  return (
+    <div 
+      className="h-full grid place-items-center overflow-hidden transition-opacity duration-300"
+      style={{
+        backgroundImage: 'url(/src/assets/post-page-bg.jpg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        opacity: bgReady ? 1 : 0.7
+      }}
+    >
+        {!isAuthenticated && (
+          <LandingHeader
+            variant="dark"
+            hideNav
+            position="fixed"
+            onSignInClick={() => {
+              const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+              const nextUrl = `/question/${id}`;
+              window.location.href = `${backendBase}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+            }}
+          />
+        )}
+      <div className="w-full max-w-2xl p-4">
+
+        {/* Loading State */}
+        {loading && (
+          <Card className="p-6 shadow-sm border border-white/40 bg-white/90 backdrop-blur-sm">
+            <FeedPostSkeleton noOuterSpacing />
+          </Card>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <p className="text-red-500">{error}</p>
+            <Button onClick={() => window.location.reload()} variant="outline" size="sm">
+              Try Again
+            </Button>
+            {!isAuthenticated && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+                  const nextUrl = `/question/${id}`;
+                  window.location.href = `${backendBase}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+                }}
+              >
+                Sign in to view more
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Question Content */}
+        {question && !loading && !error && (
+          <Card className="p-6 shadow-sm border border-white/40 bg-white/90 backdrop-blur-sm">
+            <div className="w-full flex justify-center">
+              <div className="w-full max-w-xl">
+                <QuestionFeedPost
+                  question={question}
+                  currentUserId={isAuthenticated && currentUser ? currentUser.id : undefined}
+                  noOuterSpacing={true}
+                  readOnly={!isAuthenticated}
+                  onQuestionUpdate={() => {
+                    window.location.reload();
+                  }}
+                />
+              </div>
+            </div>
+          </Card>
+        )}
+        {!isAuthenticated && !loading && !error && question && followSuggestion && (
+          <div className="mt-3 text-center text-sm text-gray-600">
+            You'll be able to follow {followSuggestion.friendName} after signing in.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default React.memo(QuestionPage);

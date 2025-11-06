@@ -6,6 +6,8 @@ exports.up = pgm => {
   // Enable extensions (requires superuser or appropriate DB privileges)
   pgm.sql('CREATE EXTENSION IF NOT EXISTS postgis;');
   pgm.sql('CREATE EXTENSION IF NOT EXISTS vector;');  // pgvector
+  pgm.sql('CREATE EXTENSION IF NOT EXISTS btree_gin;'); // For JSONB indexes
+  pgm.sql('CREATE EXTENSION IF NOT EXISTS pg_trgm;'); // For text search
 
   // Table: users (keeping existing)
   pgm.createTable('users', {
@@ -26,6 +28,7 @@ exports.up = pgm => {
     },
     display_name: {
       type: 'VARCHAR(255)',
+      notNull: true, // Make required for better UX
     },
     profile_picture_url: {
       type: 'TEXT',
@@ -47,9 +50,32 @@ exports.up = pgm => {
       type: 'TIMESTAMPTZ',
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
+    is_active: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: true,
+    },
+    updated_at: {
+      type: 'TIMESTAMPTZ',
+      notNull: true,
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
   });
-  pgm.createIndex('users', 'google_id', { ifNotExists: true });
-  pgm.createIndex('users', 'username', { ifNotExists: true });
+  // Add constraints for users
+  pgm.addConstraint('users', 'users_email_format', {
+    check: "email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'"
+  });
+  pgm.addConstraint('users', 'users_username_format', {
+    check: "username IS NULL OR (username ~* '^[a-z0-9_]{3,50}$' AND username !~ '^[0-9]')"
+  });
+
+  // Optimized indexes for users
+  pgm.createIndex('users', 'google_id', { unique: true });
+  pgm.createIndex('users', 'email', { unique: true });
+  pgm.createIndex('users', 'username', { unique: true, where: 'username IS NOT NULL' });
+  pgm.createIndex('users', 'is_active');
+  pgm.createIndex('users', 'created_at');
+  pgm.createIndex('users', 'last_login_at');
 
   // Table: categories
   pgm.createTable('categories', {
@@ -65,11 +91,25 @@ exports.up = pgm => {
     description: {
       type: 'TEXT',
     },
+    is_active: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: true,
+    },
     created_at: {
       type: 'TIMESTAMPTZ',
+      notNull: true,
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+    updated_at: {
+      type: 'TIMESTAMPTZ',
+      notNull: true,
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
+
+  pgm.createIndex('categories', 'name', { unique: true });
+  pgm.createIndex('categories', 'is_active');
 
   // Table: places
   pgm.createTable('places', {
@@ -95,9 +135,11 @@ exports.up = pgm => {
     },
     lat: {
       type: 'DOUBLE PRECISION',
+      check: 'lat IS NULL OR (lat >= -90 AND lat <= 90)',
     },
     lng: {
       type: 'DOUBLE PRECISION',
+      check: 'lng IS NULL OR (lng >= -180 AND lng <= 180)',
     },
     geom: {
       type: 'GEOGRAPHY(Point,4326)',
@@ -106,16 +148,46 @@ exports.up = pgm => {
       type: 'JSONB',
       default: pgm.func("'{}'::jsonb"),
     },
+    // Normalized location and type fields
+    city_name: {
+      type: 'TEXT',
+    },
+    city_slug: {
+      type: 'TEXT',
+    },
+    admin1_name: {
+      type: 'TEXT',
+    },
+    country_code: {
+      type: 'TEXT',
+    },
+    primary_type: {
+      type: 'TEXT',
+    },
+    types: {
+      type: 'TEXT[]',
+    },
+    is_verified: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: false,
+    },
     created_at: {
       type: 'TIMESTAMPTZ',
+      notNull: true,
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
     updated_at: {
       type: 'TIMESTAMPTZ',
+      notNull: true,
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
 
+  // Add constraints for places
+  pgm.addConstraint('places', 'places_coordinates_consistency', {
+    check: '(lat IS NULL AND lng IS NULL) OR (lat IS NOT NULL AND lng IS NOT NULL)'
+  });
 
   // Table: services
   pgm.createTable('services', {
@@ -144,6 +216,19 @@ exports.up = pgm => {
     address: {
       type: 'TEXT',
     },
+    // Normalized location fields for city filtering
+    city_name: {
+      type: 'TEXT',
+    },
+    city_slug: {
+      type: 'TEXT',
+    },
+    admin1_name: {
+      type: 'TEXT',
+    },
+    country_code: {
+      type: 'TEXT',
+    },
     website: {
       type: 'VARCHAR(255)',
     },
@@ -151,12 +236,19 @@ exports.up = pgm => {
       type: 'JSONB',
       default: pgm.func("'{}'::jsonb"),
     },
+    is_verified: {
+      type: 'BOOLEAN',
+      notNull: true,
+      default: false,
+    },
     created_at: {
       type: 'TIMESTAMPTZ',
+      notNull: true,
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
     updated_at: {
       type: 'TIMESTAMPTZ',
+      notNull: true,
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
@@ -190,6 +282,83 @@ exports.up = pgm => {
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
+
+  // Q&A tables
+  pgm.createTable('questions', {
+    id: {
+      type: 'SERIAL',
+      primaryKey: true,
+    },
+    user_id: {
+      type: 'UUID',
+      notNull: true,
+      references: 'users(id)',
+      onDelete: 'CASCADE',
+    },
+    text: {
+      type: 'TEXT',
+      notNull: true,
+    },
+    visibility: {
+      type: 'TEXT',
+      notNull: true,
+      default: 'friends',
+      check: "visibility IN ('public','friends')",
+    },
+    labels: {
+      type: 'TEXT[]',
+    },
+    metadata: {
+      type: 'JSONB',
+      default: pgm.func("'{}'::jsonb"),
+    },
+    embedding: {
+      type: 'VECTOR(1536)'
+    },
+    answers_count: {
+      type: 'INTEGER',
+      default: 0,
+      notNull: true,
+    },
+    last_answer_at: {
+      type: 'TIMESTAMPTZ',
+    },
+    last_answer_user_id: {
+      type: 'UUID',
+      references: 'users(id)',
+      onDelete: 'SET NULL',
+    },
+    created_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+    updated_at: {
+      type: 'TIMESTAMPTZ',
+      default: pgm.func('CURRENT_TIMESTAMP'),
+    },
+  });
+  // Add constraints for questions
+  pgm.addConstraint('questions', 'questions_last_answer_consistency', {
+    check: '(last_answer_at IS NULL AND last_answer_user_id IS NULL) OR (last_answer_at IS NOT NULL AND last_answer_user_id IS NOT NULL)'
+  });
+
+  // Optimized indexes for questions
+  pgm.createIndex('questions', 'user_id');
+  pgm.createIndex('questions', 'visibility');
+  pgm.createIndex('questions', 'created_at');
+  pgm.createIndex('questions', 'answers_count');
+  pgm.createIndex('questions', 'last_answer_at');
+  pgm.createIndex('questions', 'last_answer_user_id', { where: 'last_answer_user_id IS NOT NULL' });
+  
+  // Composite indexes for common query patterns
+  pgm.createIndex('questions', ['user_id', 'created_at']);
+  pgm.createIndex('questions', ['visibility', 'created_at']);
+  pgm.createIndex('questions', ['answers_count', 'created_at']);
+  
+  // Vector and JSONB indexes
+  pgm.sql("CREATE INDEX IF NOT EXISTS questions_embedding_index ON questions USING ivfflat (embedding vector_cosine_ops) WHERE embedding IS NOT NULL;");
+  pgm.createIndex('questions', 'metadata', { method: 'gin' });
+  pgm.createIndex('questions', 'labels', { method: 'gin' });
 
   // Table: recommendations (new unified table)
   pgm.createTable('recommendations', {
@@ -248,6 +417,11 @@ exports.up = pgm => {
     embedding: {
       type: 'VECTOR(1536)',
     },
+    question_id: {
+      type: 'INT',
+      references: 'questions(id)',
+      onDelete: 'SET NULL',
+    },
     created_at: {
       type: 'TIMESTAMPTZ',
       default: pgm.func('CURRENT_TIMESTAMP'),
@@ -256,6 +430,14 @@ exports.up = pgm => {
       type: 'TIMESTAMPTZ',
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
+  });
+
+  // Add constraints for recommendations
+  pgm.addConstraint('recommendations', 'recommendations_content_consistency', {
+    check: "(content_type = 'place' AND place_id IS NOT NULL AND service_id IS NULL) OR (content_type = 'service' AND service_id IS NOT NULL AND place_id IS NULL) OR (content_type IN ('tip', 'contact', 'unclear') AND place_id IS NULL AND service_id IS NULL)"
+  });
+  pgm.addConstraint('recommendations', 'recommendations_rating_range', {
+    check: 'rating IS NULL OR (rating >= 1 AND rating <= 5)'
   });
 
   // Table: media (photos, videos)
@@ -296,24 +478,59 @@ exports.up = pgm => {
   // Indexes for spatial and vector lookups
   pgm.createIndex('places', 'geom', { method: 'GIST' });
   
-  // Additional indexes for performance
-  pgm.createIndex('places', 'google_place_id');
+  // Optimized indexes for places
+  pgm.createIndex('places', 'google_place_id', { unique: true, where: 'google_place_id IS NOT NULL' });
   pgm.createIndex('places', 'category_id');
-  pgm.createIndex('services', 'phone_number', { ifNotExists: true });
-  pgm.createIndex('services', 'email', { ifNotExists: true });
-  pgm.createIndex('services', 'service_type', { ifNotExists: true });
-  pgm.createIndex('service_names', 'service_id', { ifNotExists: true });
-  pgm.createIndex('service_names', 'name', { ifNotExists: true });
+  pgm.createIndex('places', 'is_verified');
+  pgm.createIndex('places', 'created_at');
+  pgm.createIndex('places', 'name', { method: 'gin', opclass: 'gin_trgm_ops' }); // For text search
+  pgm.createIndex('places', 'metadata', { method: 'gin' }); // For JSONB queries
+  // City filtering indexes
+  pgm.createIndex('places', 'city_slug');
+  pgm.createIndex('places', 'country_code');
+  pgm.createIndex('places', 'primary_type');
+
+  // Optimized indexes for services
+  pgm.createIndex('services', 'phone_number', { unique: true, where: 'phone_number IS NOT NULL' });
+  pgm.createIndex('services', 'email', { unique: true, where: 'email IS NOT NULL' });
+  pgm.createIndex('services', 'service_type');
+  pgm.createIndex('services', 'is_verified');
+  pgm.createIndex('services', 'created_at');
+  pgm.createIndex('services', 'name', { method: 'gin', opclass: 'gin_trgm_ops' });
+  pgm.createIndex('services', 'metadata', { method: 'gin' });
+  // City filtering indexes for services
+  pgm.createIndex('services', 'city_slug');
+  pgm.createIndex('services', 'country_code');
+
+  // Optimized indexes for service_names
+  pgm.createIndex('service_names', 'service_id');
+  pgm.createIndex('service_names', 'name', { method: 'gin', opclass: 'gin_trgm_ops' });
+  pgm.createIndex('service_names', 'frequency');
+  pgm.createIndex('service_names', 'confidence');
+
+  // Optimized indexes for recommendations
   pgm.createIndex('recommendations', 'user_id');
   pgm.createIndex('recommendations', 'content_type');
-  pgm.createIndex('recommendations', 'place_id');
-  pgm.createIndex('recommendations', 'service_id', { ifNotExists: true });
+  pgm.createIndex('recommendations', 'place_id', { where: 'place_id IS NOT NULL' });
+  pgm.createIndex('recommendations', 'service_id', { where: 'service_id IS NOT NULL' });
+  pgm.createIndex('recommendations', 'question_id', { where: 'question_id IS NOT NULL' });
   pgm.createIndex('recommendations', 'visibility');
   pgm.createIndex('recommendations', 'created_at');
-  // Vector ANN index for embeddings (use cosine distance)
-  pgm.sql("CREATE INDEX IF NOT EXISTS recommendations_embedding_index ON recommendations USING ivfflat (embedding vector_cosine_ops);");
-  // GIN index for JSONB queries on content_data
+  pgm.createIndex('recommendations', 'rating', { where: 'rating IS NOT NULL' });
+  
+  // Composite indexes for common query patterns
+  pgm.createIndex('recommendations', ['user_id', 'created_at']);
+  pgm.createIndex('recommendations', ['visibility', 'created_at']);
+  pgm.createIndex('recommendations', ['content_type', 'visibility', 'created_at']);
+  pgm.createIndex('recommendations', ['question_id', 'created_at'], { where: 'question_id IS NOT NULL' });
+  
+  // Vector and JSONB indexes
+  pgm.sql("CREATE INDEX IF NOT EXISTS recommendations_embedding_index ON recommendations USING ivfflat (embedding vector_cosine_ops) WHERE embedding IS NOT NULL;");
   pgm.createIndex('recommendations', 'content_data', { method: 'gin' });
+  pgm.createIndex('recommendations', 'metadata', { method: 'gin' });
+  pgm.createIndex('recommendations', 'labels', { method: 'gin' });
+
+  // Optimized indexes for media
   pgm.createIndex('media', 'place_id');
   pgm.createIndex('media', 'recommendation_id');
   pgm.createIndex('media', 'user_id');
@@ -321,6 +538,12 @@ exports.up = pgm => {
   // Add constraints for services
   pgm.addConstraint('services', 'services_has_identifier', {
     check: 'phone_number IS NOT NULL OR email IS NOT NULL'
+  });
+  pgm.addConstraint('services', 'services_email_format', {
+    check: "email IS NULL OR email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'"
+  });
+  pgm.addConstraint('services', 'services_phone_format', {
+    check: "phone_number IS NULL OR phone_number ~ '^\\+?[1-9]\\d{1,14}$'"
   });
 
   // Add unique constraint for service_names to prevent duplicate name entries
@@ -672,27 +895,54 @@ exports.up = pgm => {
     unique: ['group_id', 'user_id']
   });
 
-  // Create indexes for social network tables
+  // Optimized indexes for social network tables
   pgm.createIndex('user_follows', 'follower_id');
   pgm.createIndex('user_follows', 'following_id');
+  pgm.createIndex('user_follows', 'created_at');
+  
+  // Optimized indexes for comments
   pgm.createIndex('annotation_comments', 'recommendation_id');
   pgm.createIndex('annotation_comments', 'user_id');
-  pgm.createIndex('annotation_comments', 'parent_comment_id');
+  pgm.createIndex('annotation_comments', 'parent_comment_id', { where: 'parent_comment_id IS NOT NULL' });
   pgm.createIndex('annotation_comments', 'created_at');
+  pgm.createIndex('annotation_comments', ['recommendation_id', 'created_at']);
+  pgm.createIndex('annotation_comments', 'comment', { method: 'gin', opclass: 'gin_trgm_ops' });
+  
+  // Optimized indexes for likes
   pgm.createIndex('annotation_likes', 'recommendation_id');
   pgm.createIndex('annotation_likes', 'user_id');
+  pgm.createIndex('annotation_likes', 'created_at');
   pgm.createIndex('comment_likes', 'comment_id');
   pgm.createIndex('comment_likes', 'user_id');
+  pgm.createIndex('comment_likes', 'created_at');
+  
+  // Optimized indexes for saved places
   pgm.createIndex('saved_places', 'user_id');
   pgm.createIndex('saved_places', 'place_id');
-  pgm.createIndex('saved_places', 'recommendation_id');
+  pgm.createIndex('saved_places', 'recommendation_id', { where: 'recommendation_id IS NOT NULL' });
+  pgm.createIndex('saved_places', 'created_at');
+  pgm.createIndex('saved_places', ['user_id', 'created_at']);
+  
+  // Optimized indexes for user blocks
   pgm.createIndex('user_blocks', 'blocker_id');
   pgm.createIndex('user_blocks', 'blocked_id');
+  pgm.createIndex('user_blocks', 'created_at');
+  
+  // Optimized indexes for friend groups
   pgm.createIndex('friend_groups', 'created_by');
+  pgm.createIndex('friend_groups', 'visibility');
+  pgm.createIndex('friend_groups', 'created_at');
+  pgm.createIndex('friend_groups', 'name', { method: 'gin', opclass: 'gin_trgm_ops' });
+  
   pgm.createIndex('friend_group_members', 'group_id');
   pgm.createIndex('friend_group_members', 'user_id');
+  pgm.createIndex('friend_group_members', 'role');
+  pgm.createIndex('friend_group_members', 'joined_at');
+  pgm.createIndex('friend_group_members', ['group_id', 'role']);
+  
   pgm.createIndex('friend_group_preferences', 'group_id');
   pgm.createIndex('friend_group_preferences', 'user_id');
+  pgm.createIndex('friend_group_preferences', 'notifications_enabled');
 
   // Mentions tables (posts and comments)
   pgm.createTable('post_mentions', {
@@ -725,8 +975,6 @@ exports.up = pgm => {
     'post_mentions_unique_recommendation_mentioned_user',
     { unique: ['recommendation_id', 'mentioned_user_id'] }
   );
-  pgm.createIndex('post_mentions', ['mentioned_user_id']);
-  pgm.createIndex('post_mentions', ['recommendation_id']);
 
   pgm.createTable('comment_mentions', {
     id: 'id',
@@ -758,8 +1006,18 @@ exports.up = pgm => {
     'comment_mentions_unique_comment_mentioned_user',
     { unique: ['comment_id', 'mentioned_user_id'] }
   );
-  pgm.createIndex('comment_mentions', ['mentioned_user_id']);
-  pgm.createIndex('comment_mentions', ['comment_id']);
+  // Optimized indexes for mentions
+  pgm.createIndex('post_mentions', 'mentioned_user_id');
+  pgm.createIndex('post_mentions', 'recommendation_id');
+  pgm.createIndex('post_mentions', 'mentioned_by_user_id');
+  pgm.createIndex('post_mentions', 'created_at');
+  pgm.createIndex('post_mentions', ['mentioned_user_id', 'created_at']);
+  
+  pgm.createIndex('comment_mentions', 'mentioned_user_id');
+  pgm.createIndex('comment_mentions', 'comment_id');
+  pgm.createIndex('comment_mentions', 'mentioned_by_user_id');
+  pgm.createIndex('comment_mentions', 'created_at');
+  pgm.createIndex('comment_mentions', ['mentioned_user_id', 'created_at']);
 
   // Notifications table
   pgm.createTable('notifications', {
@@ -795,13 +1053,40 @@ exports.up = pgm => {
       default: pgm.func('CURRENT_TIMESTAMP'),
     },
   });
-  pgm.createIndex('notifications', ['user_id']);
-  pgm.createIndex('notifications', ['is_read']);
-  pgm.createIndex('notifications', ['created_at']);
+
+  // Add notification type constraint
+  pgm.sql(`
+    ALTER TABLE notifications 
+    ADD CONSTRAINT notifications_type_check 
+    CHECK (type IN ('mention', 'like', 'comment', 'follow', 'question_answered'));
+  `);
+  // Optimized indexes for notifications
+  pgm.createIndex('notifications', 'user_id');
+  pgm.createIndex('notifications', 'type');
+  pgm.createIndex('notifications', 'is_read');
+  pgm.createIndex('notifications', 'created_at');
+  pgm.createIndex('notifications', 'read_at', { where: 'read_at IS NOT NULL' });
+  pgm.createIndex('notifications', ['user_id', 'is_read', 'created_at']);
+  pgm.createIndex('notifications', ['user_id', 'type', 'created_at']);
+  pgm.createIndex('notifications', 'data', { method: 'gin' });
+
+  // Add index for efficient querying of question notifications
+  pgm.createIndex('notifications', ['user_id', 'type', 'created_at'], {
+    name: 'idx_notifications_question_answered',
+    where: "type = 'question_answered'"
+  });
+
+  // Add index for question_id lookups in notification data
+  pgm.sql(`
+    CREATE INDEX IF NOT EXISTS idx_notifications_question_id 
+    ON notifications USING GIN ((data->>'question_id'))
+    WHERE type = 'question_answered';
+  `);
 };
 
 exports.down = pgm => {
   // Drop tables in reverse order of dependency
+  pgm.dropTable('questions', { ifExists: true, cascade: true });
   pgm.dropTable('notifications', { ifExists: true, cascade: true });
   pgm.dropTable('comment_mentions', { ifExists: true, cascade: true });
   pgm.dropTable('post_mentions', { ifExists: true, cascade: true });

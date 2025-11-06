@@ -55,8 +55,15 @@ async function upsertPlace(placeData) {
                 placeId = existingResult.rows[0].id;
                 const updateResult = await client.query(`UPDATE places 
            SET name = $1, address = $2, category_id = $3, lat = $4, lng = $5, 
-               metadata = $6, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $7
+               metadata = $6,
+               city_name = COALESCE($7, city_name),
+               city_slug = COALESCE($8, city_slug),
+               admin1_name = COALESCE($9, admin1_name),
+               country_code = COALESCE($10, country_code),
+               primary_type = COALESCE($11, primary_type),
+               types = COALESCE($12, types),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $13
            RETURNING id`, [
                     placeData.name,
                     placeData.address,
@@ -64,6 +71,12 @@ async function upsertPlace(placeData) {
                     placeData.lat,
                     placeData.lng,
                     JSON.stringify(placeData.metadata || {}),
+                    placeData.city_name,
+                    placeData.city_slug,
+                    placeData.admin1_name,
+                    placeData.country_code,
+                    placeData.primary_type,
+                    placeData.types,
                     placeId
                 ]);
                 if (updateResult.rows.length === 0) {
@@ -72,8 +85,11 @@ async function upsertPlace(placeData) {
             }
             else {
                 // Insert new place
-                const insertResult = await client.query(`INSERT INTO places (google_place_id, name, address, category_id, lat, lng, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+                const insertResult = await client.query(`INSERT INTO places (
+             google_place_id, name, address, category_id, lat, lng, metadata,
+             city_name, city_slug, admin1_name, country_code, primary_type, types
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`, [
                     placeData.google_place_id,
                     placeData.name,
@@ -81,22 +97,37 @@ async function upsertPlace(placeData) {
                     categoryId,
                     placeData.lat,
                     placeData.lng,
-                    JSON.stringify(placeData.metadata || {})
+                    JSON.stringify(placeData.metadata || {}),
+                    placeData.city_name,
+                    placeData.city_slug,
+                    placeData.admin1_name,
+                    placeData.country_code,
+                    placeData.primary_type,
+                    placeData.types
                 ]);
                 placeId = insertResult.rows[0].id;
             }
         }
         else {
             // No google_place_id provided, always insert new place
-            const insertResult = await client.query(`INSERT INTO places (name, address, category_id, lat, lng, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6)
+            const insertResult = await client.query(`INSERT INTO places (
+           name, address, category_id, lat, lng, metadata,
+           city_name, city_slug, admin1_name, country_code, primary_type, types
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`, [
                 placeData.name,
                 placeData.address,
                 categoryId,
                 placeData.lat,
                 placeData.lng,
-                JSON.stringify(placeData.metadata || {})
+                JSON.stringify(placeData.metadata || {}),
+                placeData.city_name,
+                placeData.city_slug,
+                placeData.admin1_name,
+                placeData.country_code,
+                placeData.primary_type,
+                placeData.types
             ]);
             placeId = insertResult.rows[0].id;
         }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Loader } from '@googlemaps/js-api-loader';
 import { placesApiService } from '../services/placesApiService';
 import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendationsApiService';
@@ -9,6 +10,7 @@ import SearchResults from '../components/SearchResults';
 import type { PlaceDetails } from '../components/ContentCard';
 import { Button } from '@/components/ui/button';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
+import { SEARCH_CONFIG } from '../config/searchConfig';
 import './MapPage.css';
 
 // Constants
@@ -42,6 +44,10 @@ const createPlaceDetails = (
 const MapPage: React.FC = () => {
   // Use global authentication state
   const { isAuthenticated, isChecking: isAuthChecking, user } = useAuth();
+  
+  // Get location state from navigation
+  const location = useLocation();
+  const locationState = location.state as { lat?: number; lng?: number; placeName?: string; placeAddress?: string; googlePlaceId?: string } | null;
 
   // Component state
   const [selectedPlace, setSelectedPlace] = useState<PlaceDetails | null>(null);
@@ -68,7 +74,13 @@ const MapPage: React.FC = () => {
   // Event handlers - memoized to prevent unnecessary re-renders
   const handleSemanticSearch = useCallback(async (query: string): Promise<SearchResponse> => {
     try {
-      const results = await recommendationsApi.semanticSearch(query, 10, 0.7, selectedGroupIds.length > 0 ? selectedGroupIds : undefined, 'place');
+      const results = await recommendationsApi.semanticSearch(
+        query, 
+        SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, 
+        SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, 
+        selectedGroupIds.length > 0 ? selectedGroupIds : undefined, 
+        SEARCH_CONFIG.SEMANTIC_SEARCH.DEFAULT_CONTENT_TYPE
+      );
       return results;
     } catch (error) {
       console.error('Semantic search failed:', error);
@@ -713,6 +725,100 @@ const MapPage: React.FC = () => {
     };
   }, [isAuthenticated]);
 
+  // Handle location state from navigation
+  useEffect(() => {
+    if (locationState && locationState.lat && locationState.lng && map.current && isMapReady) {
+      const { lat, lng, placeName, placeAddress, googlePlaceId } = locationState;
+      
+      // If a Google Place ID is provided, prefer that to ensure reviews load
+      if (googlePlaceId) {
+        (async () => {
+          try {
+            const enhancedDetails = await getEnhancedPlaceDetails(googlePlaceId);
+            const placeDetails: PlaceDetails = {
+              id: googlePlaceId,
+              name: enhancedDetails?.displayName?.text || placeName || 'Selected Location',
+              address: enhancedDetails?.formattedAddress || placeAddress || '',
+              category: getPrimaryGoogleType(enhancedDetails?.types || []),
+              images: enhancedDetails?.photos?.slice(0, 3).map((photo: any) => 
+                `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`
+              ) || [],
+              isSaved: false,
+              latitude: lat,
+              longitude: lng,
+              google_place_id: googlePlaceId
+            };
+            moveMapToPlace(placeDetails);
+          } catch {
+            // Fall through to reverse geocoding if enhanced details fail
+          }
+        })();
+        return;
+      }
+
+      // Try to find a Google Place ID for this location using reverse geocoding
+      const findGooglePlaceId = async () => {
+        try {
+          if (window.google && window.google.maps) {
+            const geocoder = new window.google.maps.Geocoder();
+            const latLng = new window.google.maps.LatLng(lat, lng);
+            
+            const results = await new Promise<google.maps.GeocoderResult[]>((resolve, reject) => {
+              geocoder.geocode({ location: latLng }, (results, status) => {
+                if (status === 'OK' && results) {
+                  resolve(results);
+                } else {
+                  reject(new Error('Geocoding failed'));
+                }
+              });
+            });
+            
+            // Find the best result (usually the first one)
+            const bestResult = results[0];
+            if (bestResult && bestResult.place_id) {
+              // Create place details with Google Place ID
+              const placeDetails: PlaceDetails = {
+                id: bestResult.place_id,
+                name: placeName || bestResult.formatted_address || 'Selected Location',
+                address: placeAddress || bestResult.formatted_address || '',
+                category: getPrimaryGoogleType(bestResult.types || []),
+                images: [],
+                isSaved: false,
+                latitude: lat,
+                longitude: lng,
+                google_place_id: bestResult.place_id
+              };
+              
+              // Move map to the location
+              moveMapToPlace(placeDetails);
+              return;
+            }
+          }
+        } catch (error) {
+          console.warn('Could not find Google Place ID for location:', error);
+        }
+        
+        // Fallback: Create place details without Google Place ID
+        const placeDetails: PlaceDetails = {
+          id: `nav-${Date.now()}`,
+          name: placeName || 'Selected Location',
+          address: placeAddress || '',
+          category: 'location',
+          images: [],
+          isSaved: false,
+          latitude: lat,
+          longitude: lng,
+          google_place_id: undefined
+        };
+        
+        // Move map to the location
+        moveMapToPlace(placeDetails);
+      };
+      
+      findGooglePlaceId();
+    }
+  }, [locationState, isMapReady, moveMapToPlace]);
+
   // Fetch reviewed places when user is authenticated
   useEffect(() => {
     if (isAuthenticated && map.current) {
@@ -758,6 +864,16 @@ const MapPage: React.FC = () => {
     );
   }
 
+  // Prevent body scroll on mobile when content card is open
+  useEffect(() => {
+    if (showContentCard && window.innerWidth < 768) {
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = '';
+      };
+    }
+  }, [showContentCard]);
+
   return (
     <div className="map-page-container">
 
@@ -780,8 +896,8 @@ const MapPage: React.FC = () => {
       )}
 
       {/* Reviewed Places Status */}
-      {isAuthenticated && (
-        <div className="fixed top-20 right-4 z-40 bg-white rounded-lg shadow-lg p-4 max-w-xs">
+      {isAuthenticated && !showContentCard && (
+        <div className="fixed top-20 right-4 z-40 bg-white rounded-lg shadow-lg p-4 max-w-xs hidden md:block">
           <div className="space-y-3">
             {/* Reviewed Places Status */}
             <div className="flex items-center justify-between">
@@ -844,7 +960,7 @@ const MapPage: React.FC = () => {
         </div>
       )}
 
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3">
+      <div className={`fixed ${showContentCard ? 'bottom-24 md:bottom-6' : 'bottom-6'} right-4 md:right-6 z-40 flex flex-col gap-3 transition-all duration-300 ${showContentCard ? 'hidden md:flex' : 'flex'}`}>
         <Button
           onClick={toggleReviewedPlaces}
           size="icon"
