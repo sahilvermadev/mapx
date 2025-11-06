@@ -669,19 +669,12 @@ const MapPage: React.FC = () => {
           disableDefaultUI: true
         };
 
-        // Only use custom mapId if it's explicitly configured in environment variables
-        // To create a custom map style:
-        // 1. Go to Google Cloud Console > Maps > Map Styles
-        // 2. Create a new map style or use an existing one
-        // 3. Copy the Map ID and set it in VITE_GOOGLE_MAPS_MAP_ID environment variable
-        // 4. Ensure your API key has access to the Maps JavaScript API
-        const customMapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID;
-        if (customMapId) {
-          mapConfig.mapId = customMapId;
-          console.log('Using custom map style with mapId:', customMapId);
-        } else {
-          console.log('No custom mapId configured, using default map style');
-        }
+        // Use custom mapId - can be overridden via VITE_GOOGLE_MAPS_MAP_ID environment variable
+        // Default mapId: 95079f4fa5e07d01680ea67e
+        // To override: Set VITE_GOOGLE_MAPS_MAP_ID in your .env file
+        const customMapId = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || '95079f4fa5e07d01680ea67e';
+        mapConfig.mapId = customMapId;
+        console.log('Using custom map style with mapId:', customMapId);
 
         map.current = new google.maps.Map(mapContainer.current, mapConfig);
 
