@@ -69,9 +69,9 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
-    # Frontend (proxies to Docker container on port 80)
+    # Frontend (proxies to Docker container on port 8080)
     location / {
-        proxy_pass http://localhost:80;
+        proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
