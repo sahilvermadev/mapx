@@ -33,13 +33,17 @@ export const useProfilePlacesQuery = ({
     queryFn: async () => {
       if (!userId) throw new Error('User ID is required');
       
-      console.log(`📝 [REACT-QUERY] Fetching user questions...`);
+      if (import.meta.env.DEV) {
+        console.log(`📝 [REACT-QUERY] Fetching user questions...`);
+      }
       const startTime = performance.now();
       
       const result = await profileApi.getUserQuestions(userId);
       
-      const endTime = performance.now();
-      console.log(`✅ [REACT-QUERY] questions API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      if (import.meta.env.DEV) {
+        const endTime = performance.now();
+        console.log(`✅ [REACT-QUERY] questions API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      }
       
       return result.data || [];
     },
@@ -57,7 +61,9 @@ export const useProfilePlacesQuery = ({
     queryFn: async ({ pageParam = 0 }) => {
       if (!userId) throw new Error('User ID is required');
       
-      console.log(`📝 [REACT-QUERY] Fetching user ${tab} (page ${pageParam})...`);
+      if (import.meta.env.DEV) {
+        console.log(`📝 [REACT-QUERY] Fetching user ${tab} (page ${pageParam})...`);
+      }
       const startTime = performance.now();
       
       let result;
@@ -77,8 +83,10 @@ export const useProfilePlacesQuery = ({
         );
       }
       
-      const endTime = performance.now();
-      console.log(`✅ [REACT-QUERY] ${tab} API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      if (import.meta.env.DEV) {
+        const endTime = performance.now();
+        console.log(`✅ [REACT-QUERY] ${tab} API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      }
       
       return {
         data: result.data || [],

@@ -7,13 +7,17 @@ export const useProfilePreferencesQuery = (userId: string | undefined) => {
     queryFn: async () => {
       if (!userId) throw new Error('User ID is required');
       
-      console.log('🎨 [REACT-QUERY] Fetching user preferences...');
+      if (import.meta.env.DEV) {
+        console.log('🎨 [REACT-QUERY] Fetching user preferences...');
+      }
       const startTime = performance.now();
       
       const prefs = await profileApi.getUserPreferences(userId);
       
-      const endTime = performance.now();
-      console.log(`✅ [REACT-QUERY] Preferences API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      if (import.meta.env.DEV) {
+        const endTime = performance.now();
+        console.log(`✅ [REACT-QUERY] Preferences API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      }
       
       return prefs;
     },

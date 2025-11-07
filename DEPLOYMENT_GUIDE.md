@@ -1,6 +1,6 @@
 # 🚀 Deployment Guide
 
-This guide covers multiple options for deploying and hosting your RECCE application.
+This guide covers multiple options for deploying and hosting your REKKY application.
 
 ## Table of Contents
 
@@ -24,9 +24,14 @@ The fastest way to deploy is using Docker Compose. This requires a server with D
 - Domain name (optional, but recommended)
 - Server with at least 2GB RAM and 2 CPU cores
 
-### Automated Deployment (Recommended)
+### Deployment Scripts
 
-We provide a deployment script that automates the process:
+We provide two deployment scripts:
+
+#### `deploy.sh` (Original - Simple)
+- Simple, straightforward deployment
+- Perfect for quick deployments
+- **Still works exactly as before**
 
 ```bash
 # Make script executable (if not already)
@@ -40,7 +45,38 @@ chmod +x deploy.sh
 ./deploy.sh logs      # View logs
 ./deploy.sh migrate   # Run database migrations
 ./deploy.sh stop      # Stop services
+./deploy.sh restart   # Restart services
 ```
+
+#### `deploy-prod.sh` (Enhanced - Recommended for Production)
+- All features of `deploy.sh` plus:
+  - Pre-deployment safety checks
+  - Automatic database backups
+  - Selective service updates (frontend/backend only)
+  - Deployment logging
+  - Enhanced health checks
+- **Fully backward compatible** - `./deploy-prod.sh deploy` works exactly like `./deploy.sh deploy`
+
+```bash
+# Full deployment (with safety checks and backups)
+./deploy-prod.sh deploy
+
+# Update deployment (git pull + rebuild)
+./deploy-prod.sh update
+
+# Update only frontend (faster)
+./deploy-prod.sh update-frontend
+
+# Update only backend
+./deploy-prod.sh update-backend
+
+# Skip safety checks (matches deploy.sh behavior)
+SKIP_CHECKS=1 ./deploy-prod.sh deploy
+```
+
+**Recommendation:**
+- **For production:** Use `deploy-prod.sh` for safety and features
+- **For quick updates:** Use `deploy.sh` or `deploy-prod.sh update-frontend/update-backend`
 
 ### Manual Deployment
 
@@ -50,8 +86,8 @@ Create a `.env` file in the project root:
 
 ```bash
 # Database Configuration
-DB_NAME=recce_db
-DB_USER=recce_user
+DB_NAME=rekky_db
+DB_USER=rekky_user
 DB_PASSWORD=your_secure_password_here
 
 # Backend Environment Variables
@@ -88,14 +124,13 @@ docker-compose -f docker-compose.prod.yml logs -f
 ### Step 3: Run Database Migrations
 
 ```bash
-# Connect to backend container
-docker exec -it recce_backend_prod sh
+# Using deployment script (recommended)
+./deploy.sh migrate
+# Or:
+./deploy-prod.sh migrate
 
-# Run migrations
-npm run migrate
-
-# Exit container
-exit
+# Or manually
+docker exec -it rekky_backend_prod npm run migrate
 ```
 
 ### Step 4: Verify Deployment
@@ -106,9 +141,64 @@ curl http://localhost:5000/health
 
 # Check frontend
 curl http://localhost/
+
+# Check service status
+./deploy.sh status
+# Or:
+docker compose -f docker-compose.prod.yml ps
 ```
 
 Your application should now be running!
+
+### Daily Production Operations
+
+```bash
+# Check status
+./deploy.sh status
+# Or:
+./deploy-prod.sh status
+
+# View logs
+./deploy.sh logs
+# Or:
+./deploy-prod.sh logs
+
+# Stop services
+./deploy.sh stop
+# Or:
+./deploy-prod.sh stop
+
+# Restart services
+./deploy.sh restart
+# Or:
+./deploy-prod.sh restart
+```
+
+### Updating the Application
+
+**After pushing code to repository:**
+
+```bash
+cd /opt/rekky
+
+# Option A: Simple update (using original script)
+git pull
+./deploy.sh restart
+
+# Option B: Enhanced update (using new script - recommended)
+./deploy-prod.sh update
+# This automatically:
+# - Pulls latest code
+# - Creates database backup
+# - Rebuilds and restarts services
+# - Runs health checks
+
+# Option C: Update only frontend (faster)
+./deploy-prod.sh update-frontend
+
+# Option D: Update only backend
+./deploy-prod.sh update-backend
+```
 
 ---
 
@@ -151,8 +241,8 @@ sudo usermod -aG docker $USER
 
 ```bash
 # Clone repository
-git clone <your-repo-url> /opt/recce
-cd /opt/recce
+git clone <your-repo-url> /opt/rekky
+cd /opt/rekky
 
 # Create .env file (see Environment Variables section)
 nano .env
@@ -165,7 +255,7 @@ nano .env
 docker-compose -f docker-compose.prod.yml up -d --build
 
 # Run migrations
-docker exec -it recce_backend_prod npm run migrate
+docker exec -it rekky_backend_prod npm run migrate
 
 # Check status
 docker-compose -f docker-compose.prod.yml ps
@@ -180,7 +270,7 @@ For production, use Nginx as a reverse proxy to handle SSL and route traffic:
 sudo apt install nginx certbot python3-certbot-nginx -y
 
 # Create Nginx configuration
-sudo nano /etc/nginx/sites-available/recce
+sudo nano /etc/nginx/sites-available/rekky
 ```
 
 Add this configuration:
@@ -244,7 +334,7 @@ Enable the site:
 
 ```bash
 # Create symlink
-sudo ln -s /etc/nginx/sites-available/recce /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/rekky /etc/nginx/sites-enabled/
 
 # Test configuration
 sudo nginx -t
@@ -341,7 +431,7 @@ PaaS options are simpler but usually more expensive. They handle infrastructure 
 ```yaml
 services:
   - type: web
-    name: recce-backend
+    name: rekky-backend
     env: node
     buildCommand: cd backend && npm install && npm run build
     startCommand: cd backend && npm start
@@ -350,23 +440,23 @@ services:
         value: production
       - key: DATABASE_URL
         fromDatabase:
-          name: recce-db
+          name: rekky-db
           property: connectionString
       # Add other env vars...
   
   - type: web
-    name: recce-frontend
+    name: rekky-frontend
     env: static
     buildCommand: cd frontend/mapx-frontend && npm install && npm run build
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_URL
-        value: https://recce-backend.onrender.com
+        value: https://rekky-backend.onrender.com
 
 databases:
-  - name: recce-db
-    databaseName: recce_db
-    user: recce_user
+  - name: rekky-db
+    databaseName: rekky_db
+    user: rekky_user
     plan: starter
 ```
 
@@ -405,15 +495,15 @@ fly launch
 4. **Create Postgres Database:**
 
 ```bash
-fly postgres create --name recce-db
-fly postgres attach recce-db -a recce-backend
+fly postgres create --name rekky-db
+fly postgres attach rekky-db -a rekky-backend
 ```
 
 5. **Set Environment Variables:**
 
 ```bash
-fly secrets set JWT_SECRET=your_secret -a recce-backend
-fly secrets set GOOGLE_CLIENT_ID=your_id -a recce-backend
+fly secrets set JWT_SECRET=your_secret -a rekky-backend
+fly secrets set GOOGLE_CLIENT_ID=your_id -a rekky-backend
 # ... add other secrets
 ```
 
@@ -442,13 +532,13 @@ heroku login
 ```bash
 # Backend
 cd backend
-heroku create recce-backend
+heroku create rekky-backend
 heroku addons:create heroku-postgresql:mini
 heroku addons:create heroku-redis:mini
 
 # Frontend
 cd ../frontend/mapx-frontend
-heroku create recce-frontend --buildpack heroku/nodejs
+heroku create rekky-frontend --buildpack heroku/nodejs
 ```
 
 4. **Configure Buildpacks:**
@@ -466,8 +556,8 @@ heroku buildpacks:set https://github.com/heroku/heroku-buildpack-static
 5. **Set Environment Variables:**
 
 ```bash
-heroku config:set JWT_SECRET=your_secret -a recce-backend
-heroku config:set DATABASE_URL=$(heroku config:get DATABASE_URL -a recce-backend) -a recce-backend
+heroku config:set JWT_SECRET=your_secret -a rekky-backend
+heroku config:set DATABASE_URL=$(heroku config:get DATABASE_URL -a rekky-backend) -a rekky-backend
 # ... add other vars
 ```
 
@@ -504,26 +594,26 @@ aws configure
 3. **Create ECR Repository:**
 
 ```bash
-aws ecr create-repository --repository-name recce-backend
-aws ecr create-repository --repository-name recce-frontend
+aws ecr create-repository --repository-name rekky-backend
+aws ecr create-repository --repository-name rekky-frontend
 ```
 
 4. **Build and Push Images:**
 
 ```bash
 # Build
-docker build -t recce-backend ./backend -f ./backend/Dockerfile.prod
-docker build -t recce-frontend ./frontend
+docker build -t rekky-backend ./backend -f ./backend/Dockerfile.prod
+docker build -t rekky-frontend ./frontend
 
 # Tag
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
 
-docker tag recce-backend:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/recce-backend:latest
-docker tag recce-frontend:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/recce-frontend:latest
+docker tag rekky-backend:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/rekky-backend:latest
+docker tag rekky-frontend:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/rekky-frontend:latest
 
 # Push
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/recce-backend:latest
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/recce-frontend:latest
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/rekky-backend:latest
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/rekky-frontend:latest
 ```
 
 5. **Create Task Definitions and Deploy:**
@@ -559,19 +649,19 @@ gcloud config set project YOUR_PROJECT_ID
 
 # Build backend
 cd backend
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/recce-backend
-gcloud run deploy recce-backend --image gcr.io/YOUR_PROJECT_ID/recce-backend
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/rekky-backend
+gcloud run deploy rekky-backend --image gcr.io/YOUR_PROJECT_ID/rekky-backend
 
 # Build frontend
 cd ../frontend
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/recce-frontend
-gcloud run deploy recce-frontend --image gcr.io/YOUR_PROJECT_ID/recce-frontend
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/rekky-frontend
+gcloud run deploy rekky-frontend --image gcr.io/YOUR_PROJECT_ID/rekky-frontend
 ```
 
 4. **Set up Cloud SQL (PostgreSQL):**
 
 ```bash
-gcloud sql instances create recce-db --database-version=POSTGRES_14 --tier=db-f1-micro
+gcloud sql instances create rekky-db --database-version=POSTGRES_14 --tier=db-f1-micro
 ```
 
 **Estimated Cost:** $20-80/month (pay as you go, free tier available)
@@ -644,8 +734,8 @@ Create a `.env` file in project root with these variables:
 
 ```bash
 # Database Configuration
-DB_NAME=recce_db
-DB_USER=recce_user
+DB_NAME=rekky_db
+DB_USER=rekky_user
 DB_PASSWORD=your_secure_password_here
 
 # Backend Secrets
@@ -731,7 +821,7 @@ docker-compose -f docker-compose.prod.yml logs backend
 
 **Verify environment variables:**
 ```bash
-docker exec -it recce_backend_prod env | grep -E "DATABASE_URL|JWT_SECRET|NODE_ENV"
+docker exec -it rekky_backend_prod env | grep -E "DATABASE_URL|JWT_SECRET|NODE_ENV"
 ```
 
 **Common fixes:**
@@ -755,7 +845,7 @@ echo $DATABASE_URL
 
 **Test connection:**
 ```bash
-docker exec -it recce_db_prod psql -U recce_user -d recce_db -c "SELECT 1;"
+docker exec -it rekky_db_prod psql -U rekky_user -d rekky_db -c "SELECT 1;"
 ```
 
 #### 3. **Frontend can't connect to backend**
@@ -784,7 +874,7 @@ echo "VITE_API_BASE_URL=https://api.yourdomain.com/api" > frontend/mapx-frontend
 **Verify network connectivity:**
 ```bash
 # From frontend container
-docker exec -it recce_frontend_prod wget -O- http://backend:5000/health
+docker exec -it rekky_frontend_prod wget -O- http://backend:5000/health
 ```
 
 #### 4. **SSL certificate issues**
@@ -822,12 +912,12 @@ docker-compose -f docker-compose.prod.yml logs backend | grep -i "memory\|error"
 
 **Check migration status:**
 ```bash
-docker exec -it recce_backend_prod npm run migrate
+docker exec -it rekky_backend_prod npm run migrate
 ```
 
 **Manual migration:**
 ```bash
-docker exec -it recce_backend_prod sh
+docker exec -it rekky_backend_prod sh
 cd /app
 npm run migrate
 exit
@@ -848,7 +938,7 @@ sudo lsof -i :5432  # Database
 
 ---
 
-## Monitoring & Maintenance
+## Production Operations
 
 ### Health Checks
 
@@ -857,12 +947,47 @@ sudo lsof -i :5432  # Database
 # Backend
 curl http://localhost:5000/health
 
-# Frontend
+# Frontend (if nginx is running)
 curl http://localhost/health
+# Or if frontend is on port 8080:
+curl http://localhost:8080/health
 
 # Database (from container)
-docker exec -it recce_db_prod pg_isready -U recce_user
+docker exec -it rekky_db_prod pg_isready -U appuser
+
+# Redis
+docker exec -it rekky_redis_prod redis-cli ping
+
+# Check service health in Docker
+docker exec rekky_backend_prod node /app/healthcheck.js
 ```
+
+### Database Operations
+
+**Access Database:**
+```bash
+# Via Docker
+docker exec -it rekky_db_prod psql -U appuser -d rekky_db
+
+# Or use the helper script
+./db-access.sh
+```
+
+**Backup Database:**
+```bash
+# Manual backup
+docker exec rekky_db_prod pg_dump -U appuser rekky_db > backup_$(date +%Y%m%d).sql
+
+# Automatic backup (with deploy-prod.sh)
+./deploy-prod.sh deploy  # Creates backup automatically
+```
+
+**Restore Database:**
+```bash
+cat backup_20250101.sql | docker exec -i rekky_db_prod psql -U appuser rekky_db
+```
+
+## Monitoring & Maintenance
 
 ### Logs
 
@@ -882,15 +1007,15 @@ docker-compose -f docker-compose.prod.yml logs -f frontend
 **Database backup:**
 ```bash
 # Manual backup
-docker exec -it recce_db_prod pg_dump -U recce_user recce_db > backup_$(date +%Y%m%d).sql
+docker exec -it rekky_db_prod pg_dump -U rekky_user rekky_db > backup_$(date +%Y%m%d).sql
 
 # Automated backup (add to crontab)
-# 0 2 * * * docker exec recce_db_prod pg_dump -U recce_user recce_db > /backups/backup_$(date +\%Y\%m\%d).sql
+# 0 2 * * * docker exec rekky_db_prod pg_dump -U rekky_user rekky_db > /backups/backup_$(date +\%Y\%m\%d).sql
 ```
 
 **Restore database:**
 ```bash
-cat backup_20250101.sql | docker exec -i recce_db_prod psql -U recce_user recce_db
+cat backup_20250101.sql | docker exec -i rekky_db_prod psql -U rekky_user rekky_db
 ```
 
 ### Updates
@@ -904,7 +1029,7 @@ git pull origin main
 docker-compose -f docker-compose.prod.yml up -d --build
 
 # Run migrations if needed
-docker exec -it recce_backend_prod npm run migrate
+docker exec -it rekky_backend_prod npm run migrate
 ```
 
 ---
@@ -943,12 +1068,43 @@ docker exec -it recce_backend_prod npm run migrate
 
 ---
 
+## Production Checklist
+
+Before going live, ensure:
+
+- [ ] `.env` file is configured with production values
+- [ ] `ALLOWED_ORIGINS` includes your production domain
+- [ ] `BACKEND_URL` and `FRONTEND_URL` use HTTPS
+- [ ] Database migrations are up to date
+- [ ] SSL certificates are configured (if using HTTPS)
+- [ ] Nginx reverse proxy is configured (if using)
+- [ ] Services are running: `./deploy.sh status`
+- [ ] Health checks pass: `curl http://localhost:5000/health`
+- [ ] Application is accessible via domain
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Start services | `./deploy.sh deploy` |
+| Stop services | `./deploy.sh stop` |
+| Restart services | `./deploy.sh restart` |
+| View logs | `./deploy.sh logs` |
+| Check status | `./deploy.sh status` |
+| Run migrations | `./deploy.sh migrate` |
+| Update app | `./deploy-prod.sh update` |
+| Update frontend only | `./deploy-prod.sh update-frontend` |
+| Update backend only | `./deploy-prod.sh update-backend` |
+
 ## Additional Resources
 
 - [Docker Documentation](https://docs.docker.com/)
 - [Nginx Documentation](https://nginx.org/en/docs/)
 - [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
-- [Production Readiness Guide](./PRODUCTION_READINESS.md)
+- [HTTPS Setup Guide](./HTTPS_SETUP.md) - Detailed SSL/HTTPS setup
+- [Domain Migration Guide](./DOMAIN_MIGRATION.md) - Change domain easily
+- [Production Readiness Checklist](./PRODUCTION_READINESS_CHECKLIST.md) - Production best practices
+- [Troubleshooting Guide](./TROUBLESHOOTING.md) - Common issues and solutions
 
 ---
 

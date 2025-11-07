@@ -1,0 +1,18 @@
+# Development Dockerfile for Frontend
+# Provides hot-reload for local development
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies (will be cached if package.json doesn't change)
+COPY mapx-frontend/package*.json ./
+RUN npm install
+
+# Expose Vite dev server port
+EXPOSE 5173
+
+# Default command runs dev server with hot-reload
+# Vite config already has host: '0.0.0.0' configured
+CMD ["npm", "run", "dev"]
+

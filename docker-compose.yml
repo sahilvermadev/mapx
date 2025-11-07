@@ -1,17 +1,17 @@
 # docker-compose.yml
+# Using host networking to bypass bridge networking issues
 
 services:
   db:
     image: vdauchy/postgis-vector:latest
     container_name: recce_db_container
+    network_mode: host
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
@@ -21,8 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: recce_redis_container
-    ports:
-      - "6379:6379"
+    network_mode: host
     volumes:
       - redis_data:/data
     healthcheck:
@@ -34,29 +33,26 @@ services:
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: recce_pgadmin_container
+    network_mode: host
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@recce.com
       PGADMIN_DEFAULT_PASSWORD: admin123
       PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "8080:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - db
 
   backend:
+    image: recce-backend:local
     build: ./backend
     container_name: recce_backend_container
-    command: npm run dev # Assuming you have a 'dev' script in backend/package.json
+    network_mode: host
+    command: npm run dev
     volumes:
-      - ./backend:/app # Mount host code for hot-reloading
-      # - /app/node_modules # Prevent host's node_modules from overwriting container's
-    ports:
-      - "5000:5000"
+      - ./backend:/app
+      - /app/node_modules  # Prevent host's node_modules from overwriting container's
     environment:
-      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@localhost:5432/${DB_NAME}
+      REDIS_URL: redis://localhost:6379
       JWT_SECRET: ${JWT_SECRET}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
@@ -64,12 +60,25 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GROQ_API_KEY: ${GROQ_API_KEY}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
-      # Add other backend specific env vars here
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:5000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      NODE_ENV: development
+
+  frontend:
+    image: recce-frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: recce_frontend_container
+    network_mode: host
+    volumes:
+      - ./frontend/mapx-frontend:/app
+      - /app/node_modules  # Prevent host's node_modules from overwriting container's
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5000/api}
+      VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:5000}
+      VITE_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
 
 volumes:
   db_data:

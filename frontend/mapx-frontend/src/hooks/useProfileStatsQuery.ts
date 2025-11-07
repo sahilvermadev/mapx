@@ -7,13 +7,17 @@ export const useProfileStatsQuery = (userId: string | undefined) => {
     queryFn: async () => {
       if (!userId) throw new Error('User ID is required');
       
-      console.log('📊 [REACT-QUERY] Fetching user stats...');
+      if (import.meta.env.DEV) {
+        console.log('📊 [REACT-QUERY] Fetching user stats...');
+      }
       const startTime = performance.now();
       
       const stats = await profileApi.getUserStats(userId);
       
-      const endTime = performance.now();
-      console.log(`✅ [REACT-QUERY] Stats API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      if (import.meta.env.DEV) {
+        const endTime = performance.now();
+        console.log(`✅ [REACT-QUERY] Stats API call completed in ${(endTime - startTime).toFixed(2)}ms`);
+      }
       
       return stats;
     },

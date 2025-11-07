@@ -25,7 +25,7 @@ export function Header({ onSignInClick, variant = 'light', hideNav = false, posi
       <div className="container mx-auto px-6 h-16 flex items-center justify-between relative">
         {/* Logo */}
         <div className="flex items-center space-x-2">
-          <span className={variant === 'dark' ? 'text-xl font-bold text-white' : 'text-xl font-bold text-black'}>RECCE</span>
+          <span className={variant === 'dark' ? 'text-xl font-bold text-white' : 'text-xl font-bold text-black'}>REKKY</span>
         </div>
 
         {/* Navigation - Centered */}

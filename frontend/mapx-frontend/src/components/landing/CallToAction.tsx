@@ -12,7 +12,7 @@ export function CallToAction() {
             </h2>
 
             <p className="text-lg lg:text-xl text-gray-200 mb-6 lg:mb-8 max-w-2xl mx-auto font-medium">
-              Join the waitlist for early access to Recce. Be among the first to experience 
+              Join the waitlist for early access to Rekky. Be among the first to experience 
               AI-powered local discovery through your trusted network.
             </p>
 

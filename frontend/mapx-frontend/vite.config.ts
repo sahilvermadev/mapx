@@ -19,6 +19,13 @@ export default defineConfig(({ mode }) => {
         exclude: ['error'],
       }),
     ].filter(Boolean),
+    server: {
+      host: '0.0.0.0', // Allow access from outside container
+      port: 5173,
+      watch: {
+        usePolling: true, // Enable polling for file changes in Docker
+      },
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

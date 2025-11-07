@@ -38,7 +38,7 @@ export function ProblemSolution() {
             <div className="md:order-2 px-2">
               <h3 className="text-lg sm:text-xl lg:text-2xl mb-2 sm:mb-3 font-bold text-black break-words">100% authentic recommendations</h3>
               <p className="text-xs sm:text-sm lg:text-base text-gray-700 leading-relaxed break-words">
-                Recce only shows recommendations from people in your trusted network. 
+                Rekky only shows recommendations from people in your trusted network. 
                 No anonymous reviews, no bots, no fake accounts.
               </p>
             </div>

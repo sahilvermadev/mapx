@@ -1,19 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
 import { Star, Heart, HelpCircle, Settings, MapPin, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { profileApi, type UserData, type UserStats, type FilterOptions, type SortOptions, type ProfilePreferences, THEMES, type ThemeName } from '@/services/profileService';
+import { profileApi, type FilterOptions, type ProfilePreferences, THEMES, type ThemeName } from '@/services/profileService';
 import { useTheme } from '@/contexts/ThemeContext';
 import { getReadableTextColor } from '@/utils/color';
 import { useAuth } from '@/auth';
@@ -39,8 +32,8 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   
   // React Query hooks for data fetching
   const { data: userData, isLoading: loading, error: profileError, refetch: refetchProfile } = useProfileQuery(userId);
-  const { data: userStats, isLoading: statsLoading } = useProfileStatsQuery(userId);
-  const { data: prefsData, isLoading: prefsLoading, refetch: refetchPrefs } = useProfilePreferencesQuery(userId);
+  const { data: userStats } = useProfileStatsQuery(userId);
+  const { data: prefsData, refetch: refetchPrefs } = useProfilePreferencesQuery(userId);
   
   // State management
   const [activeTab, setActiveTab] = useState<TabType>('recommendations');
@@ -145,8 +138,8 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     }
     // Infinite query result - flatten pages
     if (isInfiniteQuery(placesQuery)) {
-      const infiniteQuery = placesQuery as Extract<typeof placesQuery, { data?: { pages: Array<{ data: any[] }> } }>;
-      return infiniteQuery.data?.pages.flatMap(page => page.data) || [];
+      const infiniteQuery = placesQuery as any;
+      return infiniteQuery.data?.pages?.flatMap((page: { data: any[] }) => page.data) || [];
     }
     return [];
   }, [placesQuery, activeTab]);
@@ -164,9 +157,10 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const hasMore = useMemo(() => {
     if (activeTab === 'questions') return false;
     if (isInfiniteQuery(placesQuery)) {
-      const infiniteQuery = placesQuery as Extract<typeof placesQuery, { data?: { pages: Array<{ nextPage?: number }> } }>;
-      if (infiniteQuery.data?.pages) {
-        const lastPage = infiniteQuery.data.pages[infiniteQuery.data.pages.length - 1];
+      const infiniteQuery = placesQuery as any;
+      const pages = infiniteQuery.data?.pages;
+      if (pages && Array.isArray(pages) && pages.length > 0) {
+        const lastPage = pages[pages.length - 1];
         return lastPage?.nextPage !== undefined;
       }
     }
@@ -176,110 +170,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const error = profileError?.message || placesQuery.error?.message || null;
 
   // Request versioning to avoid race conditions on async updates
-  const profileRequestVersionRef = useRef(0);
-  const placesRequestVersionRef = useRef(0);
   const prevShowCustomizeRef = useRef(showCustomize);
-  
-
-
-  // Load user profile data
-  const loadUserProfile = useCallback(async () => {
-    if (!userId) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      
-      console.log('Loading profile for user ID:', userId);
-      
-      const currentVersion = ++profileRequestVersionRef.current;
-      const profileData = await profileApi.getUserProfile(userId);
-      if (currentVersion === profileRequestVersionRef.current) {
-        setUserData(profileData);
-      }
-      
-    } catch (err) {
-      console.error('Failed to load user profile:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load profile');
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
-
-  // Load places for current tab
-  // Accept offset as parameter to avoid dependency issues
-  const loadPlaces = useCallback(async (requestOffset: number, reset: boolean = false) => {
-    if (!userId) return;
-    
-    try {
-      setLoadingMore(!reset);
-      setPlacesLoading(reset);
-      const currentVersion = ++placesRequestVersionRef.current;
-      
-      let result;
-      
-      switch (activeTab) {
-        case 'recommendations': {
-          // Build filters object, conditionally including search, city, and categories if present
-          const trimmedSearch = debouncedSearchQuery.trim();
-          const citySlug = selectedCity?.id;
-          const filtersWithSearch = {
-            ...(trimmedSearch ? { search: trimmedSearch } : {}),
-            ...(citySlug ? { city_slug: citySlug } : {}),
-            ...(selectedCategoryKeys.length > 0 ? { categories: selectedCategoryKeys } : {})
-          };
-          
-          result = await profileApi.getUserRecommendations(
-            userId, 
-            filtersWithSearch, 
-            { field: 'created_at', direction: 'desc' }, 
-            { limit: 20, offset: requestOffset }
-          );
-          break;
-        }
-        case 'likes':
-          // Use default sort (created_at desc) - no sort options needed
-          result = await profileApi.getUserLikes(
-            userId, 
-            { field: 'created_at', direction: 'desc' }, 
-            { limit: 20, offset: requestOffset }
-          );
-          break;
-        case 'questions':
-          result = await profileApi.getUserQuestions(userId);
-          break;
-      }
-      
-      if (currentVersion !== placesRequestVersionRef.current) {
-        return; // stale response
-      }
-
-      if (result) {
-        const newPlaces = result.data;
-        setPlaces(prev => reset ? newPlaces : [...prev, ...newPlaces]);
-        
-        // Handle pagination for different tab types
-        if (activeTab === 'questions') {
-          // Questions don't support pagination yet
-          setHasMore(false);
-          setOffset(newPlaces.length);
-        } else {
-          const total = (result as any).pagination?.total || 0;
-          setHasMore(total > (requestOffset + newPlaces.length));
-          setOffset(requestOffset + newPlaces.length);
-        }
-        
-        setHasLoadedFirstPage(true);
-      }
-      
-    } catch (err) {
-      console.error(`Failed to load ${activeTab}:`, err);
-      setError(err instanceof Error ? err.message : `Failed to load ${activeTab}`);
-    } finally {
-      setLoadingMore(false);
-      setPlacesLoading(false);
-    }
-  }, [userId, activeTab, debouncedSearchQuery, selectedCity, selectedCategoryKeys]);
 
   // Handle tab change
   const handleTabChange = (tab: TabType) => {
@@ -354,7 +245,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
           country,
           recCount: 0,
           friendCount: 1, // For profile page, this is the user themselves
-          friendFaces: [{ id: userId || '', name: userData?.display_name || 'User', photoUrl: userData?.profile_picture_url }].filter(f => f.id),
+          friendFaces: [{ id: userId || '', name: userData?.displayName || 'User', photoUrl: userData?.profilePictureUrl }].filter(f => f.id),
           categories: [],
         };
       }
@@ -421,7 +312,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
       name: 'Worldwide',
       recCount: places.length,
       friendCount: 1,
-      friendFaces: userId ? [{ id: userId, name: userData?.display_name || 'User', photoUrl: userData?.profile_picture_url }] : [],
+      friendFaces: userId ? [{ id: userId, name: userData?.displayName || 'User', photoUrl: userData?.profilePictureUrl }] : [],
       categories: categoryEntries.sort((a, b) => (b.count || 0) - (a.count || 0))
     };
     
@@ -1013,7 +904,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
           ) : (
             <div className="space-y-6">
               <AnimatePresence>
-                {places.map((item, index) => (
+                {places.map((item: any, index: number) => (
                   <motion.div
                     key={item.id || `item-${index}`}
                     initial={{ opacity: 0, y: 20 }}

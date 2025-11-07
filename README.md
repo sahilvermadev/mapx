@@ -104,10 +104,22 @@ The enhanced embeddings enable powerful semantic searches:
 
 ## 📚 Documentation
 
-All project documentation is organized in the [`docs/`](./docs/) folder:
+### Getting Started
+- **[Development Guide](./DEVELOPMENT.md)** - Complete local development setup and workflow
+- **[Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Production deployment instructions
+- **[Workflow Guide](./WORKFLOW.md)** - Development-to-production workflow
+
+### Production
+- **[Production Readiness Checklist](./PRODUCTION_READINESS_CHECKLIST.md)** - Production best practices
+- **[HTTPS Setup Guide](./HTTPS_SETUP.md)** - SSL/HTTPS configuration
+- **[Domain Migration Guide](./DOMAIN_MIGRATION.md)** - Change domain easily
+- **[Troubleshooting Guide](./TROUBLESHOOTING.md)** - Common issues and solutions
+
+### Technical Documentation
+All technical documentation is organized in the [`docs/`](./docs/) folder:
 
 - **[Complete Documentation Index](./docs/README.md)** - Overview of all documentation
-- **[Authentication Strategy](./docs/COMPREHENSIVE_AUTHENTICATION_STRATEGY.md)** - Complete authentication system (includes setup guide)
+- **[Authentication Strategy](./docs/COMPREHENSIVE_AUTHENTICATION_STRATEGY.md)** - Complete authentication system
 - **[Backend Documentation](./docs/BACKEND_DOCUMENTATION.md)** - API and implementation details
 - **[AI Features](./docs/ASYNC_EMBEDDING_IMPLEMENTATION.md)** - Embedding and semantic search
 - **[Frontend Components](./docs/LANDING_PAGE_README.md)** - UI implementation guides

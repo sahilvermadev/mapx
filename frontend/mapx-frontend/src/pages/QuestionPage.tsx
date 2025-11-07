@@ -55,7 +55,7 @@ const QuestionPage: React.FC = () => {
 
   useEffect(() => {
     const img = new Image();
-    img.src = '/src/assets/post-page-bg.jpg';
+    img.src = '/post-page-bg.jpg';
     img.onload = () => setBgReady(true);
   }, []);
 
@@ -77,7 +77,7 @@ const QuestionPage: React.FC = () => {
     <div 
       className="h-full grid place-items-center overflow-hidden transition-opacity duration-300"
       style={{
-        backgroundImage: 'url(/src/assets/post-page-bg.jpg)',
+        backgroundImage: 'url(/post-page-bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',

@@ -8,7 +8,7 @@ export function Features() {
           {/* Section Header */}
           <div className="text-center max-w-3xl mx-auto mb-6 sm:mb-8 lg:mb-12 px-2">
             <h2 className="text-2xl sm:text-3xl lg:text-4xl tracking-tight mb-3 sm:mb-4 font-bold text-black break-words">
-              How Recce works
+              How Rekky works
             </h2>
             <p className="text-base sm:text-lg lg:text-xl text-gray-700 font-medium break-words">
               AI-powered discovery meets authentic social connections. 
