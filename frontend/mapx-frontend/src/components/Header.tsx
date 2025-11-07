@@ -28,7 +28,7 @@ interface HeaderProps {
 type HeaderVariant = 'default' | 'dark';
 
 // Constants
-const DEFAULT_TITLE = 'RECCE';
+const DEFAULT_TITLE = 'REKKY';
 const DISCOVER_LINK = '/friends';
 
 // Helper functions

@@ -77,16 +77,21 @@ const PostPage: React.FC = () => {
   }
 
   return (
-    <div 
-      className="h-full grid place-items-center overflow-hidden transition-opacity duration-300"
-      style={{
-        backgroundImage: 'url(/post-page-bg.jpg)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        opacity: bgReady ? 1 : 0.7
-      }}
-    >
+    <div className="h-full grid place-items-center overflow-hidden relative">
+      {/* Background image with opacity control */}
+      <div 
+        className="absolute inset-0 transition-opacity duration-300"
+        style={{
+          backgroundImage: 'url(/post-page-bg.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          opacity: bgReady ? 1 : 0.7,
+          zIndex: 0
+        }}
+      />
+      {/* Content layer */}
+      <div className="relative z-10 w-full max-w-2xl p-4">
         {!isAuthenticated && (
           <LandingHeader
             variant="dark"
@@ -99,11 +104,10 @@ const PostPage: React.FC = () => {
             }}
           />
         )}
-      <div className="w-full max-w-2xl p-4">
 
         {/* Loading State */}
         {loading && (
-          <Card className="p-6 shadow-sm border border-white/40 bg-white/90 backdrop-blur-sm">
+          <Card className={`p-6 shadow-sm border border-white/40 bg-white/90 ${bgReady ? 'backdrop-blur-sm' : ''}`}>
             <FeedPostSkeleton noOuterSpacing />
           </Card>
         )}
@@ -132,7 +136,7 @@ const PostPage: React.FC = () => {
 
         {/* Post Content */}
         {post && !loading && !error && (
-          <Card className="p-6 shadow-sm border border-white/40 bg-white/90 backdrop-blur-sm">
+          <Card className={`p-6 shadow-sm border border-white/40 bg-white/90 ${bgReady ? 'backdrop-blur-sm' : ''}`}>
             <div className="w-full flex justify-center">
               <div className="w-full max-w-xl">
                 {post && (
