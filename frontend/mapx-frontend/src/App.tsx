@@ -132,7 +132,7 @@ const AppContent: React.FC = () => {
           currentUserId={currentUser?.id}
           showProfileButton={true}
           showLogoutButton={true}
-          title="RECCE"
+          title="REKKY"
           variant="dark"
           onLogout={logout}
           profilePictureUrl={currentUser?.profilePictureUrl}
