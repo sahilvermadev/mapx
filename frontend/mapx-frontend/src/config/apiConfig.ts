@@ -85,14 +85,15 @@ export function getBackendUrl(endpoint: string): string {
 export function getProfilePictureUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   
-  // If already an absolute URL, return as-is
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return url;
-  }
-  
-  // If it's a Google profile picture URL, proxy it through our backend
+  // If it's a Google profile picture URL, always proxy it through our backend for CORS
+  // This must be checked BEFORE checking if it's absolute, since Google URLs are absolute
   if (url.includes('googleusercontent.com')) {
     return getBackendUrl(`/auth/profile-picture?url=${encodeURIComponent(url)}`);
+  }
+  
+  // If already an absolute URL (and not Google), return as-is
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
   }
   
   // For relative URLs, construct from API base URL

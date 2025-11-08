@@ -19,7 +19,7 @@ export function Hero() {
 
             {/* Subheading */}
             <p className="text-base sm:text-lg lg:text-xl text-gray-700 leading-relaxed max-w-2xl mx-auto font-medium px-2 break-words">
-              Recce combines AI-powered semantic search with authentic recommendations from people you trust. 
+              Rekky combines AI-powered semantic search with authentic recommendations from people you trust. 
               No more fake reviews. Just real experiences from your network.
             </p>
           </div>
