@@ -172,8 +172,8 @@ Actually, since we're proxying through nginx, the backend should use HTTPS in th
 
 ```bash
 # In .env, update:
-ALLOWED_ORIGINS=https://recommender.myftp.org
-FRONTEND_URL=https://recommender.myftp.org
+ALLOWED_ORIGINS=https://rekky.ai
+FRONTEND_URL=https://rekky.ai
 # Keep BACKEND_URL as http://localhost:5000 for internal Docker communication
 ```
 

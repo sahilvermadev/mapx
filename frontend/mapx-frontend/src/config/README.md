@@ -49,7 +49,7 @@ To change the domain, update these environment variables:
 
 - **VITE_BACKEND_URL**: Base URL for backend (OAuth, profile pictures, etc.)
   - Default: `http://localhost:5000` (development)
-  - In production, should be set to your domain (e.g., `http://recommender.myftp.org:5000`)
+  - In production, should be set to your domain (e.g., `https://rekky.ai`)
 
 ## Changing the Domain
 

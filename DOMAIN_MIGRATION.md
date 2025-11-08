@@ -89,12 +89,12 @@ The frontend needs to be rebuilt to pick up the new `VITE_BACKEND_URL` from the 
 
 ## Current Domain Configuration
 
-**Current Domain:** `recommender.myftp.org`
+**Current Domain:** `rekky.ai`
 
 **Files that reference the domain:**
 - `.env` file (on Droplet): `ALLOWED_ORIGINS`, `BACKEND_URL`, `FRONTEND_URL`
 - Nginx config: `/etc/nginx/sites-available/recommender` (server_name)
-- SSL certificates: `/etc/letsencrypt/live/recommender.myftp.org/`
+- SSL certificates: `/etc/letsencrypt/live/rekky.ai/`
 - Google OAuth: Google Cloud Console → Credentials
 
 **Files that DON'T need changes:**
