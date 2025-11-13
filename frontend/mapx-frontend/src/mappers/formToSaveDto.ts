@@ -1,7 +1,9 @@
 // Build the SaveRecommendationRequest payload expected by the backend
 // Centralizes mapping from collected form state to API DTO
 
-export type ContentType = 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+import { type ContentType } from '@/components/composer/constants';
+
+export type { ContentType };
 
 export interface LocationData {
   name?: string;
@@ -85,10 +87,9 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
     address: location.address,
     coordinates: location.lat && location.lng ? { lat: location.lat, lng: location.lng } : undefined,
     category: combined.category,
-    best_times: combined.best_times,
-    tips: combined.tips,
+    // Removed deprecated fields: best_times, tips
     contact_info: combined.contact_info,
-    specialities: combined.specialities,
+    highlights: combined.highlights,
     google_place_id: location.google_place_id,
     // normalized location fields: included at root and under location for backend compatibility
     city_name: inferredCityName || undefined,
@@ -114,9 +115,8 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
     place_category: combined.category || null,
     place_metadata: {
       contact_info: combined.contact_info,
-      specialities: combined.specialities,
-      best_times: combined.best_times,
-      tips: combined.tips,
+      highlights: combined.highlights,
+      // Removed deprecated fields: best_times, tips
       type: combined.type,
       google_place_id: location.google_place_id
     },

@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
+import { performance } from 'perf_hooks';
 import { deleteRecommendation } from '../db/recommendations';
 import { getSavedPlacesCount, getSavedPlaces } from '../db/social';
 import pool from '../db';
@@ -418,52 +419,66 @@ router.put('/:userId/preferences', authenticateJWT, async (req: Request, res: Re
 /**
  * GET /api/profile/:userId/stats
  * Get user statistics
+ * OPTIMIZED: Combined queries and parallel execution for better performance
  */
 router.get('/:userId/stats', async (req, res) => {
+  const startTime = performance.now();
   try {
     const { userId } = req.params;
 
-    // Get total recommendations
-    const recommendationsResult = await pool.query(
-      'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1',
-      [userId]
-    );
+    // Execute all independent queries in parallel for better performance
+    const [
+      recommendationsResult,
+      likesResult,
+      questionsResult,
+      savedCountPromise,
+      avgRatingResult,
+      citiesVisitedResult,
+      reviewsResult
+    ] = await Promise.all([
+      // Get total recommendations
+      pool.query(
+        'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1',
+        [userId]
+      ),
+      // Get total likes (count of annotations liked by this user)
+      pool.query(
+        'SELECT COUNT(*) as count FROM annotation_likes WHERE user_id = $1',
+        [userId]
+      ),
+      // Get total questions
+      pool.query(
+        'SELECT COUNT(*) as count FROM questions WHERE user_id = $1',
+        [userId]
+      ),
+      // Get total saved places
+      getSavedPlacesCount(userId),
+      // Get average rating
+      pool.query(
+        'SELECT AVG(rating) as avg_rating FROM recommendations WHERE user_id = $1 AND rating IS NOT NULL',
+        [userId]
+      ),
+      // Get total cities visited (distinct cities from recommendations)
+      pool.query(
+        `SELECT COUNT(DISTINCT p.city_slug) as count 
+         FROM recommendations r
+         JOIN places p ON r.place_id = p.id
+         WHERE r.user_id = $1 AND p.city_slug IS NOT NULL`,
+        [userId]
+      ),
+      // Get total reviews
+      pool.query(
+        'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1 AND description IS NOT NULL AND description != \'\'',
+        [userId]
+      )
+    ]);
 
-    // Get total likes (count of annotations liked by this user)
-    const likesResult = await pool.query(
-      'SELECT COUNT(*) as count FROM annotation_likes WHERE user_id = $1',
-      [userId]
-    );
+    const savedCount = savedCountPromise; // Already resolved from Promise.all
 
-    // Get total questions
-    const questionsResult = await pool.query(
-      'SELECT COUNT(*) as count FROM questions WHERE user_id = $1',
-      [userId]
-    );
-
-    // Get total saved places
-    const savedCount = await getSavedPlacesCount(userId);
-
-    // Get average rating
-    const avgRatingResult = await pool.query(
-      'SELECT AVG(rating) as avg_rating FROM recommendations WHERE user_id = $1 AND rating IS NOT NULL',
-      [userId]
-    );
-
-    // Get total cities visited (distinct cities from recommendations)
-    const citiesVisitedResult = await pool.query(
-      `SELECT COUNT(DISTINCT p.city_slug) as count 
-       FROM recommendations r
-       JOIN places p ON r.place_id = p.id
-       WHERE r.user_id = $1 AND p.city_slug IS NOT NULL`,
-      [userId]
-    );
-
-    // Get total reviews
-    const reviewsResult = await pool.query(
-      'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1 AND description IS NOT NULL AND description != \'\'',
-      [userId]
-    );
+    const duration = performance.now() - startTime;
+    if (process.env.NODE_ENV === 'development') {
+      logger.info(`[PERF] Stats endpoint completed in ${duration.toFixed(2)}ms`, { userId });
+    }
 
     res.json({
       success: true,
@@ -479,10 +494,12 @@ router.get('/:userId/stats', async (req, res) => {
     });
 
   } catch (error: any) {
+    const duration = performance.now() - startTime;
     logger.error('Error fetching user stats', { 
       error: error.message, 
       stack: error.stack,
-      userId: req.params.userId 
+      userId: req.params.userId,
+      duration: `${duration.toFixed(2)}ms`
     });
     res.status(500).json({
       success: false,
@@ -495,8 +512,10 @@ router.get('/:userId/stats', async (req, res) => {
 /**
  * GET /api/profile/:userId/recommendations
  * Get user recommendations in feed post format
+ * OPTIMIZED: Added performance logging
  */
 router.get('/:userId/recommendations', async (req, res) => {
+  const startTime = performance.now();
   try {
     const { userId } = req.params;
     const { 
@@ -544,6 +563,16 @@ router.get('/:userId/recommendations', async (req, res) => {
     const currentPage = Math.floor(offsetNum / limitNum) + 1;
     const hasMore = pageSize === limitNum; // If we got a full page, there might be more
 
+    const duration = performance.now() - startTime;
+    if (process.env.NODE_ENV === 'development') {
+      logger.info(`[PERF] Recommendations endpoint completed in ${duration.toFixed(2)}ms`, { 
+        userId, 
+        limit: limitNum, 
+        offset: offsetNum,
+        resultCount: recommendations.length 
+      });
+    }
+
     res.json({
       success: true,
       data: recommendations,
@@ -557,10 +586,12 @@ router.get('/:userId/recommendations', async (req, res) => {
     });
 
   } catch (error: any) {
+    const duration = performance.now() - startTime;
     logger.error('Error fetching user recommendations', { 
       error: error.message, 
       stack: error.stack,
-      userId: req.params.userId 
+      userId: req.params.userId,
+      duration: `${duration.toFixed(2)}ms`
     });
     res.status(500).json({
       success: false,

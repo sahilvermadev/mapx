@@ -6,6 +6,12 @@ import { buildSaveRecommendationDto } from '@/mappers/formToSaveDto';
 import { recommendationsApi } from '@/services/recommendationsApi';
 import { convertUsernamesToTokens } from '@/utils/mentions';
 import { handleError } from '@/utils/errorHandling';
+import {
+  RECOMMENDATION_PREFIX,
+  MIN_TEXT_LENGTH,
+  QUESTION_ANALYSIS_DELAY_MS,
+  ERROR_MESSAGES,
+} from '@/components/composer/constants';
 
 export interface ExtractedData {
   name?: string;
@@ -19,9 +25,8 @@ export interface ExtractedData {
     phone?: string;
     email?: string;
   };
-  specialities?: string[];
-  best_times?: string;
-  tips?: string;
+  highlights?: string[];
+  // Removed deprecated fields: best_times, tips
   type?: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
   location_name?: string;
   location_address?: string;
@@ -52,12 +57,12 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
   const [fieldResponses, setFieldResponses] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
   const [labels, setLabels] = useState<string[]>([]);
+  const [highlights, setHighlights] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [formattedPreview, setFormattedPreview] = useState<string>('');
-  const [isFormattingPreview, setIsFormattingPreview] = useState(false);
   const [editedPreview, setEditedPreview] = useState<string>('');
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
+  const [isImprovingText, setIsImprovingText] = useState(false);
 
   const location = useLocation();
 
@@ -69,9 +74,8 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
       return text;
     } else {
       // For standalone recommendations, ensure it starts with recommendation language
-      const prefix = "I want to recommend a ";
-      if (!text.toLowerCase().startsWith(prefix.toLowerCase())) {
-        return prefix + text;
+      if (!text.toLowerCase().startsWith(RECOMMENDATION_PREFIX.toLowerCase())) {
+        return RECOMMENDATION_PREFIX + text;
       }
       return text;
     }
@@ -79,15 +83,11 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
 
   const performAnalysis = useCallback(async (textToAnalyze: string, isQuestionContext: boolean = false) => {
     try {
-      console.log('Starting analysis for:', textToAnalyze, 'isQuestionContext:', isQuestionContext);
-      
       const processedText = prepareTextForAnalysis(textToAnalyze, isQuestionContext);
       const analysis = await aiClient.analyze(processedText);
-      
-      console.log('Analysis result:', analysis);
         
-      if (analysis && analysis.isGibberish) {
-        setError('Please provide a meaningful recommendation. The text you entered doesn\'t seem to contain useful information.');
+      if (analysis?.isGibberish) {
+        setError(ERROR_MESSAGES.GIBBERISH);
         setCurrentStep('writing');
         setIsAnalyzing(false);
         setIsProcessing(false);
@@ -98,22 +98,40 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
         ...analysis.extractedData,
         type: analysis.contentType,
         contentType: analysis.contentType,
-        description: isQuestionContext ? (analysis.extractedData.description || processedText) : prepareTextForAnalysis(analysis.extractedData.description || processedText, false)
+        description: isQuestionContext 
+          ? (analysis.extractedData.description || processedText) 
+          : prepareTextForAnalysis(analysis.extractedData.description || processedText, false)
       };
 
       setExtractedData(processedExtractedData);
-      setMissingFields(analysis.missingFields);
+      setMissingFields(analysis.missingFields || []);
       
-      if (analysis.missingFields && analysis.missingFields.length > 0) {
-        console.log('Proceeding to completing step with missing fields:', analysis.missingFields);
-        setCurrentStep('completing');
-      } else {
-        console.log('No missing fields, proceeding to preview');
-        setCurrentStep('preview');
+      // Initialize highlights from extractedData if available (only for places)
+      if (analysis.contentType === 'place' && processedExtractedData.highlights) {
+        const highlightsValue = Array.isArray(processedExtractedData.highlights)
+          ? processedExtractedData.highlights.join(', ')
+          : String(processedExtractedData.highlights);
+        if (highlightsValue.trim()) {
+          setHighlights(highlightsValue);
+        }
       }
+      
+      setCurrentStep(
+        analysis.missingFields && analysis.missingFields.length > 0 
+          ? 'completing' 
+          : 'preview'
+      );
     } catch (error) {
-      console.error('Error analyzing text:', error);
-      setError(error instanceof Error ? error.message : 'Sorry, there was an error analyzing your recommendation. Please try again.');
+      handleError(error, {
+        context: 'useRecommendationComposer.performAnalysis',
+        showToast: false,
+        logError: true
+      });
+      setError(
+        error instanceof Error 
+          ? error.message 
+          : ERROR_MESSAGES.ANALYSIS_ERROR
+      );
       setCurrentStep('writing');
     } finally {
       setIsAnalyzing(false);
@@ -123,12 +141,12 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
 
   const handleAnalyze = useCallback(async () => {
     if (!text.trim()) {
-      setError('Please enter some text before continuing.');
+      setError(ERROR_MESSAGES.EMPTY_TEXT);
       return;
     }
 
-    if (text.trim().length < 5) {
-      setError('Please enter at least 5 characters for your recommendation.');
+    if (text.trim().length < MIN_TEXT_LENGTH) {
+      setError(ERROR_MESSAGES.TEXT_TOO_SHORT);
       return;
     }
 
@@ -139,6 +157,17 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
 
     await performAnalysis(text, false);
   }, [text, performAnalysis]);
+
+  const moveToNextField = useCallback(() => {
+    setCurrentFieldIndex(prev => {
+      if (prev < missingFields.length - 1) {
+        return prev + 1;
+      } else {
+        setCurrentStep('preview');
+        return prev;
+      }
+    });
+  }, [missingFields.length]);
 
   const handleFieldResponse = useCallback(async (field: string, response: any) => {
     if (typeof response === 'string') {
@@ -166,23 +195,25 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
       );
       
       if (!validation.isValid) {
-        toast.error(validation.feedback || 'Please provide a more specific answer.');
+        toast.error(validation.feedback || ERROR_MESSAGES.VALIDATION_ERROR);
         return;
       }
 
       const extractedValue = validation.extractedValue || String(response);
       setFieldResponses(prev => ({ ...prev, [field]: extractedValue }));
       setExtractedData(prev => ({ ...prev, [field]: extractedValue }));
-      setFormattedPreview(''); // invalidate preview to force regeneration
       moveToNextField();
     } catch (error) {
-      console.error('Error validating response:', error);
+      handleError(error, {
+        context: 'useRecommendationComposer.handleFieldResponse',
+        showToast: false,
+        logError: true
+      });
       setFieldResponses(prev => ({ ...prev, [field]: response }));
       setExtractedData(prev => ({ ...prev, [field]: response }));
-      setFormattedPreview(''); // invalidate preview to force regeneration
       moveToNextField();
     }
-  }, [missingFields, currentFieldIndex]);
+  }, [missingFields, currentFieldIndex, moveToNextField]);
 
   const handleLocationSelected = useCallback((location: {
     name: string;
@@ -218,27 +249,42 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
 
     setFieldResponses(prev => ({ ...prev, [field]: locationText }));
     moveToNextField();
-  }, [missingFields, currentFieldIndex]);
+  }, [missingFields, currentFieldIndex, moveToNextField]);
 
   const handleSkipField = useCallback(() => {
     moveToNextField();
-  }, []);
+  }, [moveToNextField]);
 
-  const moveToNextField = useCallback(() => {
-    if (currentFieldIndex < missingFields.length - 1) {
-      setCurrentFieldIndex(prev => prev + 1);
-    } else {
-      setCurrentStep('preview');
+  const improveText = useCallback(async (currentText: string): Promise<string | null> => {
+    setIsImprovingText(true);
+    try {
+      const improved = await aiClient.improveText(currentText);
+      
+      if (improved && improved.trim()) {
+        return improved.trim();
+      }
+      
+      // Show toast if no improvement was returned
+      toast.error('Unable to improve text. Please try again.');
+      return null;
+    } catch (error) {
+      handleError(error, {
+        context: 'useRecommendationComposer.improveText',
+        showToast: true,
+        logError: true
+      });
+      return null;
+    } finally {
+      setIsImprovingText(false);
     }
-  }, [currentFieldIndex, missingFields.length]);
+  }, []);
 
   const handleSubmit = useCallback(async (getMapping: () => Record<string, any>) => {
     setIsSubmitting(true);
     
     try {
       const textWithTokens = convertUsernamesToTokens(text, getMapping());
-      const baseFormatted = editedPreview || formattedPreview || await formatRecommendationText(extractedData, fieldResponses);
-      const formattedRecommendation = convertUsernamesToTokens(baseFormatted, getMapping());
+      const formattedRecommendation = convertUsernamesToTokens(editedPreview || text, getMapping());
       
       const finalData = {
         ...extractedData,
@@ -246,7 +292,8 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
         originalText: textWithTokens,
         formattedText: formattedRecommendation,
         type: extractedData.type || 'place',
-        contentType: (extractedData as any).contentType || extractedData.type || 'place'
+        contentType: (extractedData as any).contentType || extractedData.type || 'place',
+        highlights: highlights.trim() || undefined
       };
       
       const contentType = (finalData.type as ('place' | 'service' | 'tip' | 'contact' | 'unclear')) || 'place';
@@ -275,84 +322,18 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
       // Accept both shapes: direct data ({ recommendation_id }) or wrapped
       const recId = (result as any)?.recommendation_id || (result as any)?.data?.recommendation_id;
       if (recId) return true;
-      throw new Error('Failed to save recommendation');
+      throw new Error(ERROR_MESSAGES.SAVE_FAILED);
     } catch (error) {
       handleError(error, {
-        context: 'RecommendationComposer.handleSubmit',
+        context: 'useRecommendationComposer.handleSubmit',
         showToast: true,
-        fallbackMessage: 'Sorry, there was an error saving your recommendation. Please try again.'
+        fallbackMessage: ERROR_MESSAGES.SAVE_ERROR
       });
       return false;
     } finally {
       setIsSubmitting(false);
     }
-  }, [text, editedPreview, formattedPreview, extractedData, fieldResponses, rating, currentUserId, labels, questionId]);
-
-  const formatRecommendationText = useCallback(async (data: ExtractedData, fieldResponses: Record<string, string>) => {
-    try {
-      const consolidated = { ...data, ...fieldResponses };
-      
-      try {
-        const llmFormatted = await aiClient.format(consolidated, text);
-        if (llmFormatted) {
-          return llmFormatted;
-        }
-      } catch (error) {
-        // Log AI formatting error but fall back silently
-        handleError(error, {
-          context: 'RecommendationComposer.formatRecommendationText',
-          showToast: false,
-          logError: true
-        });
-      }
-      
-      return formatRecommendationTextSync(data, fieldResponses);
-    } catch (error) {
-      return text || 'Recommendation shared';
-    }
-  }, [text]);
-
-  const formatRecommendationTextSync = useCallback((data: ExtractedData, fieldResponses: Record<string, string>) => {
-    try {
-      const consolidated = { ...data, ...fieldResponses };
-      
-      const name = consolidated.name || consolidated.location_name || 'This place';
-      const locationLine = consolidated.location || consolidated.location_address || '';
-      const contactInfo = typeof consolidated.contact_info === 'string' 
-        ? { phone: consolidated.contact_info }
-        : (consolidated.contact_info || {});
-      const phone = contactInfo.phone || fieldResponses.phone || '';
-      const email = contactInfo.email || fieldResponses.email || '';
-      const category = consolidated.category || '';
-      const pricing = consolidated.pricing || fieldResponses.pricing || fieldResponses.price || '';
-      const qualities = [fieldResponses.trustworthy, fieldResponses.affordable, fieldResponses.reliable]
-        .filter(Boolean)
-        .join(', ');
-
-      const lines: string[] = [];
-      lines.push(`${name}${category ? ` — ${category}` : ''}.`);
-      if (locationLine) lines.push(`Address: ${locationLine}.`);
-      if (pricing) lines.push(`Pricing: ${pricing}.`);
-      if (qualities) lines.push(`Notes: ${qualities}.`);
-      if (phone || email) {
-        const parts = [] as string[];
-        if (phone) parts.push(`Phone ${phone}`);
-        if (email) parts.push(`Email ${email}`);
-        lines.push(`Contact: ${parts.join(', ')}.`);
-      }
-      if (consolidated.best_times) lines.push(`Best time: ${consolidated.best_times}.`);
-      if (consolidated.tips) lines.push(`Tip: ${consolidated.tips}.`);
-      if (consolidated.specialities) {
-        const specialities = Array.isArray(consolidated.specialities) ? consolidated.specialities : [consolidated.specialities];
-        if (specialities.length > 0) lines.push(`specialities: ${specialities.join(', ')}.`);
-      }
-      if (consolidated.rating) lines.push(`Rating: ${consolidated.rating}/5.`);
-
-      return lines.join('\n');
-    } catch (error) {
-      return text || 'Recommendation shared';
-    }
-  }, [text]);
+  }, [text, editedPreview, extractedData, fieldResponses, rating, currentUserId, labels, highlights, questionId]);
 
   const reset = useCallback(() => {
     setText('');
@@ -362,27 +343,26 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
     setFieldResponses({});
     setError(null);
     setIsProcessing(false);
-    setFormattedPreview('');
-    setIsFormattingPreview(false);
     setEditedPreview('');
     setIsEditingDescription(false);
     setRating(null);
     setLabels([]);
+    setHighlights('');
+    setIsImprovingText(false);
   }, []);
 
-  const initializeWithQuestion = useCallback((questionContext: string) => {
+  const initializeWithQuestion = useCallback((questionContext: string | undefined) => {
     if (questionContext && typeof questionContext === 'string' && questionContext.trim().length > 0) {
-      console.log('Question context detected, starting analysis:', questionContext);
       setText(questionContext);
       setCurrentStep('analyzing');
       setIsAnalyzing(true);
       setIsProcessing(true);
       
+      // Small delay to ensure state updates are processed
       setTimeout(() => {
         performAnalysis(questionContext, true); // Pass true for question context
-      }, 100);
+      }, QUESTION_ANALYSIS_DELAY_MS);
     } else {
-      console.log('No question context, starting with writing step');
       setText('');
       setCurrentStep('writing');
       setIsAnalyzing(false);
@@ -427,27 +407,28 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
     setText,
     isAnalyzing,
     extractedData,
+    setExtractedData,
     missingFields,
     currentStep,
     setCurrentStep,
     isSubmitting,
     currentFieldIndex,
     fieldResponses,
+    setFieldResponses,
     error,
     setError,
     labels,
     setLabels,
+    highlights,
+    setHighlights,
     isProcessing,
-    formattedPreview,
-    setFormattedPreview,
-    isFormattingPreview,
-    setIsFormattingPreview,
     editedPreview,
     setEditedPreview,
     isEditingDescription,
     setIsEditingDescription,
     rating,
     setRating,
+    isImprovingText,
     
     // Actions
     handleAnalyze,
@@ -456,8 +437,7 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
     handleSkipField,
     handleSubmit,
     performAnalysis,
-    formatRecommendationText,
-    formatRecommendationTextSync,
+    improveText,
     reset,
     initializeWithQuestion,
     goBack,

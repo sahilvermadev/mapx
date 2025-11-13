@@ -232,8 +232,8 @@ export const recommendationsApi = {
   /**
    * Delete a recommendation
    */
-  async deleteRecommendation(annotationId: number): Promise<boolean> {
-    const response = await apiClient.delete(`/recommendations/${annotationId}`);
+  async deleteRecommendation(annotationId: number, userId: string): Promise<boolean> {
+    const response = await apiClient.delete(`/recommendations/${annotationId}`, { user_id: userId });
     return response.success;
   },
 

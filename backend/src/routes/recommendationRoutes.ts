@@ -487,7 +487,7 @@ router.post('/save', async (req, res) => {
       const derivedWebsite = service_website || cd.service_website || cd.website;
       const derivedServiceType = service_type || cd.service_type || cd.category;
       const combinedMetadata = { ...(service_metadata || {}), ...cd } as Record<string, any>;
-      // Helper: attempt type from specialities/description text if name/business didn't yield one
+      // Helper: attempt type from highlights/description text if name/business didn't yield one
       const inferTypeFromFreeText = (...texts: Array<string | string[] | undefined>) => {
         const flattened = texts
           .flatMap(t => Array.isArray(t) ? t : [t])
@@ -500,7 +500,7 @@ router.post('/save', async (req, res) => {
 
       let extractedServiceType = derivedServiceType || extractServiceType(derivedServiceName || '', derivedBusinessName);
       if (!extractedServiceType) {
-        extractedServiceType = inferTypeFromFreeText(cd?.specialities, cd?.category, description, derivedServiceName);
+        extractedServiceType = inferTypeFromFreeText(cd?.highlights, cd?.category, description, derivedServiceName);
       }
 
       console.log('[recommendations/save] service type resolution:', {

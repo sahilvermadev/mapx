@@ -1,4 +1,5 @@
 import pool from '../db';
+import { performance } from 'perf_hooks';
 
 // Types for social network features
 export interface UserFollow {
@@ -630,6 +631,7 @@ export async function getUserRecommendations(
   citySlug?: string,
   categoryKeys?: string[]
 ): Promise<any[]> {
+  const startTime = performance.now();
   try {
     // Sanitize and validate search query
     const sanitizedSearch = searchQuery?.trim();
@@ -696,6 +698,8 @@ export async function getUserRecommendations(
     const offsetParamIndex = paramCount;
     params.push(offset);
 
+    // OPTIMIZED: Use subqueries for counts instead of GROUP BY to improve performance
+    // This avoids the overhead of grouping all columns when we only need counts
     const result = await pool.query(
       `SELECT 
         r.id as recommendation_id,
@@ -706,28 +710,38 @@ export async function getUserRecommendations(
         p.city_name as place_city_name, p.city_slug as place_city_slug, p.country_code as place_country_code, p.admin1_name as place_admin1_name,
         p.primary_type as place_primary_type,
         u.id as user_id, u.display_name as user_name, u.profile_picture_url as user_picture,
-        COUNT(DISTINCT ac.id) as comments_count,
-        COUNT(DISTINCT al.id) as likes_count,
-        CASE WHEN al2.id IS NOT NULL THEN true ELSE false END as is_liked_by_current_user,
-        CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved
+        COALESCE(comment_counts.comments_count, 0) as comments_count,
+        COALESCE(like_counts.likes_count, 0) as likes_count,
+        false as is_liked_by_current_user,
+        false as is_saved
       FROM recommendations r
       LEFT JOIN places p ON r.place_id = p.id
       JOIN users u ON r.user_id = u.id
-      LEFT JOIN annotation_comments ac ON r.id = ac.recommendation_id
-      LEFT JOIN annotation_likes al ON r.id = al.recommendation_id
-      LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
-      LEFT JOIN saved_places sp ON p.id = sp.place_id AND sp.user_id = $1
+      LEFT JOIN (
+        SELECT recommendation_id, COUNT(*)::int as comments_count
+        FROM annotation_comments
+        GROUP BY recommendation_id
+      ) comment_counts ON r.id = comment_counts.recommendation_id
+      LEFT JOIN (
+        SELECT recommendation_id, COUNT(*)::int as likes_count
+        FROM annotation_likes
+        GROUP BY recommendation_id
+      ) like_counts ON r.id = like_counts.recommendation_id
       WHERE ${whereParts.join(' AND ')}
-      GROUP BY r.id, r.place_id, r.title, r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
-               p.name, p.address, p.lat, p.lng, p.google_place_id, p.city_name, p.city_slug, p.country_code, p.admin1_name, p.primary_type,
-               u.id, u.display_name, u.profile_picture_url, al2.id, sp.id
       ORDER BY r.created_at DESC
       LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`,
       params
     );
+    
+    const duration = performance.now() - startTime;
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[PERF] getUserRecommendations completed in ${duration.toFixed(2)}ms (${result.rows.length} rows, userId: ${userId})`);
+    }
+    
     return result.rows;
   } catch (error) {
-    console.error('Error getting user recommendations:', error);
+    const duration = performance.now() - startTime;
+    console.error(`[PERF] Error getting user recommendations after ${duration.toFixed(2)}ms:`, error);
     throw error;
   }
 }

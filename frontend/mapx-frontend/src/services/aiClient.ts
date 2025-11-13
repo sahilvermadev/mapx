@@ -2,11 +2,12 @@
 // Uses the main API client for consistency and proper authentication
 
 import { apiClient } from './api';
+import { CONTENT_TYPES, type ContentType } from '@/components/composer/constants';
 
 export interface RecommendationAnalysis {
   isValid: boolean;
   isGibberish: boolean;
-  contentType: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  contentType: ContentType;
   extractedData: Record<string, any>;
   missingFields: Array<{
     field: string;
@@ -65,7 +66,6 @@ export const aiClient = {
     // Retry logic for AI formatting
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`AI formatting attempt ${attempt}/2`);
         const result = await withTimeout(
           apiClient.post<{ formattedText?: string }>('/ai-recommendation/format', payload),
           20000
@@ -76,9 +76,7 @@ export const aiClient = {
           return formatted.trim();
         }
       } catch (error) {
-        console.warn(`AI formatting attempt ${attempt} failed:`, error);
         if (attempt === 2) {
-          console.warn('All AI formatting attempts failed, using fallback');
           return null;
         }
         // Wait 1 second before retry
@@ -86,6 +84,29 @@ export const aiClient = {
       }
     }
     return null;
+  },
+
+  async improveText(text: string): Promise<string | null> {
+    const payload = { text };
+    
+    try {
+      const result = await withTimeout(
+        apiClient.post<{ success?: boolean; improvedText?: string }>('/ai-recommendation/improve-text', payload),
+        20000
+      );
+      
+      // Backend returns { success: true, improvedText: "..." }
+      // apiClient.post returns the axios response.data, which is the backend response
+      const improved = (result as any).improvedText;
+      
+      if (typeof improved === 'string' && improved.trim().length > 0) {
+        return improved.trim();
+      }
+      
+      return null;
+    } catch (error) {
+      throw error; // Re-throw to let the hook handle it with toast
+    }
   }
 };
 

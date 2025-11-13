@@ -62,6 +62,7 @@ const SocialFeedPage: React.FC = () => {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const isSearchingRef = useRef(false);
   const lastSearchTimeRef = useRef(0);
+  const cityBarRef = useRef<HTMLDivElement>(null);
   
   // Guard to prevent modal from opening during/after search operations
   const setAskOpenSafe = useCallback((value: boolean) => {
@@ -642,8 +643,18 @@ const SocialFeedPage: React.FC = () => {
   return (
     <div className="min-h-[calc(100vh-64px)] overflow-x-hidden" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
       {/* Secondary sticky header: City filter bar */}
-      {/* Fixed city filter bar under main header */}
-      <div className="fixed top-16 left-0 right-0 z-40">
+      {/* Fixed city filter bar under main header with mobile scroll bug prevention */}
+      <div 
+        ref={cityBarRef}
+        className="fixed top-16 left-0 right-0 z-40 bg-background"
+        style={{ 
+          transform: 'translateZ(0)',
+          WebkitTransform: 'translateZ(0)',
+          backfaceVisibility: 'hidden',
+          WebkitBackfaceVisibility: 'hidden',
+          overscrollBehavior: 'none'
+        }}
+      >
         <CityFilterBar
           cities={citySummaries}
           selectedCityId={selectedCity?.id}
@@ -704,7 +715,7 @@ const SocialFeedPage: React.FC = () => {
       {/* Floating Ask button */}
       <button
         type="button"
-        className="fixed bottom-6 right-6 rounded-none border-2 border-black bg-yellow-300 px-6 py-3 text-black shadow-[6px_6px_0_0_#000] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[4px_4px_0_0_#000]"
+        className="fixed bottom-6 right-6 z-50 rounded-none border-2 border-black bg-yellow-300 px-6 py-3 text-black shadow-[6px_6px_0_0_#000] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[4px_4px_0_0_#000]"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();

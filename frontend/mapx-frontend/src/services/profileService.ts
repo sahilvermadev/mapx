@@ -20,6 +20,14 @@ export interface Theme {
   backgroundColor: string;
   textColor: string;
   patternEnabled: boolean;
+  tagStyle?: {
+    background: string | { from: string; to: string }; // Can be solid color or gradient
+    textColor: string;
+    borderColor?: string;
+    borderWidth?: string;
+    shadow?: string;
+    hoverBackground?: string | { from: string; to: string };
+  };
 }
 
 export const THEMES: Record<ThemeName, Theme> = {
@@ -30,6 +38,14 @@ export const THEMES: Record<ThemeName, Theme> = {
     backgroundColor: '#FFF9E6', // Light yellow
     textColor: '#000000',
     patternEnabled: false,
+    tagStyle: {
+      background: '#FFF9E6', // Very light yellow, subtle
+      textColor: '#92400E', // Dark amber for contrast
+      borderColor: 'rgba(146, 64, 14, 0.1)',
+      borderWidth: '1px',
+      shadow: 'none',
+      hoverBackground: '#FFF9E6',
+    },
   },
   'ocean': {
     name: 'ocean',
@@ -38,14 +54,30 @@ export const THEMES: Record<ThemeName, Theme> = {
     backgroundColor: '#F0FDFC', // Light teal
     textColor: '#000000',
     patternEnabled: false,
+    tagStyle: {
+      background: '#F0FDFC', // Very light teal, subtle
+      textColor: '#0D9488', // Dark teal for contrast
+      borderColor: 'rgba(13, 148, 136, 0.1)',
+      borderWidth: '1px',
+      shadow: 'none',
+      hoverBackground: '#F0FDFC',
+    },
   },
   'sunset': {
     name: 'sunset',
     displayName: 'Cotton Candy',
-    accentColor: '#FF6B6B', // Red
+    accentColor: '#FF6B6B', // Red/Pink
     backgroundColor: '#FFF5F5', // Light pink
     textColor: '#000000',
     patternEnabled: false,
+    tagStyle: {
+      background: '#FFF5F5', // Very light pink, subtle
+      textColor: '#BE123C', // Dark rose for contrast
+      borderColor: 'rgba(190, 18, 60, 0.1)',
+      borderWidth: '1px',
+      shadow: 'none',
+      hoverBackground: '#FFF5F5',
+    },
   },
   'forest': {
     name: 'forest',
@@ -54,6 +86,14 @@ export const THEMES: Record<ThemeName, Theme> = {
     backgroundColor: '#F6FFFA', // Light green
     textColor: '#000000',
     patternEnabled: false,
+    tagStyle: {
+      background: '#F6FFFA', // Very light green, subtle
+      textColor: '#065F46', // Dark green for contrast
+      borderColor: 'rgba(6, 95, 70, 0.1)',
+      borderWidth: '1px',
+      shadow: 'none',
+      hoverBackground: '#F6FFFA',
+    },
   },
   'monochrome': {
     name: 'monochrome',
@@ -62,6 +102,14 @@ export const THEMES: Record<ThemeName, Theme> = {
     backgroundColor: '#FFFFFF', // White
     textColor: '#000000',
     patternEnabled: true, // Dotted pattern
+    tagStyle: {
+      background: '#F5F5F5', // Light gray
+      textColor: '#000000', // Black text
+      borderColor: 'rgba(0, 0, 0, 0.1)',
+      borderWidth: '1px',
+      shadow: 'none',
+      hoverBackground: '#F5F5F5',
+    },
   },
 };
 

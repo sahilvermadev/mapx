@@ -57,7 +57,7 @@ export function useMentionHandler(currentUserId: string) {
     }
     const list = await mentions.suggest(query, currentUserId);
     setMentionSuggestions(list);
-  }, [currentUserId, mentions]);
+  }, [currentUserId, mentions.suggest]);
 
   const handleTextChange = useCallback((
     value: string,
@@ -151,7 +151,7 @@ export function useMentionHandler(currentUserId: string) {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(newCursor, newCursor);
     });
-  }, [mentions]);
+  }, [mentions.rememberMapping]);
 
   const closeMentionMenu = useCallback(() => {
     setShowMentionMenu(false);

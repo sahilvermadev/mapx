@@ -163,14 +163,38 @@ router.post('/:questionId/answers', async (req, res) => {
       // Handle place creation if this is a place recommendation
       if (payload.content_type === 'place' && !payload.place_id) {
         try {
+          // Extract address - prefer location_address, then place_address from DTO, then address from content_data
+          // If location is an object, don't use it as address (it's structured data, not a string)
+          let address = payload.content_data?.location_address || 
+                       (payload as any).place_address || 
+                       payload.content_data?.address || 
+                       null;
+          
+          // If address is an object (shouldn't happen, but handle gracefully), try to stringify or use a fallback
+          if (address && typeof address === 'object') {
+            // If it's a location object with city info, construct a readable address
+            if (address.city_name) {
+              address = [address.city_name, address.admin1_name, address.country_code]
+                .filter(Boolean)
+                .join(', ') || null;
+            } else {
+              // Otherwise, don't use object as address
+              address = null;
+            }
+          }
+          
           // Extract place data from the payload
           const placeData = {
-            google_place_id: payload.content_data?.location_google_place_id || null,
+            google_place_id: payload.content_data?.location_google_place_id || payload.content_data?.google_place_id || (payload as any).google_place_id || null,
             name: payload.title || 'Unnamed Place',
-            address: payload.content_data?.location_address || payload.content_data?.location || null,
+            address: address,
             category_name: payload.content_data?.category || null,
-            lat: payload.content_data?.location_lat || null,
-            lng: payload.content_data?.location_lng || null,
+            lat: payload.content_data?.location_lat || payload.content_data?.coordinates?.lat || (payload as any).place_lat || null,
+            lng: payload.content_data?.location_lng || payload.content_data?.coordinates?.lng || (payload as any).place_lng || null,
+            city_name: payload.content_data?.city_name || payload.content_data?.location?.city_name || null,
+            city_slug: payload.content_data?.city_slug || payload.content_data?.location?.city_slug || null,
+            admin1_name: payload.content_data?.admin1_name || payload.content_data?.location?.admin1_name || null,
+            country_code: payload.content_data?.country_code || payload.content_data?.location?.country_code || null,
             metadata: payload.content_data || {}
           };
 
@@ -188,14 +212,34 @@ router.post('/:questionId/answers', async (req, res) => {
       // Handle service creation if this is a service recommendation
       if (payload.content_type === 'service' && !payload.service_id) {
         try {
+          // Extract address - prefer service_address, then address from content_data
+          // If location is an object, don't use it as address (it's structured data, not a string)
+          let serviceAddress = payload.content_data?.service_address || 
+                              payload.content_data?.address || 
+                              (payload as any).service_address || 
+                              undefined;
+          
+          // If address is an object (shouldn't happen, but handle gracefully), try to stringify or use a fallback
+          if (serviceAddress && typeof serviceAddress === 'object') {
+            // If it's a location object with city info, construct a readable address
+            if (serviceAddress.city_name) {
+              serviceAddress = [serviceAddress.city_name, serviceAddress.admin1_name, serviceAddress.country_code]
+                .filter(Boolean)
+                .join(', ') || undefined;
+            } else {
+              // Otherwise, don't use object as address
+              serviceAddress = undefined;
+            }
+          }
+          
           // Extract service data from the payload
           const serviceData = {
             name: payload.title || 'Unnamed Service',
             phone_number: payload.content_data?.contact_info?.phone || undefined,
             email: payload.content_data?.contact_info?.email || undefined,
-            service_type: payload.content_data?.specialities ? extractServiceType(payload.content_data.specialities, '') || undefined : undefined,
+            service_type: payload.content_data?.highlights ? extractServiceType(payload.content_data.highlights, '') || undefined : undefined,
             business_name: payload.content_data?.business_name || undefined,
-            address: payload.content_data?.location || undefined,
+            address: serviceAddress,
             website: payload.content_data?.website || undefined,
             metadata: payload.content_data || {}
           };

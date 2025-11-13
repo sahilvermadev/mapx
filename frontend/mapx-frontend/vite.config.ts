@@ -55,7 +55,7 @@ export default defineConfig(({ mode }) => {
     },
     // Optimize dependencies in production
     optimizeDeps: {
-      include: ['react', 'react-dom', 'react-router-dom'],
+      include: ['react', 'react-dom', 'react-router-dom', 'gsap'],
     },
   };
 });

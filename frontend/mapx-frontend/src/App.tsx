@@ -158,7 +158,9 @@ const AppContent: React.FC = () => {
         <div 
           className="absolute inset-0 z-20 overflow-auto"
           style={{ 
-            top: isLandingRoute ? '0' : '64px'
+            top: isLandingRoute ? '0' : '64px',
+            overscrollBehavior: 'none',
+            WebkitOverflowScrolling: 'touch'
           }}
         >
           <Suspense fallback={<LoadingSkeleton />}>

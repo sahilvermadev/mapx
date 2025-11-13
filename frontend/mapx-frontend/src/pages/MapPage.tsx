@@ -301,23 +301,81 @@ const MapPage: React.FC = () => {
 
       const position = new google.maps.LatLng(place.lat, place.lng);
       
+      // Create beautiful metallic markers based on rating tier
+      // Excellent (4+): Gold (#EFBF04)
+      // Good (3-4): Silver (#C4C4C4)
+      // Fair (<3): Bronze (#CE8946)
+      const getMarkerSvg = (rating: number, markerId: string) => {
+        if (rating >= 4) {
+          // Beautiful Gold marker with gradient and highlight
+          return `
+            <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="goldGrad-${markerId}" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#F5D547;stop-opacity:1" />
+                  <stop offset="50%" style="stop-color:#EFBF04;stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:#D4A904;stop-opacity:1" />
+                </linearGradient>
+                <filter id="goldShadow-${markerId}" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(239,191,4,0.4)"/>
+                  <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.2)"/>
+                </filter>
+              </defs>
+              <circle cx="14" cy="14" r="12" fill="url(#goldGrad-${markerId})" stroke="#D4A904" stroke-width="1.5" filter="url(#goldShadow-${markerId})"/>
+              <ellipse cx="10" cy="10" rx="4" ry="3" fill="rgba(255,255,255,0.4)" opacity="0.8"/>
+              <circle cx="14" cy="14" r="12" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+            </svg>
+          `;
+        } else if (rating >= 3) {
+          // Beautiful Silver marker with gradient and highlight
+          return `
+            <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="silverGrad-${markerId}" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#E8E8E8;stop-opacity:1" />
+                  <stop offset="50%" style="stop-color:#C4C4C4;stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:#A8A8A8;stop-opacity:1" />
+                </linearGradient>
+                <filter id="silverShadow-${markerId}" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(196,196,196,0.3)"/>
+                  <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.2)"/>
+                </filter>
+              </defs>
+              <circle cx="14" cy="14" r="12" fill="url(#silverGrad-${markerId})" stroke="#A8A8A8" stroke-width="1.5" filter="url(#silverShadow-${markerId})"/>
+              <ellipse cx="10" cy="10" rx="4" ry="3" fill="rgba(255,255,255,0.5)" opacity="0.9"/>
+              <circle cx="14" cy="14" r="12" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.5"/>
+            </svg>
+          `;
+        } else {
+          // Beautiful Bronze marker with gradient and highlight
+          return `
+            <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="bronzeGrad-${markerId}" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#E0A570;stop-opacity:1" />
+                  <stop offset="50%" style="stop-color:#CE8946;stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:#B8753A;stop-opacity:1" />
+                </linearGradient>
+                <filter id="bronzeShadow-${markerId}" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(206,137,70,0.3)"/>
+                  <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.2)"/>
+                </filter>
+              </defs>
+              <circle cx="14" cy="14" r="12" fill="url(#bronzeGrad-${markerId})" stroke="#B8753A" stroke-width="1.5" filter="url(#bronzeShadow-${markerId})"/>
+              <ellipse cx="10" cy="10" rx="4" ry="3" fill="rgba(255,255,255,0.3)" opacity="0.7"/>
+              <circle cx="14" cy="14" r="12" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+            </svg>
+          `;
+        }
+      };
+      
       // Create custom marker with collision behavior
       const marker = new google.maps.Marker({
         position,
         map: map.current,
         title: `${place.name} (${place.review_count} reviews, ${place.average_rating.toFixed(1)}★)`,
         icon: {
-          url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-            <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.3)"/>
-                </filter>
-              </defs>
-              <circle cx="14" cy="14" r="12" fill="${place.average_rating >= 4.5 ? '#22c55e' : place.average_rating >= 3.5 ? '#eab308' : '#ef4444'}" stroke="white" stroke-width="2" filter="url(#shadow)"/>
-              <text x="14" y="18" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="Arial, sans-serif">${place.review_count}</text>
-            </svg>
-          `)}`,
+          url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(getMarkerSvg(place.average_rating, place.id.toString()))}`,
           scaledSize: new google.maps.Size(28, 28),
           anchor: new google.maps.Point(14, 28)
         },

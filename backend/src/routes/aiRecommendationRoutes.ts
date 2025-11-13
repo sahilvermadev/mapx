@@ -6,8 +6,6 @@ const router = express.Router();
 
 // Timeout configuration for AI requests
 const AI_REQUEST_TIMEOUT = 30000; // 30 seconds
-const AI_MAX_RETRIES = 2;
-const AI_RETRY_DELAY = 1000; // 1 second
 
 
 // Analyze recommendation text
@@ -178,16 +176,9 @@ router.post('/format', aiRateLimiter, async (req: express.Request, res: express.
   const startTime = Date.now();
   
   try {
-    console.log('=== LLM FORMAT ENDPOINT ===');
-    console.log('aiRecommendationRoutes - req.body:', req.body);
-    
     const { data, originalText } = req.body;
     
-    console.log('aiRecommendationRoutes - data:', data);
-    console.log('aiRecommendationRoutes - originalText:', originalText);
-    
     if (!data) {
-      console.log('aiRecommendationRoutes - No data provided');
       return res.status(400).json({ 
         success: false, 
         error: 'Data is required' 
@@ -199,11 +190,9 @@ router.post('/format', aiRateLimiter, async (req: express.Request, res: express.
       setTimeout(() => reject(new Error('AI request timeout')), AI_REQUEST_TIMEOUT);
     });
 
-    console.log('aiRecommendationRoutes - Calling recommendationAI.formatRecommendationPost');
     const formatPromise = recommendationAI.formatRecommendationPost(data, originalText);
     
     const formattedText = await Promise.race([formatPromise, timeoutPromise]) as string;
-    console.log('aiRecommendationRoutes - formattedText result:', formattedText);
     
     const duration = Date.now() - startTime;
     console.log(`AI formatting completed in ${duration}ms`);
@@ -226,6 +215,62 @@ router.post('/format', aiRateLimiter, async (req: express.Request, res: express.
       res.status(500).json({
         success: false,
         error: 'Failed to format recommendation'
+      });
+    }
+  }
+});
+
+// Improve text grammar, language, and phrasing
+router.post('/improve-text', aiRateLimiter, async (req: express.Request, res: express.Response) => {
+  const startTime = Date.now();
+  
+  try {
+    const { text } = req.body;
+    
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Text is required and must be a string' 
+      });
+    }
+
+    if (text.trim().length < 5) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Text must be at least 5 characters long' 
+      });
+    }
+
+    // Add timeout handling
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('AI request timeout')), AI_REQUEST_TIMEOUT);
+    });
+
+    const improvePromise = recommendationAI.improveText(text);
+    
+    const improvedText = await Promise.race([improvePromise, timeoutPromise]) as string;
+    
+    const duration = Date.now() - startTime;
+    console.log(`AI text improvement completed in ${duration}ms`);
+    
+    res.json({
+      success: true,
+      improvedText
+    });
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`Error improving text after ${duration}ms:`, error);
+    
+    if (error instanceof Error && error.message === 'AI request timeout') {
+      res.status(408).json({
+        success: false,
+        error: 'AI text improvement timed out. Please try again.'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to improve text'
       });
     }
   }

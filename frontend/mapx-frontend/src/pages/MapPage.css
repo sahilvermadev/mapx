@@ -4,6 +4,8 @@
   height: calc(100vh - 64px);
   overflow: hidden;
   background: #0b0f17;
+  touch-action: pan-x pan-y; /* Allow panning but prevent pinch-zoom */
+  -ms-touch-action: pan-x pan-y;
 }
 
 /* Authentication loading overlay */
@@ -44,7 +46,12 @@
   100% { transform: rotate(360deg); }
 }
 
-.map-container { position: absolute; inset: 0; }
+.map-container { 
+  position: absolute; 
+  inset: 0; 
+  touch-action: pan-x pan-y pinch-zoom !important; /* Allow Google Maps to handle all gestures including pinch-zoom */
+  -ms-touch-action: pan-x pan-y pinch-zoom !important;
+}
 
 /* Dark header styling */
 header[class*="bg-black"] {

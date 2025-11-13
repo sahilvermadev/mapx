@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { User, Map, Users, Newspaper, LogOut, Plus, Loader2, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,8 +55,6 @@ const getButtonClasses = (variant: HeaderVariant): string => {
     : '';
 };
 
-// No dynamic icon helper needed; we always render explicit icons for each nav item.
-
 const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
 import { getProfilePictureUrl } from '@/config/apiConfig';
@@ -81,6 +80,7 @@ const Header: React.FC<HeaderProps> = ({
   const location = useLocation();
   const buttonClasses = getButtonClasses(variant);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -109,15 +109,70 @@ const Header: React.FC<HeaderProps> = ({
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+  // Close user menu when route changes
+  useEffect(() => {
+    setUserMenuOpen(false);
+  }, [location.pathname]);
+
+  // Reset dropdown opacity when menu opens
+  useEffect(() => {
+    if (userMenuOpen) {
+      // Find dropdown content by data attribute and reset opacity/transition
+      const dropdownContent = document.querySelector('[data-slot="dropdown-menu-content"]') as HTMLElement;
+      if (dropdownContent) {
+        dropdownContent.style.opacity = '';
+        dropdownContent.style.pointerEvents = '';
+        dropdownContent.style.transition = '';
+      }
+    }
+  }, [userMenuOpen]);
+
   const handleDiscoverButtonClick = () => {
+    // Hide dropdown content immediately to prevent blink
+    const dropdownContent = document.querySelector('[data-slot="dropdown-menu-content"]') as HTMLElement;
+    if (dropdownContent) {
+      dropdownContent.style.opacity = '0';
+      dropdownContent.style.pointerEvents = 'none';
+      dropdownContent.style.transition = 'opacity 0s';
+    }
+    // Close dropdown synchronously before navigation to prevent blink
+    flushSync(() => {
+      setUserMenuOpen(false);
+    });
+    // Navigate immediately after closing - no delay needed since menu is already hidden
     navigate(DISCOVER_LINK);
     setMobileMenuOpen(false);
   };
   const handleProfileButtonClick = () => {
+    const startTime = performance.now();
+    if (import.meta.env.DEV) {
+      console.log('🚀 [PERF] Profile button clicked - starting navigation');
+      performance.mark('profile-nav-start');
+    }
+    // Hide dropdown content immediately to prevent blink
+    const dropdownContent = document.querySelector('[data-slot="dropdown-menu-content"]') as HTMLElement;
+    if (dropdownContent) {
+      dropdownContent.style.opacity = '0';
+      dropdownContent.style.pointerEvents = 'none';
+      dropdownContent.style.transition = 'opacity 0s';
+    }
+    // Close dropdown synchronously before navigation to prevent blink
+    flushSync(() => {
+      setUserMenuOpen(false);
+    });
+    // Navigate immediately after closing - no delay needed since menu is already hidden
     navigate(`/profile/${currentUserId}`);
     setMobileMenuOpen(false);
+    if (import.meta.env.DEV) {
+      const navTime = performance.now() - startTime;
+      console.log(`⏱️ [PERF] Navigation initiated in ${navTime.toFixed(2)}ms`);
+    }
   };
   const handleLogoutClick = () => {
+    // Close dropdown synchronously before logout
+    flushSync(() => {
+      setUserMenuOpen(false);
+    });
     if (onLogout) {
       onLogout();
     }
@@ -224,7 +279,7 @@ const Header: React.FC<HeaderProps> = ({
           
           {/* User menu - only show when not logging out */}
               {currentUserId && profilePictureUrl ? (
-            <DropdownMenu>
+            <DropdownMenu open={userMenuOpen} onOpenChange={setUserMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ${buttonClasses}`} aria-label="Profile menu">
                   <Avatar className="h-8 w-8 md:h-7 md:w-7">
@@ -233,19 +288,38 @@ const Header: React.FC<HeaderProps> = ({
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={handleProfileButtonClick}>
+              <DropdownMenuContent 
+                align="end" 
+                className="w-56"
+              >
+                <DropdownMenuItem 
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    handleProfileButtonClick();
+                  }}
+                >
                   <User className="h-4 w-4 mr-2" />
                   My Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleDiscoverButtonClick}>
+                <DropdownMenuItem 
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    handleDiscoverButtonClick();
+                  }}
+                >
                   <Users className="h-4 w-4 mr-2" />
                   Friends
                 </DropdownMenuItem>
                 {onLogout && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleLogoutClick} className="text-red-600 focus:text-red-600">
+                    <DropdownMenuItem 
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        handleLogoutClick();
+                      }}
+                      className="text-red-600 focus:text-red-600"
+                    >
                       <LogOut className="h-4 w-4 mr-2" />
                       Logout
                     </DropdownMenuItem>

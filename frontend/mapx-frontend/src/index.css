@@ -69,6 +69,24 @@
     @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+  
+  /* Prevent iOS Safari auto-zoom on input focus */
+  /* iOS Safari zooms in if font-size is less than 16px */
+  /* Apply minimum 16px font-size on mobile devices only */
+  @media (max-width: 767px) {
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    input:not([type]), /* Catch all other input types */
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
 }
 
 @theme inline {

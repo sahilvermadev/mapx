@@ -83,8 +83,8 @@ const CityFilterBar: React.FC<Props> = ({
     return categories.filter(c => c.label.toLowerCase().includes(normalizedQuery));
   }, [categories, query]);
 
-  // Variant-specific styling (both variants currently use same styles)
-  const containerStyles = 'w-full bg-background border-2 border-black/20 shadow-[2px_2px_0_0_rgba(0,0,0,0.12)] rounded-md';
+  // Variant-specific styling aligned with softened keylines (no heavy shadow/box)
+  const containerStyles = 'w-full bg-background border border-black/10 rounded-xl';
 
   // Variant-specific tagline
   const defaultTagline = variant === 'profile'
@@ -102,9 +102,9 @@ const CityFilterBar: React.FC<Props> = ({
 
   return (
     <div className={`${containerStyles} ${className}`}>
-      <div className={`w-full px-2 sm:px-3 md:px-6 h-[56px] lg:h-[64px] flex items-center ${variant === 'profile' ? 'justify-between' : 'gap-2 sm:gap-4'}`}>
+      <div className={`w-full px-2 sm:px-3 md:px-6 h-[56px] lg:h-[64px] ${variant === 'profile' ? 'grid grid-cols-3 items-center' : 'flex items-center gap-2 sm:gap-4'}`}>
         {/* Left: City selector + tagline */}
-        <div className={variant === 'profile' ? 'flex items-center gap-3 shrink-0' : 'flex-1 min-w-0 flex items-center gap-3'}>
+        <div className={variant === 'profile' ? 'flex items-center gap-3 shrink-0 justify-start' : 'flex-1 min-w-0 flex items-center gap-3'}>
           <CitySearchPopover
             triggerLabel={triggerLabel}
             onSelect={(c) => onSelectCity({ id: c.id, name: c.name })}
@@ -112,11 +112,11 @@ const CityFilterBar: React.FC<Props> = ({
           />
           {variant !== 'profile' && (
             <div className="hidden md:flex flex-col min-w-0">
-              <div className="text-sm text-muted-foreground truncate">
+              <div className="text-xs md:text-sm text-muted-foreground truncate">
                 {city?.tagline || defaultTagline}
               </div>
               {city?.country && (
-                <div className="text-xs text-muted-foreground/70">{city.country}</div>
+                <div className="text-[10px] md:text-xs text-muted-foreground/70">{city.country}</div>
               )}
             </div>
           )}
@@ -125,12 +125,12 @@ const CityFilterBar: React.FC<Props> = ({
         {/* Middle: Stats + faces (feed variant) or Search bar (profile variant) */}
         {showFriendStats && (
           <div className="hidden lg:flex items-center gap-5 px-4 border-l border-black/15">
-            <div className="flex items-center gap-2 text-sm text-foreground/80">
-              <MapPin className="h-4 w-4 opacity-70" />
+            <div className="flex items-center gap-2 text-xs md:text-sm text-foreground/80">
+              <MapPin className="h-3.5 w-3.5 md:h-4 md:w-4 opacity-70" strokeWidth={1.5} />
               <span>{summary?.recCount ?? 0}</span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-foreground/80">
-              <Users className="h-4 w-4 opacity-70" />
+            <div className="flex items-center gap-2 text-xs md:text-sm text-foreground/80">
+              <Users className="h-3.5 w-3.5 md:h-4 md:w-4 opacity-70" strokeWidth={1.5} />
               <span>{summary?.friendCount ?? 0}</span>
             </div>
             <div className="flex -space-x-2">
@@ -149,10 +149,10 @@ const CityFilterBar: React.FC<Props> = ({
           </div>
         )}
         
-        {/* Search bar for profile variant */}
+        {/* Search bar for profile variant - centered */}
         {variant === 'profile' && onSearchChange && (
-          <div className="flex-1 min-w-0 max-w-md hidden md:flex items-center justify-center px-4">
-            <div className="relative w-full max-w-full">
+          <div className="hidden md:flex items-center justify-center px-4">
+            <div className="relative w-full max-w-md">
               <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 z-10 transition-opacity ${isSearching ? 'opacity-0' : 'text-muted-foreground'}`} />
               {isSearching && (
                 <Loader2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground z-10 animate-spin" />
@@ -162,42 +162,15 @@ const CityFilterBar: React.FC<Props> = ({
                 placeholder={searchPlaceholder}
                 value={searchValue || ''}
                 onChange={(e) => onSearchChange(e.target.value)}
-                className="pl-10 h-9 w-full rounded-full border-2 border-black/20 bg-white shadow-[1px_1px_0_0_rgba(0,0,0,0.08)] focus:shadow-[2px_2px_0_0_rgba(0,0,0,0.12)] focus:border-black/30 transition-all font-medium min-w-0"
+                className="pl-10 h-9 w-full rounded-full border border-black/10 bg-white shadow-none focus:shadow-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 transition-all text-sm md:text-base font-medium min-w-0"
                 disabled={isSearching}
               />
             </div>
           </div>
         )}
 
-        {/* Right: Selected category chips + Categories menu */}
-        <div className={variant === 'profile' ? 'flex items-center gap-2 min-w-0' : 'flex items-center gap-2 justify-end flex-1 min-w-0'}>
-          {/* Selected category chips - flexible width container on mobile */}
-          <div className={`flex items-center gap-2 overflow-x-auto overflow-y-hidden ${variant === 'profile' ? 'flex-1 min-w-0 max-w-[calc(100%-3rem)] sm:max-w-[calc(100%-5rem)] md:max-w-none md:w-[200px] lg:w-[250px]' : 'w-[200px] sm:w-[250px] md:w-[300px]'} [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]`}>
-            <div className="flex items-center gap-2 flex-nowrap">
-              {selectedCategories.map(cat => {
-                // Use map for O(1) lookup instead of O(n) find
-                const categoryData = categoriesMap.get(cat.key);
-                const count = categoryData?.count ?? cat.count;
-                return (
-                  <Button
-                    key={cat.key}
-                    size="sm"
-                    variant="default"
-                    className="h-8 rounded-full px-3 sm:px-4 text-xs sm:text-sm border-2 bg-black text-white border-black shadow-[2px_2px_0_0_rgba(0,0,0,0.15)] shrink-0 font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
-                    onClick={() => onToggleCategory(cat.key)}
-                  >
-                    <span>{cat.label}</span>
-                    {typeof count === 'number' && (
-                      <span className="ml-2 px-2 py-0.5 text-[10px] sm:text-xs rounded-full bg-white/20 transition-opacity">
-                        {count}
-                      </span>
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-
+        {/* Right: Categories menu */}
+        <div className={variant === 'profile' ? 'flex items-center gap-2 min-w-0 justify-end' : 'flex items-center gap-2 justify-end flex-1 min-w-0'}>
           {/* Categories dropdown with search showing ALL categories */}
           {categories.length > 0 && (
             <DropdownMenu>
@@ -205,22 +178,31 @@ const CityFilterBar: React.FC<Props> = ({
                 <Button
                   aria-label="All categories"
                   size="sm"
-                  variant="secondary"
-                  className="h-8 w-8 sm:w-auto rounded-full bg-white border-2 border-black/20 shadow-[1px_1px_0_0_rgba(0,0,0,0.08)] px-0 sm:px-2 text-xs sm:text-sm flex items-center justify-center font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none flex-shrink-0"
+                  variant="ghost"
+                  className={`h-8 w-8 sm:w-auto rounded-full bg-transparent border ${selectedCategoryKeys.length > 0 ? 'border-black/40 bg-black/[0.03]' : 'border-black/10'} hover:border-black/40 hover:bg-black/[0.03] px-0 sm:px-2 text-xs md:text-sm flex items-center justify-center font-medium transition-all flex-shrink-0 relative`}
                 >
-                  <ListFilter className="h-4 w-4" />
-                  {categories.length > 0 && (
-                    <span className="hidden sm:inline ml-2 px-2 py-0.5 text-xs rounded-full bg-black/5">{categories.length}</span>
+                  <ListFilter className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
+                  {selectedCategoryKeys.length > 0 ? (
+                    <span className="hidden sm:inline ml-2 px-2 py-0.5 text-[10px] md:text-xs rounded-full bg-black/10 font-medium">
+                      {selectedCategoryKeys.length}
+                    </span>
+                  ) : categories.length > 0 ? (
+                    <span className="hidden sm:inline ml-2 px-2 py-0.5 text-[10px] md:text-xs rounded-full bg-black/5">{categories.length}</span>
+                  ) : null}
+                  {/* Visual indicator dot when categories are selected */}
+                  {selectedCategoryKeys.length > 0 && (
+                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-black border border-white" />
                   )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[90vw] max-w-[360px] p-2">
-                <DropdownMenuLabel>All Categories</DropdownMenuLabel>
+              <DropdownMenuContent align="end" className="w-[90vw] max-w-[360px] p-2 border border-black/10">
+                <DropdownMenuLabel className="text-xs md:text-sm font-semibold">All Categories</DropdownMenuLabel>
                 <div className="p-1">
                   <Input
                     placeholder="Search categories..."
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    className="border border-black/10 text-xs md:text-sm"
                   />
                 </div>
                 <DropdownMenuSeparator />
@@ -229,11 +211,11 @@ const CityFilterBar: React.FC<Props> = ({
                       const active = selectedCategoryKeys.includes(cat.key);
                       return (
                         <DropdownMenuItem key={cat.key} onSelect={() => onToggleCategory(cat.key)} className="cursor-pointer">
-                          <div className={`inline-flex items-center gap-2 ${active ? 'font-medium' : ''}`}>
+                          <div className={`inline-flex items-center gap-2 text-xs md:text-sm ${active ? 'font-medium' : ''}`}>
                             <span className={`inline-block h-2 w-2 rounded-full ${active ? 'bg-black' : 'bg-gray-300'}`} />
                             <span>{cat.label}</span>
                             {typeof cat.count === 'number' && (
-                              <Badge variant={active ? 'secondary' : 'outline'} className="ml-1 h-5 px-1 text-xs">
+                              <Badge variant={active ? 'secondary' : 'outline'} className="ml-1 h-5 px-1 text-[10px] md:text-xs border-black/20">
                                 {cat.count}
                               </Badge>
                             )}
@@ -242,7 +224,7 @@ const CityFilterBar: React.FC<Props> = ({
                       );
                     })}
                   {filteredCategories.length === 0 && (
-                    <div className="py-6 text-center text-sm text-muted-foreground">No categories found.</div>
+                    <div className="py-6 text-center text-xs md:text-sm text-muted-foreground">No categories found.</div>
                   )}
                 </div>
                 {selectedCategoryKeys.length > 0 && (

@@ -3,7 +3,6 @@ import { X } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { questionsApi, type CreateQuestionPayload } from '@/services/questionsService';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
@@ -25,7 +24,6 @@ type AskQuestionModalProps = {
 
 const AskQuestionModal: React.FC<AskQuestionModalProps> = ({ open, initialText = '', onClose, onSubmitted }) => {
   const [text, setText] = useState(initialText);
-  const [visibility, setVisibility] = useState<'friends' | 'public'>('friends');
   const askMutation = useAskQuestion();
   
   // Theme support
@@ -36,7 +34,8 @@ const AskQuestionModal: React.FC<AskQuestionModalProps> = ({ open, initialText =
 
   const submit = async () => {
     if (!text.trim()) return;
-    const res = (await askMutation.mutateAsync({ text: text.trim(), visibility })) as any;
+    // Default visibility to 'friends' since visibility feature is not actively used
+    const res = (await askMutation.mutateAsync({ text: text.trim(), visibility: 'friends' })) as any;
     if (res?.data?.id) onSubmitted?.(res.data.id);
     onClose();
   };
@@ -93,20 +92,7 @@ const AskQuestionModal: React.FC<AskQuestionModalProps> = ({ open, initialText =
           }}
         />
         
-        <div className="flex items-center justify-between mt-5 pt-4 border-t-2 border-black">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-semibold text-gray-700">Visibility</label>
-            <Select value={visibility} onValueChange={(v: 'friends' | 'public') => setVisibility(v)}>
-              <SelectTrigger className="h-9 w-[140px] rounded-md border border-black/30 bg-white shadow-sm focus:shadow-md focus:border-black transition-shadow">
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent sideOffset={4} className="rounded-md border-2 border-black bg-white shadow-[4px_4px_0_0_#000]">
-                <SelectItem value="friends">Friends</SelectItem>
-                <SelectItem value="public">Public</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
+        <div className="flex items-center justify-end mt-5 pt-4 border-t-2 border-black">
           <div className="flex gap-3">
             <Button 
               variant="outline" 

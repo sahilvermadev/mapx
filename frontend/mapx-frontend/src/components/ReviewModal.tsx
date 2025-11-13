@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
 import { FaMapMarkerAlt, FaExclamationTriangle, FaPlus } from 'react-icons/fa';
-import { Star, X } from 'lucide-react';
+import { Star, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 import { recommendationsApi, type SaveRecommendationRequest } from '../services/recommendationsApiService';
 import { useAuth } from '../auth';
@@ -12,12 +13,14 @@ import { insertPlainMention, convertUsernamesToTokens } from '@/utils/mentions';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
+import { CURATED_LABELS, MAX_VISIBLE_LABELS, MAX_LABEL_LENGTH } from '@/components/composer/constants';
+import { getTagInlineStyles } from '@/utils/themeUtils';
 
 // Types
 export interface ReviewPayload {
   labels?: string[];
   notes?: string;
-  specialities?: string;
+  highlights?: string;
   rating: number; // 1..5
   priceLevel?: number; // 1..4 (₹ to ₹₹₹₹)
   visibility?: 'friends' | 'public';
@@ -38,21 +41,7 @@ interface ReviewModalProps {
   onError?: (error: string) => void;
 }
 
-// Constants
-const LABEL_OPTIONS = [
-  'Good for dates',
-  'Family friendly',
-  'Work-friendly',
-  'Pet friendly',
-  'Budget',
-  'Luxury',
-  'Live music',
-  'Rooftop',
-  'Outdoor seating',
-  'Quick service',
-  'Fine dining',
-  'Casual'
-];
+// Constants - Using CURATED_LABELS from composer constants
 
 const RATING_MESSAGES = {
   5: 'Truly exceptional!',
@@ -132,11 +121,13 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   const [labels, setLabels] = useState<string[]>([]);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [specialities, setSpecialities] = useState<string>('');
+  const [highlights, setHighlights] = useState<string>('');
   const [rating, setRating] = useState<number>(0);
   const [priceLevel, setPriceLevel] = useState<number>(0);
-  const [showCustomInput, setShowCustomInput] = useState<boolean>(false);
+  const [showLabelPicker, setShowLabelPicker] = useState<boolean>(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(Object.keys(CURATED_LABELS)));
   const [hoverRating, setHoverRating] = useState<number>(0);
+  const [labelSearch, setLabelSearch] = useState<string>('');
 
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -158,6 +149,23 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   const selectedTheme = THEMES[theme];
   const accentColor = selectedTheme.accentColor;
   const textOnAccent = getReadableTextColor(accentColor);
+  const tagInlineStyles = useMemo(() => getTagInlineStyles(theme), [theme]);
+
+  const filteredLabelEntries = useMemo(() => {
+    const query = labelSearch.trim().toLowerCase();
+    if (!query) {
+      return Object.entries(CURATED_LABELS);
+    }
+
+    return Object.entries(CURATED_LABELS)
+      .map(([category, labelList]) => {
+        const filtered = labelList.filter(label =>
+          label.toLowerCase().includes(query)
+        );
+        return [category, filtered] as [string, string[]];
+      })
+      .filter(([, labels]) => labels.length > 0);
+  }, [labelSearch]);
 
   // Validation
   const validationErrors = useMemo(() => {
@@ -195,19 +203,16 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   }, []);
 
   // Event handlers
-  const handleToggleLabel = (label: string) => {
-    setLabels(prev => 
-      prev.includes(label) 
-        ? prev.filter(l => l !== label) 
-        : [...prev, label]
-    );
-  };
+  const removeLabel = useCallback((labelToRemove: string) => {
+    const newLabels = labels.filter(l => l !== labelToRemove);
+    setLabels(newLabels);
+  }, [labels]);
 
-  const addCustomLabel = () => {
+  const addCustomLabel = useCallback(() => {
     const value = customLabel.trim();
     if (!value) return;
     
-    const normalized = value.replace(/\s+/g, ' ').slice(0, 40);
+    const normalized = value.replace(/\s+/g, ' ').slice(0, MAX_LABEL_LENGTH);
     const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1);
     
     const exists = labels.some(l => l.toLowerCase() === capitalized.toLowerCase());
@@ -218,7 +223,46 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
     
     setLabels(prev => [...prev, capitalized]);
     setCustomLabel('');
-  };
+  }, [customLabel, labels]);
+
+  const toggleLabel = useCallback((label: string) => {
+    const normalizedLabel = label.trim();
+    const isSelected = labels.some(l => l.toLowerCase() === normalizedLabel.toLowerCase());
+    
+    if (isSelected) {
+      const newLabels = labels.filter(l => l.toLowerCase() !== normalizedLabel.toLowerCase());
+      setLabels(newLabels);
+    } else {
+      const newLabels = [...labels, normalizedLabel];
+      setLabels(newLabels);
+    }
+  }, [labels]);
+
+  const toggleCategory = useCallback((category: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+      } else {
+        newSet.add(category);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleOpenLabelPicker = useCallback(() => {
+    setShowLabelPicker(true);
+    setLabelSearch('');
+    setCustomLabel('');
+    setExpandedCategories(new Set(Object.keys(CURATED_LABELS)));
+  }, []);
+
+  const handleCloseLabelPicker = useCallback(() => {
+    setShowLabelPicker(false);
+    setLabelSearch('');
+    setCustomLabel('');
+    setExpandedCategories(new Set(Object.keys(CURATED_LABELS)));
+  }, []);
 
   const handleSubmit = async () => {
     setSubmitError(null);
@@ -243,7 +287,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
       const reviewPayload: ReviewPayload = {
         labels,
         notes: notesTokenized?.trim() || undefined,
-        specialities: specialities.trim() || undefined,
+        highlights: highlights.trim() || undefined,
         rating,
         priceLevel: priceLevel > 0 ? priceLevel : undefined,
       };
@@ -257,8 +301,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
         title: undefined,
         description: descriptionCombined,
         content_data: {
-          specialities: reviewPayload.specialities,
-          labels: reviewPayload.labels,
+          highlights: reviewPayload.highlights,
           priceLevel: reviewPayload.priceLevel,
           visit_date: getTodayIso(),
         },
@@ -269,7 +312,7 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
         google_place_id: placeData.google_place_id,
         labels: reviewPayload.labels,
         metadata: {
-          specialities: reviewPayload.specialities,
+          highlights: reviewPayload.highlights,
         },
         visit_date: getTodayIso(),
         rating: reviewPayload.rating,
@@ -354,11 +397,15 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
     if (!isOpen) {
       setLabels([]);
       setNotes('');
-      setSpecialities('');
+      setHighlights('');
       setRating(0);
       setPriceLevel(0);
       setSubmitError(null);
       setFieldErrors({});
+      setShowLabelPicker(false);
+      setCustomLabel('');
+      setExpandedCategories(new Set(Object.keys(CURATED_LABELS)));
+      setLabelSearch('');
     }
   }, [isOpen]);
 
@@ -376,86 +423,48 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   // Render helpers
   const renderLabelButtons = () => (
     <div className="flex items-center gap-2 flex-wrap">
-      {LABEL_OPTIONS.map(label => (
-        <button
-          key={label}
-          type="button"
-          onClick={() => handleToggleLabel(label)}
-          disabled={isSubmitting}
-          className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none shadow-sm ${
-            labels.includes(label)
-              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
-              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
-          } ${isSubmitting ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-        >
-          {label}
-        </button>
-      ))}
-      
-      {labels.filter(l => !LABEL_OPTIONS.includes(l)).map(label => (
-        <button
-          key={`custom-${label}`}
-          type="button"
-          onClick={() => handleToggleLabel(label)}
-          disabled={isSubmitting}
-          className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none shadow-sm ${
-            labels.includes(label)
-              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
-              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
-          } ${isSubmitting ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-        >
-          {label}
-        </button>
-      ))}
-      
-      {showCustomInput ? (
-        <div className="inline-flex items-center gap-1">
-          <input
-            className="px-2.5 py-1 rounded-md text-xs font-medium border border-black/20 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:border-black focus:shadow-[2px_2px_0_0_#000] transition-all duration-200"
-            value={customLabel}
-            onChange={e => setCustomLabel(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                addCustomLabel();
-                setShowCustomInput(false);
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                setShowCustomInput(false);
-                setCustomLabel('');
-              }
-            }}
-            onBlur={() => {
-              if (!customLabel.trim()) {
-                setShowCustomInput(false);
-              }
-            }}
-            placeholder="Add label…"
-            disabled={isSubmitting}
-            autoFocus
-          />
-          <button
-            type="button"
-            onClick={() => { addCustomLabel(); setShowCustomInput(false); }}
-            disabled={isSubmitting || !customLabel.trim()}
-            className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 border border-black/20 bg-white text-gray-600 shadow-sm hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:opacity-40 disabled:cursor-not-allowed"
-            aria-label="Add label"
-          >
-            <FaPlus />
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setShowCustomInput(true)}
-          disabled={isSubmitting}
-          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 border border-black/20 bg-white text-gray-600 shadow-sm hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:opacity-40 disabled:cursor-not-allowed"
-          aria-label="Add label"
-        >
-          <FaPlus />
-          <span className="ml-1">Add</span>
-        </button>
+      {/* Display existing labels */}
+      {labels.length > 0 && (
+        <>
+          {labels.slice(0, MAX_VISIBLE_LABELS).map((label: string, i: number) => (
+            <span
+              key={`${label}-${i}`}
+              className="inline-flex items-center px-2.5 md:px-3 py-1 md:py-1.5 text-xs font-medium rounded-md cursor-default"
+              style={tagInlineStyles}
+            >
+              {label}
+              <button
+                type="button"
+                onClick={() => removeLabel(label)}
+                className="ml-1 md:ml-1.5 text-yellow-600 hover:text-yellow-800 focus:outline-none transition-colors text-xs"
+                aria-label={`Remove ${label} label`}
+                disabled={isSubmitting}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {labels.length > MAX_VISIBLE_LABELS && (
+            <span 
+              className="inline-flex items-center px-2.5 md:px-3 py-1 md:py-1.5 text-xs font-medium rounded-md cursor-default"
+              style={tagInlineStyles}
+            >
+              +{labels.length - MAX_VISIBLE_LABELS} more
+            </span>
+          )}
+        </>
       )}
+      {/* Add label button */}
+      <button
+        type="button"
+        onClick={handleOpenLabelPicker}
+        disabled={isSubmitting}
+        className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label="Add label"
+      >
+        <FaPlus />
+        <span className="ml-1">Add label</span>
+      </button>
     </div>
   );
 
@@ -576,14 +585,6 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
             )}
 
             <form className="flex flex-col gap-4 md:gap-5" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-              {/* Labels */}
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-gray-700 mb-2 block">
-                  Tags
-                </label>
-                {renderLabelButtons()}
-              </div>
-
               {/* Review Text */}
               <div className="flex flex-col gap-2 relative">
                 <label className="text-sm font-medium text-gray-700 mb-2 block">
@@ -620,12 +621,216 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                 </label>
                 <input 
                   className="w-full p-3 rounded-md border border-black/20 bg-white text-gray-900 text-sm font-inherit transition-all duration-200 box-border leading-[1.4] focus:outline-none focus:border-black focus:shadow-[2px_2px_0_0_#000] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50" 
-                  value={specialities} 
-                  onChange={e => setSpecialities(e.target.value)} 
+                  value={highlights} 
+                  onChange={e => setHighlights(e.target.value)} 
                   placeholder="e.g., Margherita pizza, Tiramisu, Live music" 
                   disabled={isSubmitting}
                 />
               </div>
+
+              {/* Labels */}
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Labels
+                </label>
+                {renderLabelButtons()}
+              </div>
+
+              {/* Label Picker Panel */}
+              <AnimatePresence initial={false}>
+                {showLabelPicker && (
+                  <motion.div
+                    key="label-picker"
+                    initial={{ opacity: 0, y: -12, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: -8, height: 0 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                    className="overflow-hidden"
+                  >
+                    <motion.div
+                      layout
+                      transition={{ duration: 0.25, ease: 'easeOut' }}
+                      className="rounded-md border border-black/20 bg-white shadow-sm"
+                    >
+                      {/* Header */}
+                      <motion.div
+                        layout="position"
+                        className="sticky top-0 z-10 flex flex-col gap-3 border-b bg-white p-3 md:flex-row md:items-center md:justify-between"
+                      >
+                        <motion.h3
+                          layout="position"
+                          initial={{ opacity: 0, y: -6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2, delay: 0.05 }}
+                          className="text-sm font-semibold text-gray-900"
+                        >
+                          Select Labels
+                        </motion.h3>
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                          <Input
+                            value={labelSearch}
+                            onChange={(e) => setLabelSearch(e.target.value)}
+                            placeholder="Search labels..."
+                            className="h-8 w-full md:w-56"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCloseLabelPicker}
+                            className="h-8 w-full md:w-8 md:p-0"
+                            aria-label="Close label picker"
+                          >
+                            <span className="md:hidden">Done</span>
+                            <span className="hidden md:inline">
+                              <X className="h-4 w-4" />
+                            </span>
+                          </Button>
+                        </div>
+                      </motion.div>
+
+                      {/* Selected labels summary */}
+                      <AnimatePresence>
+                        {labels.length > 0 && (
+                          <motion.div
+                            key="selected-labels"
+                            initial={{ opacity: 0, y: -6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.2 }}
+                            className="border-b border-dashed border-black/10 p-3"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              {labels.map((label, i) => (
+                                <motion.span
+                                  key={`${label}-${i}`}
+                                  layout
+                                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md"
+                                  style={tagInlineStyles}
+                                >
+                                  {label}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeLabel(label)}
+                                    className="ml-1 text-yellow-600 hover:text-yellow-800 text-xs"
+                                    aria-label={`Remove ${label}`}
+                                  >
+                                    ×
+                                  </button>
+                                </motion.span>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* Categories */}
+                      <div className="max-h-[45vh] overflow-y-auto p-3 space-y-4">
+                        {filteredLabelEntries.length > 0 ? (
+                          filteredLabelEntries.map(([category, labelList]) => (
+                            <motion.div key={category} layout className="space-y-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleCategory(category)}
+                                className="flex items-center gap-2 w-full text-left font-semibold text-sm text-foreground hover:text-foreground/80 transition-colors"
+                              >
+                                {expandedCategories.has(category) ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronUp className="h-4 w-4" />
+                                )}
+                                <span>{category}</span>
+                              </button>
+                              <AnimatePresence initial={false}>
+                                {expandedCategories.has(category) && (
+                                  <motion.div
+                                    key={`${category}-labels`}
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                                    className="flex flex-wrap gap-2 pl-6"
+                                  >
+                                    {labelList.map((label: string) => {
+                                      const isSelected = labels.some(
+                                        l => l.toLowerCase() === label.toLowerCase()
+                                      );
+                                      return (
+                                        <motion.button
+                                          key={label}
+                                          type="button"
+                                          whileTap={{ scale: 0.96 }}
+                                          onClick={() => toggleLabel(label)}
+                                          className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none ${
+                                            isSelected
+                                              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
+                                              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
+                                          }`}
+                                        >
+                                          {label}
+                                        </motion.button>
+                                      );
+                                    })}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </motion.div>
+                          ))
+                        ) : (
+                          <motion.div
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="rounded-md border border-dashed border-black/10 bg-gray-50 p-4 text-sm text-gray-500 text-center"
+                          >
+                            No labels found. Try a different search.
+                          </motion.div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      <motion.div
+                        layout="position"
+                        className="sticky bottom-0 flex flex-col gap-3 border-t bg-white p-3 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="text"
+                            value={customLabel}
+                            onChange={(e) => setCustomLabel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addCustomLabel();
+                              }
+                            }}
+                            placeholder="Add custom label..."
+                            className="h-8 w-full md:w-56"
+                          />
+                          <Button
+                            type="button"
+                            onClick={addCustomLabel}
+                            disabled={!customLabel.trim()}
+                            size="sm"
+                            className="px-3"
+                          >
+                            <FaPlus className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex justify-end md:justify-start">
+                          <Button
+                            type="button"
+                            onClick={handleCloseLabelPicker}
+                            className="px-6"
+                          >
+                            Done
+                          </Button>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Rating and Price Range - Inline */}
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-8">

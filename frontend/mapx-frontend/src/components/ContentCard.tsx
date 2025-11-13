@@ -614,12 +614,21 @@ const ContentCard: React.FC<ContentCardProps> = ({
           {/* Display additional content data */}
           {review.content_data && (
             <div className="space-y-1">
-              {review.content_data.specialities && (
-                <div className="flex items-start gap-2">
-                  <span className="text-gray-500 text-xs font-medium min-w-0 flex-shrink-0">Specialities:</span>
-                  <span className="text-gray-600 text-xs">{review.content_data.specialities}</span>
-                </div>
-              )}
+              {(() => {
+                const highlights = review.content_data.highlights || review.content_data.specialities;
+                const hasHighlights = highlights && (
+                  (typeof highlights === 'string' && highlights.trim().length > 0) ||
+                  (Array.isArray(highlights) && highlights.length > 0 && highlights.some(h => h && String(h).trim().length > 0))
+                );
+                return hasHighlights ? (
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-500 text-xs font-medium min-w-0 flex-shrink-0">Highlights:</span>
+                    <span className="text-gray-600 text-xs">
+                      {Array.isArray(highlights) ? highlights.filter(h => h && String(h).trim()).join(', ') : highlights}
+                    </span>
+                  </div>
+                ) : null;
+              })()}
               {/* Removed visit_type display as it is not needed */}
               {review.content_data.companions_count !== undefined && (
                 <div className="flex items-start gap-2">

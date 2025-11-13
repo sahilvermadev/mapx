@@ -107,13 +107,13 @@ const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className,
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className={`px-3 py-2 h-9 rounded-full border-2 border-black/20 bg-white hover:bg-white shadow-[1px_1px_0_0_rgba(0,0,0,0.08)] font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none ${className || ''}`}>
-          <MapPin className="mr-1 h-4 w-4 opacity-70" />
+        <Button variant="ghost" className={`px-3 py-2 h-9 rounded-full border border-black/10 bg-transparent hover:border-black/40 hover:bg-black/[0.03] shadow-none text-xs md:text-sm font-medium transition-all ${className || ''}`}>
+          <MapPin className="mr-1 h-3.5 w-3.5 opacity-70" strokeWidth={1.5} />
           <span className="font-medium">{triggerLabel}</span>
-          <ChevronDown className="ml-1 h-4 w-4 opacity-70" />
+          <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-70" strokeWidth={1.5} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent sideOffset={8} className="w-80 p-3">
+      <DropdownMenuContent sideOffset={8} className="w-80 p-3 border border-black/10">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <button
@@ -123,39 +123,39 @@ const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className,
               Worldwide
             </button>
           </div>
-            <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search any city in the world" className="h-9" />
-          <div className="max-h-72 overflow-auto rounded-md border divide-y">
+            <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search any city in the world" className="h-9 border border-black/10" />
+          <div className="max-h-72 overflow-auto rounded-md border border-black/10 divide-y">
             {/* Available cities section */}
             <div className="py-1">
               <div className="px-3 py-1 text-xs font-medium text-muted-foreground">Your cities</div>
               {filteredAvailable.length === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No cities yet</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground">No cities yet</div>
               )}
               {filteredAvailable.map((c) => (
                 <button
                   key={c.id}
-                  className="block w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                  className="block w-full text-left px-3 py-2 text-xs hover:bg-accent"
                   onClick={() => { onSelect({ id: c.id, name: c.name, country: c.country }); setOpen(false); setQuery(''); }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="font-medium">{c.name}</div>
-                    {typeof c.recCount === 'number' && <span className="text-xs text-muted-foreground">{c.recCount}</span>}
+                    {typeof c.recCount === 'number' && <span className="text-[10px] text-muted-foreground">{c.recCount}</span>}
                   </div>
-                  {c.country && <div className="text-xs text-muted-foreground">{c.country}</div>}
+                  {c.country && <div className="text-[10px] text-muted-foreground">{c.country}</div>}
                 </button>
               ))}
             </div>
             {/* Worldwide search results */}
             <div className="py-1">
               <div className="px-3 py-1 text-xs font-medium text-muted-foreground">Search worldwide</div>
-              {loading && <div className="px-3 py-2 text-sm text-muted-foreground">Searching…</div>}
+              {loading && <div className="px-3 py-2 text-xs text-muted-foreground">Searching…</div>}
               {!loading && results.length === 0 && query.length >= 2 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No matches</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground">No matches</div>
               )}
               {!loading && results.map((r, idx) => (
-                <button key={idx} className="block w-full text-left px-3 py-2 text-sm hover:bg-accent" onClick={() => { onSelect({ id: normalizeCityId(r.name), name: r.name, country: r.country }); setOpen(false); setQuery(''); }}>
+                <button key={idx} className="block w-full text-left px-3 py-2 text-xs hover:bg-accent" onClick={() => { onSelect({ id: normalizeCityId(r.name), name: r.name, country: r.country }); setOpen(false); setQuery(''); }}>
                   <div className="font-medium">{r.name}</div>
-                  {r.country && <div className="text-xs text-muted-foreground">{r.country}</div>}
+                  {r.country && <div className="text-[10px] text-muted-foreground">{r.country}</div>}
                 </button>
               ))}
               {results.length > 0 && (

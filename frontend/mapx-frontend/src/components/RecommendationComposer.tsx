@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { Check } from 'lucide-react';
@@ -7,13 +7,22 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
 import { insertPlainMention } from '@/utils/mentions';
-import { useRecommendationComposer } from '@/hooks/useRecommendationComposer';
+import { useRecommendationComposer, type ExtractedData } from '@/hooks/useRecommendationComposer';
 import { useMentionHandler } from '@/hooks/useMentionHandler';
 import WritingStep from '@/components/composer/steps/WritingStep';
 import AnalyzingStep from '@/components/composer/steps/AnalyzingStep';
 import CompletingStep from '@/components/composer/steps/CompletingStep';
 import PreviewStep from '@/components/composer/steps/PreviewStep';
 import MentionMenu from '@/components/MentionMenu';
+import {
+  CELEBRATION_DELAY_MS,
+  CELEBRATION_SHAPES_COUNT,
+  CELEBRATION_SHAPE_RADIUS,
+  CELEBRATION_SHAPE_SIZE_MIN,
+  CELEBRATION_SHAPE_SIZE_MAX,
+  CELEBRATION_SHAPE_COLORS,
+  SUCCESS_MESSAGES,
+} from './composer/constants';
 
 interface RecommendationComposerProps {
   isOpen: boolean;
@@ -22,6 +31,24 @@ interface RecommendationComposerProps {
   currentUserId: string;
   questionContext?: string;
   questionId?: number;
+}
+
+interface LocationData {
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  google_place_id?: string;
+  city_name?: string;
+  admin1_name?: string;
+  country_code?: string;
+}
+
+interface MentionUser {
+  id: string;
+  username?: string;
+  display_name?: string;
+  user_name?: string;
 }
 
 const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
@@ -50,6 +77,37 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   const composer = useRecommendationComposer(currentUserId, questionId);
   const mentionHandler = useMentionHandler(currentUserId);
 
+  // Extract stable functions and values to avoid dependency issues
+  const { 
+    reset, 
+    initializeWithQuestion, 
+    location: composerLocation,
+    improveText,
+    isImprovingText,
+  } = composer;
+
+  // Memoize celebration shapes to prevent re-generation on each render
+  const celebrationShapes = useMemo(() => {
+    return Array.from({ length: CELEBRATION_SHAPES_COUNT }, (_, i) => {
+      const angle = (i * 360) / CELEBRATION_SHAPES_COUNT;
+      const x = Math.cos((angle * Math.PI) / 180) * CELEBRATION_SHAPE_RADIUS;
+      const y = Math.sin((angle * Math.PI) / 180) * CELEBRATION_SHAPE_RADIUS;
+      const size = CELEBRATION_SHAPE_SIZE_MIN + (i % (CELEBRATION_SHAPE_SIZE_MAX - CELEBRATION_SHAPE_SIZE_MIN));
+      const colors = [accentColor, ...CELEBRATION_SHAPE_COLORS];
+      const shapeColor = colors[i % colors.length];
+      
+      return { x, y, size, shapeColor, angle, delay: 0.3 + i * 0.05 };
+    });
+  }, [accentColor]);
+
+  // Container style: no card for analyzing step
+  const stepContainerClassName = useMemo(() => {
+    if (composer.currentStep === 'analyzing') {
+      return 'w-full max-w-4xl p-4 md:p-6 lg:p-8';
+    }
+    return 'w-full max-w-4xl rounded-lg border-2 border-black bg-white p-4 md:p-6 lg:p-8 shadow-[6px_6px_0_0_#000]';
+  }, [composer.currentStep]);
+
   // Auto-focus input when completing step is shown
   useEffect(() => {
     if (composer.currentStep === 'completing' && inputRef.current) {
@@ -61,15 +119,14 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     
-    console.log('RecommendationComposer opened, questionContext:', questionContext, 'questionId:', questionId);
-    
     // Reset all state including celebration
-    composer.reset();
+    reset();
     setShowCelebration(false);
     
     // Check for question context from props or location.state
-    const contextToUse = questionContext || composer.location.state?.questionContext;
-    composer.initializeWithQuestion(contextToUse);
+    const contextToUse = questionContext || composerLocation.state?.questionContext;
+    initializeWithQuestion(contextToUse);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, questionContext, questionId]);
 
   // Auto-focus textarea when opened (but only for writing step)
@@ -79,137 +136,230 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     }
   }, [isOpen, composer.currentStep]);
 
-  // Fetch mention suggestions
+  // Fetch mention suggestions with proper cleanup
   useEffect(() => {
-    let active = true;
-    const run = async () => {
+    let isMounted = true;
+    
+    const fetchMentions = async () => {
       if (!mentionHandler.mentionQuery || mentionHandler.mentionQuery.length < 1) {
-        if (active) mentionHandler.fetchSuggestions('');
+        if (isMounted) {
+          // Clear suggestions when there's no query
+          mentionHandler.fetchSuggestions('');
+        }
         return;
       }
-      await mentionHandler.fetchSuggestions(mentionHandler.mentionQuery);
+      
+      if (isMounted) {
+        await mentionHandler.fetchSuggestions(mentionHandler.mentionQuery);
+      }
     };
-    run();
-    return () => { active = false; };
-  }, [mentionHandler.mentionQuery]);
+    
+    fetchMentions();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [mentionHandler.mentionQuery, mentionHandler.fetchSuggestions]);
 
   // Handle text change with mention detection
-  const handleTextChange = (value: string) => {
+  const handleTextChange = useCallback((value: string) => {
     mentionHandler.handleTextChange(value, textareaRef, composer.setText);
-    if (composer.error) composer.setError(null);
-  };
+    if (composer.error) {
+      composer.setError(null);
+    }
+  }, [mentionHandler, composer]);
 
   // Handle text selection for mention positioning
-  const handleTextSelection = (newPos: number) => {
+  const handleTextSelection = useCallback((newPos: number) => {
     mentionHandler.handleTextSelection(textareaRef, newPos);
-  };
+  }, [mentionHandler]);
 
   // Handle mention selection
-  const handleMentionSelect = (user: any) => {
+  const handleMentionSelect = useCallback((user: MentionUser) => {
     mentionHandler.handleMentionSelect(user, composer.text, textareaRef, composer.setText);
-  };
+  }, [mentionHandler, composer.text]);
 
   // Handle field response
-  const handleFieldResponse = async (field: string, response: any) => {
+  const handleFieldResponse = useCallback(async (field: string, response: any) => {
     await composer.handleFieldResponse(field, response);
-  };
+  }, [composer]);
 
   // Handle location selection
-  const handleLocationSelected = (location: {
-    name: string;
-    address: string;
-    lat: number;
-    lng: number;
-    google_place_id?: string;
-  }) => {
+  const handleLocationSelected = useCallback((location: LocationData) => {
     composer.handleLocationSelected(location);
-  };
+  }, [composer]);
 
-  // Handle skip field
-  const handleSkipField = () => {
-    composer.handleSkipField();
-  };
-
-  // Handle approve preview
-  const handleApprovePreview = async () => {
-    const success = await composer.handleSubmit(mentionHandler.getMapping);
-    if (success) {
-      setShowCelebration(true);
-      toast.success('Recommendation posted!');
-      
-      // Navigate directly after celebration animation completes
-      // Don't close celebration - let navigation unmount the component
-      // This prevents the flash back to preview screen
-        setTimeout(() => {
-      onPostCreated();
-      }, 1800); // Slightly shorter than celebration duration to ensure smooth transition
-    }
-  };
-
-  // Handle edit preview
-  const handleEditPreview = () => {
-    composer.setIsEditingDescription(true);
-    const currentText = composer.formattedPreview || composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses);
-    composer.setEditedPreview(currentText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim());
-  };
-
-  // Handle save edit
-  const handleSaveEdit = () => {
-    composer.setFormattedPreview(composer.editedPreview);
-    composer.setIsEditingDescription(false);
-  };
-
-  // Handle cancel edit
-  const handleCancelEdit = () => {
-    composer.setIsEditingDescription(false);
-    composer.setEditedPreview('');
-  };
-
-  // Generate/refresh LLM-formatted preview whenever entering preview, or when data has changed
-  useEffect(() => {
-    if (composer.currentStep !== 'preview' || composer.isFormattingPreview) return;
-
-    composer.setIsFormattingPreview(true);
-
-    const generatePreview = async () => {
-      try {
-        const llmFormatted = await composer.formatRecommendationText(composer.extractedData, composer.fieldResponses);
-        if (llmFormatted) {
-          composer.setFormattedPreview(llmFormatted);
-        }
-      } catch (error) {
-        console.error('Error generating LLM preview:', error);
-        composer.setFormattedPreview(composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses));
-      } finally {
-        composer.setIsFormattingPreview(false);
-      }
+  // Helper function to update both extractedData and fieldResponses
+  const updateLocationData = useCallback((location: LocationData) => {
+    const locationUpdate = {
+      name: location.name,
+      location_name: location.name,
+      title: location.name,
+      location: location.address,
+      location_address: location.address,
+      location_lat: location.lat,
+      location_lng: location.lng,
+      place_lat: location.lat,
+      place_lng: location.lng,
+      google_place_id: location.google_place_id,
+      location_google_place_id: location.google_place_id,
+      city_name: location.city_name,
+      admin1_name: location.admin1_name,
+      country_code: location.country_code,
     };
 
-    const timeoutId = setTimeout(() => {
-      if (composer.isFormattingPreview) {
-        composer.setFormattedPreview(composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses));
-        composer.setIsFormattingPreview(false);
-      }
-    }, 25000);
+    composer.setExtractedData((prev: ExtractedData) => ({
+      ...prev,
+      ...locationUpdate,
+    }));
 
-    generatePreview();
-    return () => clearTimeout(timeoutId);
-  }, [composer.currentStep, composer.extractedData, composer.fieldResponses]);
+    composer.setFieldResponses((prev: Record<string, any>) => ({
+      ...prev,
+      ...locationUpdate,
+    }));
+  }, [composer]);
 
-  // Update labels when consolidated data changes
-  useEffect(() => {
-    if (composer.currentStep === 'preview') {
-      const consolidated = { ...composer.extractedData, ...composer.fieldResponses };
-      const newLabels = Array.isArray(consolidated.specialities)
-        ? consolidated.specialities
-        : consolidated.specialities
-        ? [consolidated.specialities]
-        : [];
-      composer.setLabels(newLabels);
+  // Handle place name/address changes for preview step
+  const handlePlaceNameChange = useCallback((name: string) => {
+    const trimmedName = name.trim() || undefined;
+    const nameUpdate = {
+      name: trimmedName,
+      location_name: trimmedName,
+      title: trimmedName,
+    };
+
+    composer.setExtractedData((prev: ExtractedData) => ({
+      ...prev,
+      ...nameUpdate,
+    }));
+
+    composer.setFieldResponses((prev: Record<string, any>) => ({
+      ...prev,
+      ...nameUpdate,
+    }));
+  }, [composer]);
+
+  const handlePlaceAddressChange = useCallback((address: string) => {
+    const trimmedAddress = address || undefined;
+    const addressUpdate = {
+      location: trimmedAddress,
+      location_address: trimmedAddress,
+    };
+
+    composer.setExtractedData((prev: ExtractedData) => ({
+      ...prev,
+      ...addressUpdate,
+    }));
+
+    composer.setFieldResponses((prev: Record<string, any>) => ({
+      ...prev,
+      ...addressUpdate,
+    }));
+  }, [composer]);
+
+  const handlePreviewLocationSelected = useCallback((location: LocationData) => {
+    updateLocationData(location);
+  }, [updateLocationData]);
+
+  // Handle skip field
+  const handleSkipField = useCallback(() => {
+    composer.handleSkipField();
+  }, [composer]);
+
+  // Shared celebration handler
+  const handleCelebration = useCallback(() => {
+    setShowCelebration(true);
+    toast.success(SUCCESS_MESSAGES.POSTED);
+    
+    setTimeout(() => {
+      onPostCreated();
+    }, CELEBRATION_DELAY_MS);
+  }, [onPostCreated]);
+
+  // Handle approve preview
+  const handleApprovePreview = useCallback(async () => {
+    const success = await composer.handleSubmit(mentionHandler.getMapping);
+    if (success) {
+      handleCelebration();
     }
-  }, [composer.currentStep]);
+  }, [composer, mentionHandler, handleCelebration]);
 
-  const renderWritingStep = () => (
+  // Handle edit preview
+  const handleEditPreview = useCallback(() => {
+    composer.setIsEditingDescription(true);
+    if (!composer.editedPreview) {
+      composer.setEditedPreview('');
+    }
+  }, [composer]);
+
+  // Handle save edit
+  const handleSaveEdit = useCallback(() => {
+    composer.setIsEditingDescription(false);
+  }, [composer]);
+
+  // Handle improve text with AI
+  const handleImproveText = useCallback(async () => {
+    if (!composer.editedPreview.trim()) {
+      toast.error('Please enter some text to improve');
+      return;
+    }
+    
+    const improved = await improveText(composer.editedPreview);
+    
+    if (improved && improved.trim()) {
+      composer.setEditedPreview(improved);
+      if (!composer.isEditingDescription) {
+        composer.setIsEditingDescription(true);
+      }
+      toast.success('Text improved successfully!');
+    }
+  }, [composer, improveText]);
+
+  // Memoize consolidated data to avoid recalculating on every render
+  const consolidatedData = useMemo(() => {
+    return { ...composer.extractedData, ...composer.fieldResponses };
+  }, [composer.extractedData, composer.fieldResponses]);
+
+  // Memoize preview step props
+  const previewStepProps = useMemo(() => {
+    const placeName = consolidatedData.name || consolidatedData.location_name || consolidatedData.title;
+    const placeAddress = consolidatedData.location || consolidatedData.location_address;
+    const contentType = (consolidatedData.contentType || consolidatedData.type || 'place') as 
+      'place' | 'service' | 'tip' | 'contact' | 'unclear';
+    const contact = consolidatedData.contact_info || consolidatedData.contact || null;
+
+    return {
+      placeName,
+      placeAddress,
+      contentType,
+      contact,
+    };
+  }, [
+    consolidatedData,
+  ]);
+
+  // Handle preview mention selection
+  const handlePreviewMentionSelect = useCallback((user: MentionUser) => {
+    const sel = previewTextareaRef.current;
+    if (!sel) return;
+
+    const cursor = sel.selectionStart || composer.editedPreview.length;
+    const uname = (user.username || '').toLowerCase() || 
+      (user.display_name || user.user_name || '').toLowerCase().replace(/\s+/g, '');
+    const { text: nt, newCursor } = insertPlainMention(composer.editedPreview, cursor, uname);
+    const display = user.display_name || user.user_name || uname;
+    
+    mentionHandler.getMapping()[uname] = { id: user.id, displayName: display };
+    composer.setEditedPreview(nt);
+    mentionHandler.closeMentionMenu();
+    
+    requestAnimationFrame(() => {
+      sel.focus();
+      sel.setSelectionRange(newCursor, newCursor);
+    });
+  }, [composer.editedPreview, composer.setEditedPreview, mentionHandler]);
+
+  const renderWritingStep = useCallback(() => (
     <WritingStep
       error={composer.error}
       text={composer.text}
@@ -227,13 +377,13 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         />
       }
     />
-  );
+  ), [composer, handleTextChange, handleTextSelection, handleMentionSelect, mentionHandler]);
 
-  const renderAnalyzingStep = () => (
+  const renderAnalyzingStep = useCallback(() => (
     <AnalyzingStep />
-  );
+  ), []);
 
-  const renderCompletingStep = () => (
+  const renderCompletingStep = useCallback(() => (
     <CompletingStep
       missingFields={composer.missingFields}
       currentFieldIndex={composer.currentFieldIndex}
@@ -247,60 +397,33 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
       onSubmit={async () => {
         const success = await composer.handleSubmit(mentionHandler.getMapping);
         if (success) {
-          setShowCelebration(true);
-          toast.success('Recommendation posted!');
-          
-          // Navigate directly after celebration animation completes
-          // Don't close celebration - let navigation unmount the component
-          // This prevents the flash back to preview screen
-            setTimeout(() => {
-          onPostCreated();
-          }, 1800); // Slightly shorter than celebration duration to ensure smooth transition
+          handleCelebration();
         }
       }}
     />
-  );
+  ), [composer, handleFieldResponse, handleLocationSelected, handleSkipField, mentionHandler, handleCelebration]);
 
-  const renderPreviewStep = () => {
-    const consolidated = { ...composer.extractedData, ...composer.fieldResponses };
-    
-    const placeName = consolidated.name || consolidated.location_name || consolidated.title;
-    const placeAddress = consolidated.location || consolidated.location_address;
-    const description = composer.formattedPreview || composer.formatRecommendationTextSync(composer.extractedData, composer.fieldResponses);
-    const contentType = (consolidated.contentType || consolidated.type) as any;
-    const contact = consolidated.contact_info || consolidated.contact || null;
-    
-    const previewMentionMenu = (composer.isEditingDescription && mentionHandler.showMentionMenu && mentionHandler.mentionSuggestions.length > 0) ? (
+  const renderPreviewStep = useCallback(() => {
+    const previewMentionMenu = (
+      composer.isEditingDescription && 
+      mentionHandler.showMentionMenu && 
+      mentionHandler.mentionSuggestions.length > 0
+    ) ? (
       <MentionMenu
         show={mentionHandler.showMentionMenu}
         suggestions={mentionHandler.mentionSuggestions}
         position={mentionHandler.mentionPosition}
-        onSelect={(user) => {
-                  const sel = previewTextareaRef.current;
-                  if (!sel) return;
-          const cursor = sel.selectionStart || composer.editedPreview.length;
-          const uname = (user.username || '').toLowerCase() || (user.display_name || user.user_name || '').toLowerCase().replace(/\s+/g, '');
-          const { text: nt, newCursor } = insertPlainMention(composer.editedPreview, cursor, uname);
-          const display = user.display_name || user.user_name || uname;
-          mentionHandler.getMapping()[uname] = { id: user.id, displayName: display };
-          composer.setEditedPreview(nt);
-          mentionHandler.closeMentionMenu();
-                  requestAnimationFrame(() => {
-                    sel.focus();
-                    sel.setSelectionRange(newCursor, newCursor);
-                  });
-                }}
+        onSelect={handlePreviewMentionSelect}
       />
     ) : null;
 
     return (
       <PreviewStep
         currentUser={currentUser}
-        placeName={placeName}
-        placeAddress={placeAddress}
-        description={description}
-        contentType={contentType}
-        contact={contact}
+        placeName={previewStepProps.placeName}
+        placeAddress={previewStepProps.placeAddress}
+        contentType={previewStepProps.contentType}
+        contact={previewStepProps.contact}
         isEditingDescription={composer.isEditingDescription}
         editedPreview={composer.editedPreview}
         onEditedPreviewChange={composer.setEditedPreview}
@@ -309,19 +432,38 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         rating={composer.rating}
         onRatingChange={composer.setRating}
         onEdit={handleEditPreview}
-        onCancelEdit={handleCancelEdit}
         onSaveEdit={handleSaveEdit}
         onApprove={handleApprovePreview}
         onBack={composer.goBack}
+        onImproveText={handleImproveText}
+        isImprovingText={isImprovingText}
         labels={composer.labels}
         onLabelsChange={composer.setLabels}
+        highlights={composer.highlights}
+        onHighlightsChange={composer.setHighlights}
+        onPlaceNameChange={handlePlaceNameChange}
+        onPlaceAddressChange={handlePlaceAddressChange}
+        onLocationSelected={handlePreviewLocationSelected}
       />
     );
-  };
-
+  }, [
+    currentUser,
+    previewStepProps,
+    composer,
+    mentionHandler,
+    handlePreviewMentionSelect,
+    handleEditPreview,
+    handleSaveEdit,
+    handleApprovePreview,
+    handlePlaceNameChange,
+    handlePlaceAddressChange,
+    handlePreviewLocationSelected,
+    handleImproveText,
+    isImprovingText,
+  ]);
 
   // Neobrutalist celebration animation component
-  const CelebrationOverlay = () => (
+  const CelebrationOverlay = useCallback(() => (
     <AnimatePresence>
       {showCelebration && (
         <motion.div
@@ -391,53 +533,43 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
             </motion.div>
             
             {/* Geometric decorative shapes - brutalist style */}
-            {[...Array(12)].map((_, i) => {
-              const angle = (i * 360) / 12;
-              const radius = 100;
-              const x = Math.cos((angle * Math.PI) / 180) * radius;
-              const y = Math.sin((angle * Math.PI) / 180) * radius;
-              const size = Math.random() * 16 + 12;
-              const colors = [accentColor, '#000', '#fbbf24', '#ef4444'];
-              const shapeColor = colors[Math.floor(Math.random() * colors.length)];
-              
-              return (
-                <motion.div
-                  key={i}
-                  initial={{ 
-                    scale: 0,
-                    x: 0,
-                    y: 0,
-                    rotate: 0,
-                    opacity: 0
-                  }}
-                  animate={{ 
-                    scale: [0, 1.2, 1],
-                    x: x,
-                    y: y,
-                    rotate: [0, 180, 360],
-                    opacity: [0, 1, 0.8, 0]
-                  }}
-                  transition={{ 
-                    delay: 0.3 + i * 0.05,
-                    duration: 1.2,
-                    ease: 'easeOut'
-                  }}
-                  className="absolute rounded-lg border-2 border-black"
-                  style={{
-                    width: `${size}px`,
-                    height: `${size}px`,
-                    backgroundColor: shapeColor === '#000' ? '#000' : shapeColor,
-                    borderColor: '#000',
-                    boxShadow: '3px 3px 0 0 #000'
-                  }}
-                />
-              );
-            })}
+            {celebrationShapes.map((shape, i) => (
+              <motion.div
+                key={i}
+                initial={{ 
+                  scale: 0,
+                  x: 0,
+                  y: 0,
+                  rotate: 0,
+                  opacity: 0
+                }}
+                animate={{ 
+                  scale: [0, 1.2, 1],
+                  x: shape.x,
+                  y: shape.y,
+                  rotate: [0, 180, 360],
+                  opacity: [0, 1, 0.8, 0]
+                }}
+                transition={{ 
+                  delay: shape.delay,
+                  duration: 1.2,
+                  ease: 'easeOut'
+                }}
+                className="absolute rounded-lg border-2 border-black"
+                style={{
+                  width: `${shape.size}px`,
+                  height: `${shape.size}px`,
+                  backgroundColor: shape.shapeColor === '#000' ? '#000' : shape.shapeColor,
+                  borderColor: '#000',
+                  boxShadow: '3px 3px 0 0 #000'
+                }}
+              />
+            ))}
           </div>
         </motion.div>
       )}
     </AnimatePresence>
-  );
+  ), [showCelebration, accentColor, textOnAccent, celebrationShapes]);
 
   return (
     <>
@@ -453,10 +585,10 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
             }}
             className="fixed inset-0 z-40 pt-16"
             style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}
-        >
-          <div className="h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto">
-              <div className="h-full flex items-center justify-center p-4 md:p-12">
+          >
+            <div className="h-full flex flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <div className="h-full flex items-center justify-center p-4 md:p-12">
                   <motion.div
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
@@ -466,21 +598,21 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                       scale: 0.95,
                       transition: { duration: 0.2 }
                     }}
-                    className="w-full max-w-4xl rounded-lg border-2 border-black bg-white p-4 md:p-6 lg:p-8 shadow-[6px_6px_0_0_#000]"
+                    className={stepContainerClassName}
                   >
-                  <AnimatePresence mode="wait">
-                    {composer.currentStep === 'writing' && renderWritingStep()}
-                    {composer.currentStep === 'analyzing' && renderAnalyzingStep()}
-                    {composer.currentStep === 'completing' && renderCompletingStep()}
-                    {composer.currentStep === 'preview' && renderPreviewStep()}
-                  </AnimatePresence>
+                    <AnimatePresence mode="wait">
+                      {composer.currentStep === 'writing' && renderWritingStep()}
+                      {composer.currentStep === 'analyzing' && renderAnalyzingStep()}
+                      {composer.currentStep === 'completing' && renderCompletingStep()}
+                      {composer.currentStep === 'preview' && renderPreviewStep()}
+                    </AnimatePresence>
                   </motion.div>
+                </div>
               </div>
             </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       <CelebrationOverlay />
     </>

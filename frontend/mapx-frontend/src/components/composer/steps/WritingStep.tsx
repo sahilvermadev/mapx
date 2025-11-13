@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import TypingText from '@/components/ui/shadcn-io/typing-text';
 
 interface WritingStepProps {
   error: string | null;
@@ -34,7 +35,7 @@ export const WritingStep: React.FC<WritingStepProps> = ({
     >
       <div className="max-w-3xl mx-auto space-y-4 md:space-y-8">
         <h1 className="text-2xl md:text-4xl lg:text-5xl font-light tracking-tight text-foreground leading-tight">
-          What would you like to recommend?
+          What are you recommending?
         </h1>
 
         {error && (
@@ -62,8 +63,9 @@ export const WritingStep: React.FC<WritingStepProps> = ({
               const newPos = (e.target as HTMLTextAreaElement).selectionStart || 0;
               onTextSelection(newPos);
             }}
-            placeholder="Tell us about a new spot, service, or tip..."
-            className="min-h-[150px] md:min-h-[200px] text-lg md:text-xl lg:text-2xl resize-none border-0 rounded-none bg-transparent px-0 text-foreground placeholder:text-muted-foreground text-left shadow-none focus:shadow-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 appearance-none"
+            placeholder=""
+            className="min-h-[150px] md:min-h-[200px] text-lg md:text-xl lg:text-2xl resize-none border-0 rounded-none bg-transparent px-0 text-foreground placeholder:text-muted-foreground text-left shadow-none focus:shadow-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 appearance-none relative z-10"
+            style={{ caretColor: text ? 'auto' : 'transparent' }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 if (e.metaKey || e.ctrlKey) {
@@ -77,6 +79,28 @@ export const WritingStep: React.FC<WritingStepProps> = ({
               }
             }}
           />
+          {/* Animated placeholder overlay - only visible when textarea is empty */}
+          {!text && (
+            <div className="absolute top-3 md:top-5 left-3 md:left-4 pointer-events-none z-0">
+              <TypingText
+                text={[
+                  "a restaurant I went to recently",
+                  "a carpenter who worked on my kitchen",
+                  "the Shangri La hotel in Delhi"
+                ]}
+                typingSpeed={75}
+                pauseDuration={2000}
+                deletingSpeed={30}
+                loop={true}
+                showCursor={true}
+                cursorCharacter="|"
+                cursorBlinkDuration={0.5}
+                variableSpeed={{ min: 50, max: 120 }}
+                className="text-lg md:text-xl lg:text-2xl text-muted-foreground leading-relaxed"
+                cursorClassName=""
+              />
+            </div>
+          )}
           {mentionMenu}
         </div>
         

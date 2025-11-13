@@ -63,8 +63,7 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults,
           handleSearch(e);
         }}
       >
-        <div className="rounded-full bg-white border border-gray-200 text-foreground h-14 px-6 flex items-center gap-3 shadow-sm">
-
+        <div className="rounded-full bg-white border border-black/10 text-foreground h-12 md:h-14 px-5 md:px-6 flex items-center gap-3 shadow-sm">
           <input
             type="text"
             placeholder="Ask anything..."
@@ -86,7 +85,7 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults,
               }
             }}
             disabled={!isAuthenticated || loading}
-            className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm"
+            className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm md:text-base font-medium"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
@@ -94,17 +93,17 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults,
 
           <button
             type="button"
-            className="shrink-0 h-8 w-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
+            className="shrink-0 h-7 w-7 md:h-8 md:w-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
             aria-label="Voice"
             disabled={!isAuthenticated || loading}
           >
-            <Mic className="h-4 w-4 text-muted-foreground" />
+            <Mic className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground" strokeWidth={1.5} />
           </button>
 
           <Button
             type="button"
             size="icon"
-            className="h-10 w-10 rounded-full bg-black text-white hover:bg-black/90"
+            className="h-9 w-9 md:h-10 md:w-10 rounded-full bg-black text-white hover:bg-black/90"
             disabled={!query.trim() || loading || !isAuthenticated}
             onClick={(e) => {
               e.preventDefault();
@@ -114,9 +113,9 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults,
             aria-label="Send"
           >
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 md:h-4 md:w-4 animate-spin" strokeWidth={1.5} />
             ) : (
-              <ArrowUp className="h-4 w-4" />
+              <ArrowUp className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
             )}
           </Button>
         </div>

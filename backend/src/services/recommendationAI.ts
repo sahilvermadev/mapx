@@ -1,5 +1,15 @@
 import Groq from 'groq-sdk';
 import '../config/env';
+import {
+  FIELD_CONFIG,
+  isFieldForbidden,
+  filterForbiddenFields,
+  getMissingRequiredFields,
+  normalizeFieldName,
+  isFieldRequired,
+  type ContentType,
+} from '../config/fieldConfig';
+import { CONTENT_TYPES, ERROR_MESSAGES } from '../config/constants';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -9,7 +19,7 @@ const groq = new Groq({
 export interface RecommendationAnalysis {
   isValid: boolean;
   isGibberish: boolean;
-  contentType: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  contentType: ContentType;
   extractedData: {
     name?: string;
     description?: string;
@@ -18,11 +28,10 @@ export interface RecommendationAnalysis {
       phone?: string;
       email?: string;
     };
-    specialities?: string[];
+    highlights?: string[];
     pricing?: string;
     experience?: string;
-    best_times?: string;
-    tips?: string;
+    // Removed deprecated fields: best_times, tips
     [key: string]: any;
   };
   missingFields: Array<{
@@ -64,9 +73,9 @@ CONTEXT: The user is answering a question from someone else. This text appears t
 The follow-up questions should be SHORT and DIRECT, like form fields. Use concise, simple questions:
 - "What's the name?"
 - "Where is it located?"
-- "What's the contact info?"
-- "What makes it good?"
-- "Any tips or notes?"
+
+For places: ask only for name and location. DO NOT ask for contact information, tips, or best times.
+For services: ask only for name and contact info.
 
 Avoid long explanations or phrases like "To give a complete answer" or "To help others understand".
 ` : ''}
@@ -85,11 +94,9 @@ Analyze this text and respond with a JSON object containing:
       "phone": "phone number if mentioned",
       "email": "email if mentioned"
     },
-    "specialities": ["array of specialities if mentioned"],
+    "highlights": ["array of highlights if mentioned"],
     "pricing": "pricing info if mentioned",
-    "experience": "experience info if mentioned",
-    "best_times": "best times if mentioned",
-    "tips": "tips if mentioned"
+    "experience": "experience info if mentioned"
   },
   "missingFields": [
     {
@@ -105,13 +112,15 @@ Analyze this text and respond with a JSON object containing:
 }
 
 Guidelines:
-- For services (carpenter, plumber, etc.): ALWAYS ask for contact information if missing
-- For places: ask for location, best times to visit, insider tips
+- For places: ask ONLY for name and location if missing. DO NOT ask for contact information (phone/email), tips, best_times, highlights, or any other optional fields.
+- For services: ask ONLY for name and contact information if missing. DO NOT ask for tips, best_times, or any other optional fields.
 - For contacts: ask what they can help with, their services
 - For tips: ask where it applies, when it's useful
 - Generate questions that feel natural and helpful
 - Consider what information would be most valuable to other users
 - Be specific and contextual in your questions
+- Only ask for fields that are actually displayed and editable in the UI
+- DO NOT ask for deprecated fields: tips, best_times, best_time
 - If the text is gibberish or irrelevant, set isValid to false and isGibberish to true
 - IMPORTANT: For location-related fields (location, address, place), set "needsLocationPicker": true to enable Google Maps location selection
 ${isAnsweringQuestion ? `
@@ -149,12 +158,12 @@ Respond with valid JSON only.`;
       const parsed = JSON.parse(cleanedResponse);
 
       // Normalize
-      const contentType: RecommendationAnalysis['contentType'] = parsed.contentType || 'unclear';
+      const contentType: RecommendationAnalysis['contentType'] = (parsed.contentType || CONTENT_TYPES.UNCLEAR) as ContentType;
       const extractedData = parsed.extractedData || {};
-      let missingFields: RecommendationAnalysis['missingFields'] = Array.isArray(parsed.missingFields) ? parsed.missingFields : [];
-
-      // Post-process: enforce category-specific required fields
-      missingFields = this.ensureCategoryRequirements(contentType, extractedData, missingFields);
+      
+      // Only ask for required fields per content type (ignore LLM optional suggestions)
+      let missingFields: RecommendationAnalysis['missingFields'] = [];
+      missingFields = this.ensureCategoryRequirements(contentType, extractedData, []);
 
       return {
         isValid: parsed.isValid || false,
@@ -179,6 +188,17 @@ Respond with valid JSON only.`;
     contentType: string,
     conversationHistory: string[]
   ): Promise<RecommendationQuestion> {
+    // Use field configuration to check if field is forbidden or not required
+    const normalizedContentType = contentType as ContentType;
+    if (isFieldForbidden(missingField, normalizedContentType)) {
+      throw new Error(ERROR_MESSAGES.FIELD_FORBIDDEN(missingField, contentType));
+    }
+    
+    // Only allow required fields to be asked
+    if (!isFieldRequired(missingField, normalizedContentType)) {
+      throw new Error(ERROR_MESSAGES.INVALID_FIELD(missingField, contentType));
+    }
+    
     try {
       // Check if this is part of answering a question using more sophisticated detection
       const isAnsweringQuestion = this.detectQuestionContext(conversationHistory.join(' '));
@@ -198,9 +218,11 @@ CONTEXT: The user is answering a question from someone else. Your follow-up ques
 Use concise, simple questions:
 - "What's the name?"
 - "Where is it located?"
-- "What's the contact info?"
-- "What makes it good?"
-- "Any tips or notes?"
+
+For places: ask only for name and location. DO NOT ask for contact information, tips, or best times.
+For services: ask only for name and contact info.
+
+DO NOT ask for deprecated fields: tips, best_times, best_time.
 
 Avoid long explanations or verbose phrasing.
 ` : ''}
@@ -382,15 +404,15 @@ Respond with JSON:
                        text.split(' ').length < 2;
     
     // Simple content type detection
-    let contentType: 'place' | 'service' | 'tip' | 'contact' | 'unclear' = 'unclear';
+    let contentType: ContentType = CONTENT_TYPES.UNCLEAR;
     if (['carpenter', 'plumber', 'electrician', 'mechanic', 'service'].some(word => lowerText.includes(word))) {
-      contentType = 'service';
+      contentType = CONTENT_TYPES.SERVICE;
     } else if (['restaurant', 'cafe', 'shop', 'place', 'location'].some(word => lowerText.includes(word))) {
-      contentType = 'place';
+      contentType = CONTENT_TYPES.PLACE;
     } else if (['tip', 'advice', 'suggestion'].some(word => lowerText.includes(word))) {
-      contentType = 'tip';
+      contentType = CONTENT_TYPES.TIP;
     } else if (['contact', 'phone', 'number', 'call'].some(word => lowerText.includes(word))) {
-      contentType = 'contact';
+      contentType = CONTENT_TYPES.CONTACT;
     }
 
     const extractedData: any = { description: text };
@@ -409,9 +431,7 @@ Respond with JSON:
 
   /**
    * Ensure per-category required fields are represented in missingFields with correct UI hints.
-   * - place: require location/address selection via Maps picker 
-   * - service: require at least one identifier (phone or email)
-   * - future categories: add here; UI can render dynamically
+   * Uses centralized field configuration for consistency.
    */
   private ensureCategoryRequirements(
     contentType: RecommendationAnalysis['contentType'],
@@ -419,11 +439,7 @@ Respond with JSON:
     existingMissing: RecommendationAnalysis['missingFields']
   ): RecommendationAnalysis['missingFields'] {
     const missing: RecommendationAnalysis['missingFields'] = [...existingMissing];
-
-    const hasField = (key: string) => {
-      const v = extractedData?.[key];
-      return v !== undefined && v !== null && String(v).trim().length > 0;
-    };
+    const config = FIELD_CONFIG[contentType];
 
     // Helper to add missing item if not already present
     const addMissing = (field: string, question: string, required = true, reasoning = 'Required for this recommendation', needsLocationPicker = false) => {
@@ -433,10 +449,18 @@ Respond with JSON:
       }
     };
 
-    if (contentType === 'place') {
-      // Require location; support multiple possible keys from frontend mapping
-      const hasLocation = hasField('location') || hasField('location_address') || hasField('address') || hasField('location_name');
-      if (!hasLocation) {
+    // Check for missing required fields using centralized configuration
+    const missingRequired = getMissingRequiredFields(extractedData, contentType);
+    
+    for (const field of missingRequired) {
+      if (field === 'name') {
+        addMissing(
+          'name',
+          "What's the name?",
+          true,
+          'The name is required.'
+        );
+      } else if (field === 'location') {
         addMissing(
           'location',
           'Where is this place? Please select it on the map.',
@@ -444,12 +468,7 @@ Respond with JSON:
           'Place recommendations must include a concrete location to save in Places.',
           true
         );
-      }
-    } else if (contentType === 'service') {
-      // Require at least one of phone/email
-      const phone = extractedData?.contact_info?.phone || extractedData?.phone || extractedData?.service_phone;
-      const email = extractedData?.contact_info?.email || extractedData?.email || extractedData?.service_email;
-      if (!phone && !email) {
+      } else if (field === 'contact_info') {
         addMissing(
           'contact_info',
           'What is the best contact for this service (phone or email)?',
@@ -459,15 +478,12 @@ Respond with JSON:
       }
     }
 
-    return missing;
+    // Filter out any forbidden fields (double-check)
+    return missing.filter(m => !isFieldForbidden(m.field, contentType));
   }
 
   async formatRecommendationPost(data: any, originalText?: string): Promise<string> {
     try {
-      console.log('=== RECOMMENDATION AI FORMAT ===');
-      console.log('recommendationAI.formatRecommendationPost - data:', data);
-      console.log('recommendationAI.formatRecommendationPost - originalText:', originalText);
-      
       // Determine content type from data (backend tolerant of either key)
       const contentType: string = data?.contentType || data?.type || 'unclear';
 
@@ -482,7 +498,7 @@ GOAL:
 
 STYLE:
 - Write 3–5 short sentences in third-person, using active voice.
-- Mention concrete details only when provided: specialties, outcomes, responsiveness, pricing, years of experience.
+- Mention concrete details only when provided: highlights, outcomes, responsiveness, pricing, years of experience.
 - Prefer the professional title (e.g., neurosurgeon, carpenter) over generic terms like "service provider".
 - Avoid boilerplate phrases and hedging: do not use "recommended service provider", "skilled professional", "notable recommendation", or "as evidenced by".
 - Do not repeat the name more than once and vary sentence openings.
@@ -530,7 +546,7 @@ Return only the final text.`;
 STYLE:
 - Write 3–5 short sentences in active voice.
 - Be specific, avoid filler and clichés. Do not repeat the name more than once.
-- Only use details that exist in the data (category, specialties, pricing, best time, tips). Never invent.
+- Only use details that exist in the data (category, highlights, pricing, best time, tips). Never invent.
 - Convert any first-person statements from the ORIGINAL into neutral third-person without implying authorship or personal involvement. Avoid phrases like "I recommend" or "the recommender".
 - Do not include location or contact information; the UI surfaces those separately.
 ${original && (original.includes('?') || original.includes('what') || original.includes('where') || original.includes('how')) ? `
@@ -558,8 +574,6 @@ Return only the final text.`;
   
       const formattedText = response.choices[0]?.message?.content?.trim();
       
-      console.log('recommendationAI.formatRecommendationPost - LLM response:', formattedText);
-      
       if (!formattedText) {
         throw new Error('No response from LLM');
       }
@@ -575,28 +589,74 @@ Return only the final text.`;
 
       if (ct === 'service') {
         lines.push(`${nameOrCategory} is recommended for their expertise.`);
-        if (Array.isArray(data?.specialities) && data.specialities.length) {
-          lines.push(`Specialities: ${data.specialities.join(', ')}.`);
+        if (Array.isArray(data?.highlights) && data.highlights.length) {
+          lines.push(`Highlights: ${data.highlights.join(', ')}.`);
         }
-        if (data?.best_times) lines.push(`Best time: ${data.best_times}.`);
-        if (data?.tips) lines.push(`${data.tips}.`);
+        // Removed deprecated fields: best_times, tips
       } else if (ct === 'place') {
         lines.push(`${nameOrCategory} is a recommended place to visit.`);
         const address = data?.location || data?.location_address;
         if (address) lines.push(`Address: ${address}.`);
         if (data?.pricing) lines.push(`Pricing: ${data.pricing}.`);
-        if (data?.best_times) lines.push(`Best time: ${data.best_times}.`);
-        if (data?.tips) lines.push(`${data.tips}.`);
+        // Removed deprecated fields: best_times, tips
       } else {
         lines.push(`${nameOrCategory} is recommended.`);
         if (data?.pricing) lines.push(`Pricing: ${data.pricing}.`);
-        if (data?.best_times) lines.push(`Best time: ${data.best_times}.`);
-        if (data?.tips) lines.push(`${data.tips}.`);
-        if (Array.isArray(data?.specialities) && data.specialities.length) lines.push(`specialities: ${data.specialities.join(', ')}.`);
+        // Removed deprecated fields: best_times, tips
+        if (Array.isArray(data?.highlights) && data.highlights.length) lines.push(`highlights: ${data.highlights.join(', ')}.`);
       }
 
       if (!lines.length && originalText) lines.push(originalText);
       return lines.join('\n');
+    }
+  }
+
+  async improveText(text: string): Promise<string> {
+    try {
+      const prompt = `Fix all spelling and grammar errors in this text. Return ONLY the corrected text, nothing else.
+
+Text with errors:
+"${text}"
+
+Corrected text:`;
+
+      const completion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a spelling and grammar checker. Fix all errors and return only the corrected text.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.1, // Very low temperature for consistent corrections
+        max_tokens: 1000,
+      });
+
+      const rawResponse = completion.choices[0]?.message?.content?.trim() || '';
+      
+      if (!rawResponse) {
+        return text;
+      }
+      
+      // Clean up the response
+      let improvedText = rawResponse
+        .replace(/^```[\w]*\n?/g, '')
+        .replace(/\n?```$/g, '')
+        .replace(/^["']/g, '')
+        .replace(/["']$/g, '')
+        .trim();
+      
+      // Always return the AI response, even if it seems the same
+      // (sometimes the AI makes subtle improvements)
+      return improvedText || text;
+    } catch (error) {
+      console.error('Error in improveText:', error);
+      // Return original text on error
+      return text;
     }
   }
 }
