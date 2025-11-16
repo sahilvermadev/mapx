@@ -11,6 +11,7 @@ import type { PlaceDetails } from '../components/ContentCard';
 import { Button } from '@/components/ui/button';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
 import { SEARCH_CONFIG } from '../config/searchConfig';
+import { useReviewedPlacesQuery } from '../hooks/useReviewedPlacesQuery';
 import './MapPage.css';
 
 // Constants
@@ -55,13 +56,21 @@ const MapPage: React.FC = () => {
   const [isLocating, setIsLocating] = useState(true);
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [reviewedPlaces, setReviewedPlaces] = useState<ReviewedPlace[]>([]);
-  const [reviewedPlacesLoading, setReviewedPlacesLoading] = useState(false);
-  const [reviewedPlacesError, setReviewedPlacesError] = useState<string | null>(null);
   const [showReviewedPlaces, setShowReviewedPlaces] = useState(true);
   const [currentZoom, setCurrentZoom] = useState(9);
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   const [isMapReady, setIsMapReady] = useState(false);
+
+  // Use React Query for reviewed places
+  const {
+    data: reviewedPlaces = [],
+    isLoading: reviewedPlacesLoading,
+    error: reviewedPlacesQueryError
+  } = useReviewedPlacesQuery(user?.id, selectedGroupIds, isAuthenticated);
+  
+  const reviewedPlacesError = reviewedPlacesQueryError 
+    ? (reviewedPlacesQueryError instanceof Error ? reviewedPlacesQueryError.message : 'Failed to load reviewed places')
+    : null;
 
   // Refs
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -70,6 +79,7 @@ const MapPage: React.FC = () => {
   const userLocationMarker = useRef<google.maps.Marker | null>(null);
   const placesService = useRef<google.maps.places.PlacesService | null>(null);
   const reviewedPlacesMarkers = useRef<google.maps.Marker[]>([]);
+  const zoomListenerRef = useRef<google.maps.MapsEventListener | null>(null);
 
   // Event handlers - memoized to prevent unnecessary re-renders
   const handleSemanticSearch = useCallback(async (query: string): Promise<SearchResponse> => {
@@ -164,13 +174,6 @@ const MapPage: React.FC = () => {
   const handleClearGroups = useCallback(() => {
     setSelectedGroupIds([]);
   }, []);
-
-  // Reload reviewed places when group selection changes
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchReviewedPlaces();
-    }
-  }, [selectedGroupIds, isAuthenticated]);
 
   const handleLocateMe = useCallback(() => {
     if (!map.current) return;
@@ -289,8 +292,14 @@ const MapPage: React.FC = () => {
   };
 
   // Function to create markers for reviewed places
-  const createReviewedPlacesMarkers = (places: ReviewedPlace[]) => {
+  const createReviewedPlacesMarkers = useCallback((places: ReviewedPlace[]) => {
     if (!map.current || !window.google) return;
+
+    // Clean up existing zoom listener
+    if (zoomListenerRef.current) {
+      google.maps.event.removeListener(zoomListenerRef.current);
+      zoomListenerRef.current = null;
+    }
 
     // Clear existing markers
     reviewedPlacesMarkers.current.forEach(marker => marker.setMap(null));
@@ -511,9 +520,16 @@ const MapPage: React.FC = () => {
     // Set initial visibility
     updateMarkerVisibility();
 
-    // Add zoom change listener
-    map.current.addListener('zoom_changed', updateMarkerVisibility);
-  };
+    // Add zoom change listener and store reference for cleanup
+    zoomListenerRef.current = map.current.addListener('zoom_changed', updateMarkerVisibility);
+  }, [showReviewedPlaces]);
+
+  // Update markers when reviewed places data changes
+  useEffect(() => {
+    if (isMapReady) {
+      createReviewedPlacesMarkers(reviewedPlaces);
+    }
+  }, [reviewedPlaces, isMapReady, createReviewedPlacesMarkers]);
 
   // Function to setup POI click handler with improved collision behavior
   const setupPOIClickHandler = (google: typeof globalThis.google) => {
@@ -627,26 +643,6 @@ const MapPage: React.FC = () => {
     }
   };
 
-  // Function to fetch reviewed places
-  const fetchReviewedPlaces = async () => {
-    if (!isAuthenticated) return;
-
-    try {
-      setReviewedPlacesLoading(true);
-      setReviewedPlacesError(null);
-      
-      const places = await recommendationsApi.getReviewedPlaces('friends', 200, 0, selectedGroupIds.length > 0 ? selectedGroupIds : undefined);
-      setReviewedPlaces(places);
-      
-      // Create markers for reviewed places
-      createReviewedPlacesMarkers(places);
-    } catch (error) {
-      console.error('Failed to fetch reviewed places:', error);
-      setReviewedPlacesError(error instanceof Error ? error.message : 'Failed to load reviewed places');
-    } finally {
-      setReviewedPlacesLoading(false);
-    }
-  };
 
   // Function to toggle reviewed places visibility
   const toggleReviewedPlaces = useCallback(() => {
@@ -673,6 +669,12 @@ const MapPage: React.FC = () => {
     if (userLocationMarker.current) {
       userLocationMarker.current.setMap(null);
       userLocationMarker.current = null;
+    }
+    
+    // Clean up zoom listener
+    if (zoomListenerRef.current) {
+      google.maps.event.removeListener(zoomListenerRef.current);
+      zoomListenerRef.current = null;
     }
     
     // Clear reviewed places markers
@@ -785,7 +787,6 @@ const MapPage: React.FC = () => {
         }, 3000);
 
         getUserLocation(google);
-        fetchReviewedPlaces(); // Fetch reviewed places on map load
 
       } catch (err) {
         console.error('Error loading Google Maps:', err);
@@ -893,12 +894,6 @@ const MapPage: React.FC = () => {
     }
   }, [locationState, isMapReady, moveMapToPlace]);
 
-  // Fetch reviewed places when user is authenticated
-  useEffect(() => {
-    if (isAuthenticated && map.current) {
-      fetchReviewedPlaces();
-    }
-  }, [isAuthenticated]);
 
   // Add zoom change listener to track current zoom level
   useEffect(() => {

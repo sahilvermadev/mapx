@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, startTransition } from 'react';
 import { useParams } from 'react-router-dom';
-import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform } from 'framer-motion';
 import { Star, Heart, HelpCircle, Settings, MapPin, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -38,6 +38,9 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   // State management
   const [activeTab, setActiveTab] = useState<TabType>('recommendations');
   const [showCustomize, setShowCustomize] = useState(false);
+  const [deletedPostIds, setDeletedPostIds] = useState<Set<number>>(new Set());
+  const [editingBio, setEditingBio] = useState(userData?.bio || '');
+  const [editingCity, setEditingCity] = useState(userData?.city || '');
   
   // Cities visited modal state
   const [showCitiesModal, setShowCitiesModal] = useState(false);
@@ -67,6 +70,14 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const [selectedCity, setSelectedCity] = useState<{ id?: string; name?: string } | undefined>(undefined);
   const [selectedCategoryKeys, setSelectedCategoryKeys] = useState<string[]>([]);
   
+  // Sync editing state with userData
+  useEffect(() => {
+    if (userData) {
+      setEditingBio(userData.bio || '');
+      setEditingCity(userData.city || '');
+    }
+  }, [userData]);
+
   // Format preferences banner URL (for display)
   const prefsDisplay: ProfilePreferences = useMemo(() => {
     if (!prefsData) return {};
@@ -149,8 +160,16 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
       }
     }
     
+    // Filter out deleted posts
+    if (deletedPostIds.size > 0) {
+      result = result.filter((item: any) => {
+        const postId = item.id || item.recommendation_id;
+        return !deletedPostIds.has(postId);
+      });
+    }
+    
     return result;
-  }, [placesQuery.data, activeTab, placesQuery.isLoading]);
+  }, [placesQuery.data, activeTab, placesQuery.isLoading, deletedPostIds]);
 
   const placesLoading = placesQuery.isLoading || placesQuery.isFetching;
   const loadingMore = useMemo(() => {
@@ -181,7 +200,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const prevShowCustomizeRef = useRef(showCustomize);
   
   // Store refetch function in ref to avoid callback dependency issues
-  const placesQueryRefetchRef = useRef<(() => void) | null>(null);
+  const placesQueryRefetchRef = useRef<(() => Promise<any>) | null>(null);
   useEffect(() => {
     if (isInfiniteQuery(placesQuery)) {
       placesQueryRefetchRef.current = placesQuery.refetch;
@@ -385,6 +404,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     setActiveTab('recommendations');
     setSelectedCity(undefined);
     setSelectedCategoryKeys([]);
+    setDeletedPostIds(new Set());
   }, [userId]);
 
   // Load unique cities when modal opens
@@ -521,7 +541,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const isOwnProfile = currentUser?.id === userId;
   // Use preview theme when customize panel is open, otherwise use saved theme
   const previewTheme = showCustomize ? prefs.theme : prefsDisplay.theme;
-  const selectedTheme = previewTheme ? THEMES[previewTheme] : THEMES['neo-brutal'];
+  const selectedTheme = previewTheme ? THEMES[previewTheme] : THEMES['monochrome'];
   const accentColor = selectedTheme.accentColor;
   const backgroundColor = selectedTheme.backgroundColor;
 
@@ -553,10 +573,48 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   }, [isOwnProfile, prefsDisplay.theme, setTheme, showCustomize]);
 
   // Stable callback references to prevent FeedPost re-renders
-  const handlePostUpdate = useCallback(() => {
-    // Invalidate profile data and places
+  const handlePostUpdate = useCallback(async (deletedPostId?: number) => {
+    // Optimistically remove the post from UI immediately
+    if (deletedPostId) {
+      setDeletedPostIds(prev => new Set([...prev, deletedPostId]));
+    }
+    
+    // Comprehensive cache invalidation - invalidate all relevant queries
+    // Profile queries
     queryClient.invalidateQueries({ queryKey: ['profile', userId] });
-    placesQueryRefetchRef.current?.();
+    queryClient.invalidateQueries({ queryKey: ['profile', userId, 'places'] });
+    queryClient.invalidateQueries({ queryKey: ['profile', userId, 'stats'] });
+    
+    // Feed queries (where this post might appear)
+    queryClient.invalidateQueries({ queryKey: ['feed'], exact: false });
+    
+    // Search queries (if search results include this post)
+    queryClient.invalidateQueries({ queryKey: ['search'], exact: false });
+    queryClient.invalidateQueries({ queryKey: ['recommendations'], exact: false });
+    
+    // Wait for refetch to complete, then clear deleted IDs
+    try {
+      await placesQueryRefetchRef.current?.();
+      
+      // Clear deleted ID after successful refetch
+      if (deletedPostId) {
+        setDeletedPostIds(prev => {
+          const next = new Set(prev);
+          next.delete(deletedPostId);
+          return next;
+        });
+      }
+    } catch (error) {
+      // If refetch fails, restore the item (rollback optimistic update)
+      console.error('Failed to refetch after deletion:', error);
+      if (deletedPostId) {
+        setDeletedPostIds(prev => {
+          const next = new Set(prev);
+          next.delete(deletedPostId);
+          return next;
+        });
+      }
+    }
   }, [queryClient, userId]);
 
   const handleQuestionUpdate = useCallback(() => {
@@ -760,9 +818,46 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                     <h1 className="text-xl md:text-2xl lg:text-3xl font-bold tracking-tight truncate mb-1" style={{ letterSpacing: '-0.02em' }}>
                       {userData?.displayName || 'User'}
                     </h1>
-                    <div className="flex items-center gap-2 md:gap-3">
+                    <div className="flex items-center gap-2 md:gap-3 flex-wrap">
                       <p className="text-sm md:text-base text-muted-foreground truncate font-medium">@{userData?.username || 'no-username'}</p>
+                      {userData?.city && (
+                        <>
+                          <span className="text-sm md:text-base text-muted-foreground">•</span>
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground" strokeWidth={1.5} />
+                            <p className="text-sm md:text-base text-muted-foreground font-medium">{userData.city}</p>
+                          </div>
+                        </>
+                      )}
                     </div>
+                    {/* Follower/Following counts */}
+                    {(userData?.followers_count !== undefined || userData?.following_count !== undefined) && (
+                      <div className="flex items-center gap-4 md:gap-5 mt-2 md:mt-3">
+                        {userData.followers_count !== undefined && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm md:text-base font-semibold" style={{ color: accentColor }}>
+                              {userData.followers_count.toLocaleString()}
+                            </span>
+                            <span className="text-sm md:text-base text-muted-foreground">
+                              {userData.followers_count === 1 ? 'follower' : 'followers'}
+                            </span>
+                          </div>
+                        )}
+                        {userData.following_count !== undefined && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm md:text-base font-semibold" style={{ color: accentColor }}>
+                              {userData.following_count.toLocaleString()}
+                            </span>
+                            <span className="text-sm md:text-base text-muted-foreground">following</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {userData?.bio && (
+                      <p className="text-sm md:text-base text-foreground mt-2 md:mt-3 leading-relaxed max-w-2xl">
+                        {userData.bio}
+                      </p>
+                    )}
                   </div>
 
                   {isOwnProfile && (
@@ -964,6 +1059,61 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                       <option value="cursive">Cursive (Elegant)</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="text-sm font-semibold block mb-3 tracking-tight">City</label>
+                    <input
+                      type="text"
+                      value={editingCity}
+                      onChange={(e) => setEditingCity(e.target.value)}
+                      onBlur={async () => {
+                        if (!userId || !isOwnProfile) return;
+                        const newCity = editingCity.trim() || null;
+                        if (newCity !== (userData?.city || null)) {
+                          try {
+                            await profileApi.updateUserProfile(userId, { city: newCity });
+                            await refetchProfile();
+                          } catch (error) {
+                            console.error('Failed to update city:', error);
+                            // Reset input on error
+                            setEditingCity(userData?.city || '');
+                          }
+                        }
+                      }}
+                      placeholder="e.g., New York, London"
+                      maxLength={255}
+                      className="h-10 w-full border-[1.5px] border-black rounded-none px-3 bg-white font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black/20"
+                      style={{ boxShadow: '2px 2px 0 0 #000' }}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-semibold block mb-3 tracking-tight">Bio</label>
+                    <textarea
+                      value={editingBio}
+                      onChange={(e) => setEditingBio(e.target.value)}
+                      onBlur={async () => {
+                        if (!userId || !isOwnProfile) return;
+                        const newBio = editingBio.trim() || null;
+                        if (newBio !== (userData?.bio || null)) {
+                          try {
+                            await profileApi.updateUserProfile(userId, { bio: newBio });
+                            await refetchProfile();
+                          } catch (error) {
+                            console.error('Failed to update bio:', error);
+                            // Reset textarea on error
+                            setEditingBio(userData?.bio || '');
+                          }
+                        }
+                      }}
+                      placeholder="Tell us about yourself..."
+                      maxLength={500}
+                      rows={4}
+                      className="w-full border-[1.5px] border-black rounded-none px-3 py-2 bg-white font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black/20 resize-none"
+                      style={{ boxShadow: '2px 2px 0 0 #000' }}
+                    />
+                    <div className="mt-2 text-xs text-muted-foreground font-medium">
+                      {editingBio.length}/500 characters
+                    </div>
+                  </div>
                   <div className="flex items-end">
                     <Button 
                       variant="outline" 
@@ -1092,49 +1242,73 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
               </CardContent>
             </Card>
           ) : (
-            <motion.div 
-              className="space-y-8"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.3 }}
-            >
-              {/* Optimized: Only animate first few items, rest render without animation for better performance */}
-              {places.map((item: any, index: number) => {
-                const shouldAnimate = index < 5; // Only animate first 5 items
-                const PostComponent = activeTab === 'questions' ? (
-                  <QuestionFeedPost
-                    key={item.id || `question-${index}`}
-                    question={item}
-                    currentUserId={currentUser?.id || ''}
-                    onQuestionUpdate={handleQuestionUpdate}
-                  />
-                ) : (
-                  <FeedPost
-                    key={item.id || `post-${index}`}
-                    post={item}
-                    currentUserId={currentUser?.id || ''}
-                    allowEdit={true}
-                    onPostUpdate={handlePostUpdate}
-                  />
-                );
+            <LayoutGroup>
+              <AnimatePresence mode="popLayout">
+                <motion.div 
+                  className="space-y-8 relative"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  {/* Optimized: Only animate first few items, rest render without animation for better performance */}
+                  {places.map((item: any, index: number) => {
+                    const shouldAnimate = index < 5; // Only animate first 5 items
+                    const postId = item.id || item.recommendation_id;
+                    const uniqueKey = postId || `item-${index}`;
+                    
+                    const PostComponent = activeTab === 'questions' ? (
+                      <QuestionFeedPost
+                        key={uniqueKey}
+                        question={item}
+                        currentUserId={currentUser?.id || ''}
+                        onQuestionUpdate={handleQuestionUpdate}
+                        allowEdit={true}
+                      />
+                    ) : (
+                      <FeedPost
+                        key={uniqueKey}
+                        post={item}
+                        currentUserId={currentUser?.id || ''}
+                        allowEdit={true}
+                        onPostUpdate={() => handlePostUpdate(postId)}
+                      />
+                    );
 
-                if (shouldAnimate) {
-                  return (
-                    <motion.div
-                      key={item.id || `item-${index}`}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ delay: index * 0.03, duration: 0.15 }}
-                    >
-                      {PostComponent}
-                    </motion.div>
-                  );
-                }
+                    if (shouldAnimate) {
+                      return (
+                        <motion.div
+                          key={uniqueKey}
+                          layout
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                          transition={{ 
+                            layout: { duration: 0.2, ease: 'easeOut' },
+                            exit: { duration: 0.3, ease: 'easeIn' }
+                          }}
+                        >
+                          {PostComponent}
+                        </motion.div>
+                      );
+                    }
 
-                return PostComponent;
-              })}
-            </motion.div>
+                    return (
+                      <motion.div
+                        key={uniqueKey}
+                        layout
+                        exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                        transition={{ 
+                          layout: { duration: 0.2, ease: 'easeOut' },
+                          exit: { duration: 0.3, ease: 'easeIn' }
+                        }}
+                      >
+                        {PostComponent}
+                      </motion.div>
+                    );
+                  })}
+                </motion.div>
+              </AnimatePresence>
+            </LayoutGroup>
           )}
 
           {/* Load More - Only show for recommendations and likes */}

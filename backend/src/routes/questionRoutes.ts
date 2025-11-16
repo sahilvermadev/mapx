@@ -150,6 +150,24 @@ router.post('/:questionId/answers', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid question id' });
     }
 
+    // Check if the question exists and verify the user is not the question author
+    const questionResult = await pool.query(
+      'SELECT user_id FROM questions WHERE id = $1',
+      [questionId]
+    );
+
+    if (questionResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Question not found' });
+    }
+
+    const questionAuthorId = questionResult.rows[0].user_id;
+    if (questionAuthorId === userId) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'You cannot answer your own question' 
+      });
+    }
+
     let recId: number | undefined = recommendation_id;
     if (!recId && recommendation_payload) {
       const payload: RecommendationData = {
@@ -295,7 +313,124 @@ router.post('/:questionId/answers', async (req, res) => {
   }
 });
 
-export default router;
+// PUT /api/questions/:id  (update question)
+router.put('/:id', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const questionId = parseInt(req.params.id, 10);
+    const { text, visibility, labels, metadata } = req.body || {};
+
+    if (!Number.isFinite(questionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid question ID' });
+    }
+
+    // Validate visibility if provided
+    if (visibility && !['friends', 'public'].includes(visibility)) {
+      return res.status(400).json({ success: false, error: 'Invalid visibility' });
+    }
+
+    // Validate text if provided
+    if (text !== undefined) {
+      if (typeof text !== 'string' || text.trim().length === 0) {
+        return res.status(400).json({ success: false, error: 'Text cannot be empty' });
+      }
+    }
+
+    // Build update query dynamically
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (text !== undefined) {
+      updates.push(`text = $${paramIndex++}`);
+      values.push(text.trim());
+    }
+
+    if (visibility !== undefined) {
+      updates.push(`visibility = $${paramIndex++}`);
+      values.push(visibility);
+    }
+
+    if (labels !== undefined) {
+      updates.push(`labels = $${paramIndex++}`);
+      values.push(Array.isArray(labels) ? labels : null);
+    }
+
+    if (metadata !== undefined) {
+      updates.push(`metadata = $${paramIndex++}`);
+      values.push(metadata || {});
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ success: false, error: 'No updates provided' });
+    }
+
+    // Always update updated_at
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+
+    // Add questionId and userId to values for WHERE clause
+    values.push(questionId, userId);
+
+    const query = `
+      UPDATE questions 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex++} AND user_id = $${paramIndex}
+      RETURNING id
+    `;
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Question not found or unauthorized' });
+    }
+
+    // If text was updated, re-enqueue embedding
+    if (text !== undefined) {
+      try {
+        await embeddingQueue.enqueue('question', questionId, { 
+          text: text.trim(), 
+          labels: labels || null, 
+          metadata: metadata || {} 
+        }, 'normal');
+      } catch (e) {
+        // best-effort; ignore enqueue failure
+        console.warn('Failed to enqueue question embedding update', e);
+      }
+    }
+
+    return res.json({ success: true, message: 'Question updated successfully' });
+  } catch (error) {
+    console.error('Error updating question:', error);
+    return res.status(500).json({ success: false, error: 'Failed to update question' });
+  }
+});
+
+// DELETE /api/questions/:id  (delete question)
+router.delete('/:id', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    const questionId = parseInt(req.params.id, 10);
+
+    if (!Number.isFinite(questionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid question ID' });
+    }
+
+    // Delete the question (CASCADE will handle related records)
+    const result = await pool.query(
+      'DELETE FROM questions WHERE id = $1 AND user_id = $2 RETURNING id',
+      [questionId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Question not found or unauthorized' });
+    }
+
+    return res.json({ success: true, message: 'Question deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting question:', error);
+    return res.status(500).json({ success: false, error: 'Failed to delete question' });
+  }
+});
 
 // GET /api/questions/:questionId/answers
 router.get('/:questionId/answers', async (req, res) => {
@@ -344,3 +479,4 @@ router.get('/:questionId/answers', async (req, res) => {
   }
 });
 
+export default router;

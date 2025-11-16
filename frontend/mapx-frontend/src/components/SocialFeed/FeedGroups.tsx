@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +7,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Star, ChevronDown, ChevronUp, Clock, MapPin, Heart, MessageCircle, Share2 } from 'lucide-react';
 import type { FeedPost as FeedPostType } from '@/services/socialService';
 import { toast } from 'sonner';
+import ContactReveal from '@/components/ContactReveal';
 
 type Props = {
   posts: FeedPostType[];
@@ -14,6 +16,7 @@ type Props = {
 };
 
 const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta }) => {
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const { orderKeys, keyToPosts } = useMemo(() => {
@@ -82,16 +85,47 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                           (displayPost?.content_data as any)?.service_address ||
                           (displayPost?.content_data as any)?.address;
           
-          // Extract labels from the post description or use default labels
+          // Extract labels from all posts in the group
           const getLabels = () => {
-            if (displayPost?.labels && displayPost.labels.length > 0) {
-              return displayPost.labels.slice(0, 3);
+            const allLabels = new Set<string>();
+            // Collect labels from all posts in the group
+            group.forEach(post => {
+              if (post.labels && Array.isArray(post.labels)) {
+                post.labels.forEach(label => allLabels.add(label));
+              }
+            });
+            const labelsArray = Array.from(allLabels);
+            if (labelsArray.length > 0) {
+              return labelsArray.slice(0, 6); // Show up to 6 labels
             }
             // Fallback to service type labels
             if (isService) {
               return ['service provider', 'professional'];
             }
             return ['local business', 'recommended'];
+          };
+          
+          // Get contact info for services
+          const getContactInfo = () => {
+            if (!isService) return { phone: undefined, email: undefined };
+            // Try to get contact info from displayPost first, then from other posts in the group
+            let contactPhone = displayPost?.content_data?.contact_info?.phone || displayPost?.content_data?.phone;
+            let contactEmail = displayPost?.content_data?.contact_info?.email || displayPost?.content_data?.email;
+            
+            // If not found in displayPost, search other posts
+            if (!contactPhone || !contactEmail) {
+              for (const post of group) {
+                if (!contactPhone && (post.content_data?.contact_info?.phone || post.content_data?.phone)) {
+                  contactPhone = post.content_data?.contact_info?.phone || post.content_data?.phone;
+                }
+                if (!contactEmail && (post.content_data?.contact_info?.email || post.content_data?.email)) {
+                  contactEmail = post.content_data?.contact_info?.email || post.content_data?.email;
+                }
+                if (contactPhone && contactEmail) break; // Found both, stop searching
+              }
+            }
+            
+            return { phone: contactPhone, email: contactEmail };
           };
 
           // Format date helper
@@ -127,7 +161,7 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                 <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <h3 className="text-xl font-semibold text-gray-900 mb-3">{serviceName}</h3>
-                      <div className="flex items-center gap-3 text-sm text-gray-600">
+                      <div className="flex items-center gap-3 text-sm text-gray-600 flex-wrap">
                         <div className="flex items-center gap-1">
                           {Array.from({ length: 5 }, (_, i) => (
                             <Star 
@@ -148,6 +182,24 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                             </div>
                           </>
                         )}
+                        {isService && (() => {
+                          const contactInfo = getContactInfo();
+                          if (contactInfo.phone || contactInfo.email) {
+                            return (
+                              <>
+                                <span className="text-gray-400">•</span>
+                                <ContactReveal
+                                  contact={contactInfo}
+                                  className="relative flex-shrink-0"
+                                  buttonClassName="h-5 w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
+                                  iconClassName="h-3.5 w-3.5"
+                                  align="right"
+                                />
+                              </>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                     </div>
                     <Badge variant="secondary" className="bg-blue-50 text-blue-700 text-xs px-2 py-1 font-medium border-blue-200">
@@ -180,7 +232,10 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                 {/* Featured Review */}
                 {displayPost && (
                   <div className="p-6">
-                    <div className="bg-gray-50/50 rounded-lg p-4 border border-gray-100">
+                    <div 
+                      className="bg-gray-50/50 rounded-lg p-4 border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
+                      onClick={() => displayPost.recommendation_id && navigate(`/post/${displayPost.recommendation_id}`)}
+                    >
                       <div className="flex items-start gap-3 mb-3">
                         <Avatar className="h-8 w-8 flex-shrink-0">
                           <AvatarImage src={displayPost.user_picture} />
@@ -310,8 +365,9 @@ const FeedGroups: React.FC<Props> = ({ posts, recIdToGroupKey, groupKeyToMeta })
                             initial={{ opacity: 0, y: 10 }} 
                             animate={{ opacity: 1, y: 0 }} 
                             transition={{ duration: 0.2, delay: postIndex * 0.05 }}
-                              className="bg-gray-50/30 rounded-lg p-4 border border-gray-100"
-                            >
+                            className="bg-gray-50/30 rounded-lg p-4 border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
+                            onClick={() => post.recommendation_id && navigate(`/post/${post.recommendation_id}`)}
+                          >
                               <div className="flex items-start gap-3 mb-3">
                                 <Avatar className="h-7 w-7 flex-shrink-0">
                                   <AvatarImage src={post.user_picture} />

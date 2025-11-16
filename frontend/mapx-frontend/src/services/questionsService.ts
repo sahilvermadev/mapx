@@ -35,6 +35,13 @@ export interface CreateQuestionPayload {
   metadata?: Record<string, any>;
 }
 
+export interface UpdateQuestionPayload {
+  text?: string;
+  visibility?: 'public' | 'friends';
+  labels?: string[];
+  metadata?: Record<string, any>;
+}
+
 export const questionsApi = {
   createQuestion: async (payload: CreateQuestionPayload): Promise<ApiResponse<{ id: number; created_at: string }>> => {
     const res = await apiClient.post('/questions', payload);
@@ -50,6 +57,14 @@ export const questionsApi = {
   listQuestions: async (params?: { limit?: number; cursorCreatedAt?: string; cursorId?: number }): Promise<ApiResponse<QuestionDto[]>> => {
     const res = await apiClient.get('/questions', { params });
     return res.data as ApiResponse<QuestionDto[]>;
+  },
+  updateQuestion: async (questionId: number, payload: UpdateQuestionPayload): Promise<boolean> => {
+    const res = await apiClient.put(`/questions/${questionId}`, payload);
+    return res.success;
+  },
+  deleteQuestion: async (questionId: number): Promise<boolean> => {
+    const res = await apiClient.delete(`/questions/${questionId}`);
+    return res.success;
   },
 };
 

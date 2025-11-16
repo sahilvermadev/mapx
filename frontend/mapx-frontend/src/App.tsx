@@ -18,6 +18,7 @@ const FriendsPage = lazy(() => import('./pages/FriendsPage'));
 const RecommendationComposerPage = lazy(() => import('./pages/RecommendationComposerPage'));
 const PostPage = lazy(() => import('./pages/PostPage'));
 const QuestionPage = lazy(() => import('./pages/QuestionPage'));
+const AskQuestionPage = lazy(() => import('./pages/AskQuestionPage'));
 
 // Fast loading component
 const LoadingSkeleton: React.FC = () => (
@@ -172,6 +173,7 @@ const AppContent: React.FC = () => {
               <Route path="/compose" element={<RecommendationComposerPage />} />
               <Route path="/post/:recommendationId" element={<PostPage />} />
               <Route path="/question/:id" element={<QuestionPage />} />
+              <Route path="/ask" element={<AskQuestionPage />} />
             </Routes>
           </Suspense>
         </div>

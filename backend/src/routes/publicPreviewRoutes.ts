@@ -15,13 +15,27 @@ router.get('/recommendations/:id', async (req, res) => {
          r.id as recommendation_id,
          r.title, r.description, r.rating, r.created_at,
          r.content_type,
-         p.name as place_name, p.address as place_address,
-         u.id as user_id, u.display_name as user_name, u.profile_picture_url as user_picture,
+         r.content_data,
+         r.labels,
+         r.metadata,
+         p.id as place_id,
+         p.name as place_name, 
+         p.address as place_address,
+         p.lat as place_lat,
+         p.lng as place_lng,
+         p.google_place_id,
+         s.id as service_id,
+         s.name as service_name,
+         s.address as service_address,
+         u.id as user_id, 
+         u.display_name as user_name, 
+         u.profile_picture_url as user_picture,
          0::int as likes_count,
          '0'::text as comments_count,
          false as is_liked_by_current_user
        FROM recommendations r
        LEFT JOIN places p ON r.place_id = p.id
+       LEFT JOIN services s ON r.service_id = s.id
        LEFT JOIN users u ON r.user_id = u.id
        WHERE r.id = $1`,
       [id]

@@ -380,6 +380,30 @@ export async function getAnnotationLikesCount(annotationId: number): Promise<num
   }
 }
 
+export async function getUserLikedPostsCount(userId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(DISTINCT al.recommendation_id) as count
+      FROM annotation_likes al
+      JOIN recommendations r ON al.recommendation_id = r.id
+      JOIN places p ON r.place_id = p.id
+      JOIN users u ON r.user_id = u.id
+      WHERE al.user_id = $1
+      AND r.visibility IN ('public', 'friends')
+      AND NOT EXISTS (
+        SELECT 1 FROM user_blocks 
+        WHERE (blocker_id = $1 AND blocked_id = r.user_id) 
+        OR (blocker_id = r.user_id AND blocked_id = $1)
+      )`,
+      [userId]
+    );
+    return parseInt(result.rows[0].count) || 0;
+  } catch (error) {
+    console.error('Error getting user liked posts count:', error);
+    throw error;
+  }
+}
+
 export async function getUserLikedPosts(userId: string, limit: number = 20, offset: number = 0): Promise<any[]> {
   try {
     const result = await pool.query(

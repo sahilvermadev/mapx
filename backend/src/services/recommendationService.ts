@@ -331,8 +331,8 @@ export class RecommendationService {
   /**
    * Determine the final content type
    */
-  private determineContentType(request: SaveRecommendationRequest): 'place' | 'service' | 'tip' | 'contact' | 'unclear' {
-    if (request.content_type && ['place', 'service', 'tip', 'contact', 'unclear'].includes(request.content_type)) {
+  private determineContentType(request: SaveRecommendationRequest): 'place' | 'service' | 'unclear' {
+    if (request.content_type && ['place', 'service', 'unclear'].includes(request.content_type)) {
       return request.content_type;
     }
     

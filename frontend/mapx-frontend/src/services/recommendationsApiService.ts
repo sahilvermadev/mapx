@@ -91,6 +91,11 @@ export interface SearchRecommendation {
   created_at: string;
 }
 
+export interface SearchQnA {
+  questions: Array<{ id: number; score?: number }>;
+  answers: Array<{ id: number; recommendation_id: number; score?: number }>;
+}
+
 export type SearchResult =
   | {
       type: 'place';
@@ -120,6 +125,7 @@ export interface SearchResponse {
   query: string;
   summary: string;
   results: SearchResult[];
+  qna?: SearchQnA;
   total_places: number;
   total_recommendations: number;
   search_metadata: {
@@ -267,9 +273,11 @@ export const recommendationsApi = {
 
   /**
    * Delete a recommendation
+   * Note: userId parameter is kept for backward compatibility but not sent to server
+   * Server uses authenticated user ID from JWT token
    */
   async deleteRecommendation(annotationId: number, userId: string): Promise<boolean> {
-    const response = await apiClient.delete(`/recommendations/${annotationId}`, { user_id: userId });
+    const response = await apiClient.delete(`/recommendations/${annotationId}`);
     return response.success;
   },
 

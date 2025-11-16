@@ -49,7 +49,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { user, isAuthenticated } = useAuth();
   const [theme, setThemeState] = useState<ThemeName>(() => {
     const stored = (typeof window !== 'undefined') ? (localStorage.getItem(THEME_STORAGE_KEY) as ThemeName | null) : null;
-    return stored && THEMES[stored] ? stored : 'neo-brutal';
+    return stored && THEMES[stored] ? stored : 'monochrome';
   });
 
   // Load user's theme preference when they log in

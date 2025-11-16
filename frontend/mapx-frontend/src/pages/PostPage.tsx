@@ -91,7 +91,7 @@ const PostPage: React.FC = () => {
         }}
       />
       {/* Content layer */}
-      <div className="relative z-10 w-full max-w-2xl p-4">
+      <div className="relative z-10 w-full max-w-4xl p-4 md:p-6">
         {!isAuthenticated && (
           <LandingHeader
             variant="dark"
@@ -136,21 +136,19 @@ const PostPage: React.FC = () => {
 
         {/* Post Content */}
         {post && !loading && !error && (
-          <Card className={`p-6 shadow-sm border border-white/40 bg-white/90 ${bgReady ? 'backdrop-blur-sm' : ''}`}>
-            <div className="w-full flex justify-center">
-              <div className="w-full max-w-xl">
-                {post && (
-                  <FeedPost
-                    post={post}
-                    currentUserId={isAuthenticated && currentUser ? currentUser.id : undefined}
-                    noOuterSpacing
-                    readOnly={!isAuthenticated}
-                    onPostUpdate={() => {
-                      window.location.reload();
-                    }}
-                  />
-                )}
-              </div>
+          <Card className={`p-8 md:p-10 lg:p-12 shadow-sm border border-white/40 bg-white/90 ${bgReady ? 'backdrop-blur-sm' : ''}`}>
+            <div className="w-full">
+              {post && (
+                <FeedPost
+                  post={post}
+                  currentUserId={isAuthenticated && currentUser ? currentUser.id : undefined}
+                  noOuterSpacing
+                  readOnly={!isAuthenticated}
+                  onPostUpdate={() => {
+                    window.location.reload();
+                  }}
+                />
+              )}
             </div>
           </Card>
         )}

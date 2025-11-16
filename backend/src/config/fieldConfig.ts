@@ -27,7 +27,7 @@ export interface FieldConfig {
  * Field configuration per content type
  * This is the single source of truth for field filtering logic
  */
-export const FIELD_CONFIG: Record<ContentType, FieldConfig> = {
+export const FIELD_CONFIG: Partial<Record<ContentType, FieldConfig>> = {
   [CONTENT_TYPES.PLACE]: {
     allowed: [
       'name',
@@ -85,49 +85,6 @@ export const FIELD_CONFIG: Record<ContentType, FieldConfig> = {
       location_name: 'location',
     },
   },
-  [CONTENT_TYPES.TIP]: {
-    allowed: [
-      'name',
-      'description',
-      'location',
-      'category',
-    ] as const,
-    required: [] as const,
-    forbidden: [
-      'contact_info',
-      'phone',
-      'email',
-      'tips',
-      'best_times',
-      'best_time',
-    ] as const,
-    aliases: {
-      location_address: 'location',
-      address: 'location',
-      location_name: 'location',
-    },
-  },
-  [CONTENT_TYPES.CONTACT]: {
-    allowed: [
-      'name',
-      'contact_info',
-      'description',
-      'category',
-    ] as const,
-    required: ['contact_info'] as const,
-    forbidden: [
-      'tips',
-      'best_times',
-      'best_time',
-      'location',
-      'location_address',
-      'address',
-    ] as const,
-    aliases: {
-      phone: 'contact_info',
-      email: 'contact_info',
-    },
-  },
   [CONTENT_TYPES.UNCLEAR]: {
     allowed: [
       'name',
@@ -150,6 +107,7 @@ export const FIELD_CONFIG: Record<ContentType, FieldConfig> = {
  */
 export function isFieldAllowed(field: string, contentType: ContentType): boolean {
   const config = FIELD_CONFIG[contentType];
+  if (!config) return false;
   const canonicalField = normalizeFieldName(field, contentType);
   return config.allowed.includes(canonicalField as any);
 }
@@ -159,6 +117,7 @@ export function isFieldAllowed(field: string, contentType: ContentType): boolean
  */
 export function isFieldRequired(field: string, contentType: ContentType): boolean {
   const config = FIELD_CONFIG[contentType];
+  if (!config) return false;
   const canonicalField = normalizeFieldName(field, contentType);
   return config.required.includes(canonicalField as any);
 }
@@ -168,6 +127,7 @@ export function isFieldRequired(field: string, contentType: ContentType): boolea
  */
 export function isFieldForbidden(field: string, contentType: ContentType): boolean {
   const config = FIELD_CONFIG[contentType];
+  if (!config) return false;
   const canonicalField = normalizeFieldName(field, contentType);
   return config.forbidden.includes(canonicalField as any);
 }
@@ -177,7 +137,7 @@ export function isFieldForbidden(field: string, contentType: ContentType): boole
  */
 export function normalizeFieldName(field: string, contentType: ContentType): string {
   const config = FIELD_CONFIG[contentType];
-  if (config.aliases && config.aliases[field]) {
+  if (config?.aliases && config.aliases[field]) {
     return config.aliases[field];
   }
   return field;
@@ -201,6 +161,7 @@ export function getMissingRequiredFields(
   contentType: ContentType
 ): string[] {
   const config = FIELD_CONFIG[contentType];
+  if (!config) return [];
   const missing: string[] = [];
 
   for (const requiredField of config.required) {
@@ -221,6 +182,17 @@ function checkFieldExists(
   data: Record<string, any>,
   contentType: ContentType
 ): boolean {
+  // Special handling for contact_info (check nested and flat structures)
+  // This must come FIRST to avoid treating empty objects as valid
+  if (field === 'contact_info') {
+    const phone = data.contact_info?.phone || data.phone || data.service_phone;
+    const email = data.contact_info?.email || data.email || data.service_email;
+    // Only return true if we have a valid (non-empty) phone or email
+    const hasValidPhone = phone && typeof phone === 'string' && phone.trim().length > 0;
+    const hasValidEmail = email && typeof email === 'string' && email.trim().length > 0;
+    return !!(hasValidPhone || hasValidEmail);
+  }
+
   const value = data[field];
   if (value !== undefined && value !== null && String(value).trim().length > 0) {
     return true;
@@ -228,7 +200,7 @@ function checkFieldExists(
 
   // Check aliases
   const config = FIELD_CONFIG[contentType];
-  if (config.aliases) {
+  if (config?.aliases) {
     for (const [alias, canonical] of Object.entries(config.aliases)) {
       if (canonical === field) {
         const aliasValue = data[alias];
@@ -257,13 +229,6 @@ function checkFieldExists(
       data.place_name ||
       data.service_name
     );
-  }
-
-  // Special handling for contact_info (check nested and flat structures)
-  if (field === 'contact_info') {
-    const phone = data.contact_info?.phone || data.phone || data.service_phone;
-    const email = data.contact_info?.email || data.email || data.service_email;
-    return !!(phone || email);
   }
 
   return false;

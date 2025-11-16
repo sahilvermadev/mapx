@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
-import { Heart, MessageCircle, MapPin, Star, Share2, Edit2, Trash2, X, Save, MoreVertical } from 'lucide-react';
+import { Heart, MessageCircle, MapPin, Star, Share2, Edit2, Trash2, X, Save, MoreVertical, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
@@ -20,12 +20,14 @@ import { recommendationsApi } from '@/services/recommendationsApiService';
 import { toast } from 'sonner';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
+import { CURATED_LABELS, MAX_LABEL_LENGTH } from '@/components/composer/constants';
+import { getTagInlineStyles } from '@/utils/themeUtils';
 
 // Types
 interface FeedPostProps {
   post?: FeedPostType;
   currentUserId?: string;
-  onPostUpdate?: () => void;
+  onPostUpdate?: (deletedPostId?: number) => void;
   noOuterSpacing?: boolean;
   isLoading?: boolean;
   readOnly?: boolean;
@@ -131,7 +133,14 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const [editDescription, setEditDescription] = useState(post.description || '');
   const [editRating, setEditRating] = useState(post.rating || 0);
   const [editVisibility, setEditVisibility] = useState<'friends' | 'public'>((post.visibility as 'friends' | 'public') || 'public');
-  const [editLabels, setEditLabels] = useState<string>(post.labels?.join(', ') || '');
+  const [editLabels, setEditLabels] = useState<string[]>(post.labels || []);
+  const [showLabelPicker, setShowLabelPicker] = useState<boolean>(false);
+  const [labelSearch, setLabelSearch] = useState<string>('');
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(Object.keys(CURATED_LABELS)));
+  const [customLabel, setCustomLabel] = useState<string>('');
+  
+  // Get tag inline styles for theme
+  const tagInlineStyles = React.useMemo(() => getTagInlineStyles(theme), [theme]);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -296,12 +305,73 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     }
   };
 
+  // Label management functions
+  const filteredLabelEntries = React.useMemo(() => {
+    const query = labelSearch.trim().toLowerCase();
+    if (!query) {
+      return Object.entries(CURATED_LABELS);
+    }
+
+    return Object.entries(CURATED_LABELS)
+      .map(([category, labelList]) => {
+        const filtered = labelList.filter(label =>
+          label.toLowerCase().includes(query)
+        );
+        return [category, filtered] as [string, string[]];
+      })
+      .filter(([, labels]) => labels.length > 0);
+  }, [labelSearch]);
+
+  const toggleLabel = React.useCallback((label: string) => {
+    const normalizedLabel = label.trim();
+    const isSelected = editLabels.some(l => l.toLowerCase() === normalizedLabel.toLowerCase());
+    
+    if (isSelected) {
+      setEditLabels(prev => prev.filter(l => l.toLowerCase() !== normalizedLabel.toLowerCase()));
+    } else {
+      setEditLabels(prev => [...prev, normalizedLabel]);
+    }
+  }, [editLabels]);
+
+  const removeLabel = React.useCallback((labelToRemove: string) => {
+    setEditLabels(prev => prev.filter(l => l !== labelToRemove));
+  }, []);
+
+  const toggleCategory = React.useCallback((category: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+      } else {
+        newSet.add(category);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const addCustomLabel = React.useCallback(() => {
+    const value = customLabel.trim();
+    if (!value) return;
+    
+    const normalized = value.replace(/\s+/g, ' ').slice(0, MAX_LABEL_LENGTH);
+    const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    
+    const exists = editLabels.some(l => l.toLowerCase() === capitalized.toLowerCase());
+    if (exists) {
+      setCustomLabel('');
+      return;
+    }
+    
+    setEditLabels(prev => [...prev, capitalized]);
+    setCustomLabel('');
+  }, [customLabel, editLabels]);
+
   const handleStartEdit = () => {
     setEditTitle(postData.title || '');
     setEditDescription(postData.description || '');
     setEditRating(postData.rating || 0);
     setEditVisibility((postData.visibility as 'friends' | 'public') || 'public');
-    setEditLabels(postData.labels?.join(', ') || '');
+    setEditLabels(postData.labels || []);
     setIsEditing(true);
   };
 
@@ -311,7 +381,10 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     setEditDescription(postData.description || '');
     setEditRating(postData.rating || 0);
     setEditVisibility((postData.visibility as 'friends' | 'public') || 'public');
-    setEditLabels(postData.labels?.join(', ') || '');
+    setEditLabels(postData.labels || []);
+    setShowLabelPicker(false);
+    setLabelSearch('');
+    setCustomLabel('');
   };
 
   const handleSaveEdit = async () => {
@@ -321,10 +394,6 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     let toastShown = false;
     
     try {
-      const labelsArray = editLabels.trim() 
-        ? editLabels.split(',').map(l => l.trim()).filter(l => l.length > 0)
-        : undefined;
-
       const updates: any = {
         description: editDescription,
         rating: editRating,
@@ -335,8 +404,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         updates.title = editTitle.trim();
       }
 
-      if (labelsArray && labelsArray.length > 0) {
-        updates.labels = labelsArray;
+      if (editLabels && editLabels.length > 0) {
+        updates.labels = editLabels;
       }
 
       const success = await recommendationsApi.updateRecommendation(
@@ -352,7 +421,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           description: editDescription,
           rating: editRating,
           visibility: editVisibility,
-          labels: labelsArray || prev.labels,
+          labels: editLabels || prev.labels,
         }));
         setIsEditing(false);
         toastShown = true;
@@ -392,27 +461,42 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     
     setShowDeleteConfirm(false);
     setIsDeleting(true);
+    const postId = postData.recommendation_id;
+    
     try {
       const success = await recommendationsApi.deleteRecommendation(
-        postData.recommendation_id,
+        postId,
         effectiveUserId
       );
 
       if (success) {
         toast.success('Recommendation deleted successfully');
         // Call onPostUpdate if provided to refresh the list
+        // Pass the post ID for optimistic UI updates
         if (onPostUpdate) {
-          onPostUpdate();
+          try {
+            // onPostUpdate handles cache invalidation and optimistic updates
+            // If it fails, it will rollback the optimistic update internally
+            await onPostUpdate(postId);
+          } catch (error) {
+            // onPostUpdate failed (e.g., refetch failed)
+            // The callback should handle rollback internally, but we show an error
+            console.error('Error in onPostUpdate callback:', error);
+            toast.error('Post deleted but failed to refresh. Please refresh the page.');
+          }
         } else {
           // If no callback, remove from view by setting post to null
           setPostData(null as any);
         }
       } else {
+        // API returned success: false
         toast.error('Failed to delete recommendation');
       }
     } catch (error) {
+      // API call failed (network error, etc.)
       console.error('Failed to delete recommendation:', error);
-      toast.error('Failed to delete recommendation');
+      toast.error('Failed to delete recommendation. Please try again.');
+      // Note: onPostUpdate is not called, so no optimistic update was made
     } finally {
       setIsDeleting(false);
     }
@@ -425,7 +509,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   // Render components
   const renderRatingBadge = () => (
-    <div className="flex items-center gap-2 mb-3 md:mb-4">
+    <div className="flex items-center gap-2 mb-2">
       <div className="flex items-center gap-0.5">
         {renderStars(postData.rating)}
       </div>
@@ -444,10 +528,10 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           <Button
             variant="ghost"
             size="sm"
-            className="absolute top-4 right-4 md:top-6 md:right-6 z-20 h-9 w-9 md:h-10 md:w-10 p-0 bg-transparent hover:bg-gray-50 transition-all rounded-none"
+            className="absolute top-3 right-3 md:top-4 md:right-4 z-20 h-7 w-7 md:h-8 md:w-8 p-0 bg-transparent hover:bg-gray-50 transition-all rounded-none"
             aria-label="More options"
           >
-            <MoreVertical className="h-4 w-4 md:h-5 md:w-5" strokeWidth={1.5} />
+            <MoreVertical className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40 border-[1.5px] border-black" style={{ boxShadow: '3px 3px 0 0 #000' }}>
@@ -473,7 +557,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     if (!isEditing) return null;
 
     return (
-      <div className="flex items-center gap-2 mb-3 md:mb-4">
+      <div className="flex items-center gap-2 mb-2">
         <div className="flex items-center gap-0.5">
           {[1, 2, 3, 4, 5].map((rating) => (
             <button
@@ -531,67 +615,63 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         className: 'md:truncate'
       });
 
-      const labelsArray = editLabels.trim() 
-        ? editLabels.split(',').map(l => l.trim()).filter(l => l.length > 0)
-        : [];
-
       return (
-        <div className="flex items-start gap-4 md:gap-5 pr-24 md:pr-36">
+        <div className="flex items-start gap-3 md:gap-4 pr-24 md:pr-36">
           <button
             onClick={() => navigate(`/profile/${postData.user_id}`)}
             className="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
             aria-label={`View ${userDisplay.name}'s profile`}
           >
-            <Avatar className="h-12 w-12 md:h-14 md:w-14">
+            <Avatar className="h-10 w-10 md:h-12 md:w-12">
               <AvatarImage src={getProxiedImageUrl(postData.user_picture)} alt={userDisplay.name} />
               <AvatarFallback className="text-sm md:text-base font-semibold">{getUserInitials({ displayName: postData.user_name })}</AvatarFallback>
             </Avatar>
           </button>
 
           <div className="flex-1 min-w-0">
-            <div className="mb-3 md:mb-4">
+            <div className="mb-2">
               <div className="flex items-center gap-2 md:gap-2.5 flex-wrap">
                 <button
                   onClick={() => navigate(`/profile/${postData.user_id}`)}
-                  className="font-bold text-sm md:text-base hover:underline cursor-pointer focus:outline-none focus:underline tracking-tight"
+                  className="font-bold text-xs md:text-sm hover:underline cursor-pointer focus:outline-none focus:underline tracking-tight"
                   aria-label={`View ${userDisplay.name}'s profile`}
                 >
                   {userDisplay.name}
                 </button>
                 {userDisplay.subtitle && (
-                  <span className="text-sm md:text-base text-muted-foreground font-medium">{userDisplay.subtitle}</span>
+                  <span className="text-xs md:text-sm text-muted-foreground font-medium">{userDisplay.subtitle}</span>
                 )}
                 {postData.place_name ? (
                   <>
-                    <span className="text-sm md:text-base text-muted-foreground font-medium"> rated </span>
-                    <span className="font-bold text-sm md:text-base tracking-tight">{postData.place_name}</span>
+                    <span className="text-xs md:text-sm text-muted-foreground font-medium"> rated </span>
+                    <span className="font-bold text-xs md:text-sm tracking-tight">{postData.place_name}</span>
                   </>
                 ) : editTitle ? (
                   <>
-                    <span className="text-sm md:text-base text-muted-foreground font-medium"> recommended </span>
+                    <span className="text-xs md:text-sm text-muted-foreground font-medium"> recommended </span>
                     <Input
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       placeholder="Title..."
-                      className="inline-block w-auto min-w-[100px] max-w-[200px] h-auto py-0 px-2 text-sm md:text-base font-bold border-b-[1.5px] border-dashed border-black/30 focus:border-black focus:outline-none bg-transparent rounded-none"
+                      className="inline-block w-auto min-w-[100px] max-w-[200px] h-auto py-0 px-2 text-xs md:text-sm font-bold border-b-[1.5px] border-dashed border-black/30 focus:border-black focus:outline-none bg-transparent rounded-none"
                     />
                   </>
                 ) : (
                   <>
-                    <span className="text-sm md:text-base text-muted-foreground font-medium"> recommended </span>
+                    <span className="text-xs md:text-sm text-muted-foreground font-medium"> recommended </span>
                     <Input
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       placeholder="Add title..."
-                      className="inline-block w-auto min-w-[100px] max-w-[200px] h-auto py-0 px-2 text-sm md:text-base font-bold border-b-[1.5px] border-dashed border-black/30 focus:border-black focus:outline-none bg-transparent rounded-none"
+                      className="inline-block w-auto min-w-[100px] max-w-[200px] h-auto py-0 px-2 text-xs md:text-sm font-bold border-b-[1.5px] border-dashed border-black/30 focus:border-black focus:outline-none bg-transparent rounded-none"
                     />
                   </>
                 )}
-                <span className="text-sm md:text-base text-muted-foreground">•</span>
-                <span className="text-sm md:text-base text-muted-foreground font-medium">{formatDate(postData.created_at)}</span>
-                <span className="text-sm md:text-base text-muted-foreground ml-1">•</span>
+                <span className="text-xs md:text-sm text-muted-foreground">•</span>
+                <span className="text-xs md:text-sm text-muted-foreground font-medium">{formatDate(postData.created_at)}</span>
+                <span className="text-xs md:text-sm text-muted-foreground ml-1">•</span>
                 <Select value={editVisibility} onValueChange={(value: 'friends' | 'public') => setEditVisibility(value)}>
-                  <SelectTrigger className="h-auto w-auto p-0 border-0 shadow-none text-sm md:text-base text-muted-foreground hover:text-foreground font-medium">
+                  <SelectTrigger className="h-auto w-auto p-0 border-0 shadow-none text-xs md:text-sm text-muted-foreground hover:text-foreground font-medium">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="border-[1.5px] border-black" style={{ boxShadow: '3px 3px 0 0 #000' }}>
@@ -603,7 +683,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             </div>
 
             {address && (
-              <div className="flex items-center gap-2 md:gap-2.5 text-[10px] md:text-xs text-muted-foreground mb-4 font-medium">
+              <div className="flex items-center gap-2 md:gap-2.5 text-[10px] md:text-xs text-muted-foreground mb-2 font-medium">
                 <MapPin className="h-3 w-3 md:h-3.5 md:w-3.5 flex-shrink-0" strokeWidth={1.5} />
                 <span {...locationProps} className="truncate">
                   {address}
@@ -622,66 +702,213 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
             {renderEditableRatingBadge()}
 
-            <div className="mb-4 md:mb-5">
+            <div className="mb-2">
               <Textarea
                 value={editDescription}
                 onChange={(e) => setEditDescription(e.target.value)}
                 placeholder="Add a description..."
-                className="w-full text-xs md:text-sm leading-relaxed border-[1.5px] border-dashed border-black/30 focus:border-black focus:ring-0 resize-none min-h-[80px] bg-transparent rounded-none font-medium"
+                className="w-full text-xs leading-relaxed border-[1.5px] border-dashed border-black/30 focus:border-black focus:ring-0 resize-none min-h-[60px] bg-transparent rounded-none font-medium"
                 style={{ boxShadow: '2px 2px 0 0 rgba(0,0,0,0.1)' }}
                 required
               />
             </div>
 
-            <div className="mb-4 md:mb-5">
-              <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-                <Input
-                  value={editLabels}
-                  onChange={(e) => setEditLabels(e.target.value)}
-                  placeholder="Add labels (comma-separated)..."
-                  className="inline-block w-auto min-w-[150px] max-w-[300px] h-auto py-1.5 px-3 text-xs md:text-sm border-[1.5px] border-dashed border-black/30 focus:border-black focus:outline-none bg-transparent rounded-none font-medium"
-                  style={{ boxShadow: '2px 2px 0 0 rgba(0,0,0,0.1)' }}
-                />
-                {labelsArray.length > 0 && (
-                  <>
-                    {labelsArray.slice(0, 6).map((label: string, i: number) => (
-                      <span 
-                        key={i} 
-                        className="inline-flex items-center px-2.5 md:px-3 py-1 md:py-1.5 text-xs font-medium rounded-md cursor-default"
-                        style={{
-                          background: tagBackground,
-                          color: tagStyle.textColor,
-                          border: `${tagStyle.borderWidth || '1px'} solid ${tagStyle.borderColor || 'rgba(0, 0, 0, 0.1)'}`,
-                          boxShadow: tagStyle.shadow === 'none' ? 'none' : (tagStyle.shadow || 'none'),
-                        }}
-                      >
-                        {label}
-                      </span>
-                    ))}
-                    {labelsArray.length > 6 && (
-                      <span 
-                        className="inline-flex items-center px-2.5 md:px-3 py-1 md:py-1.5 text-xs font-medium rounded-md"
-                        style={{
-                          background: tagBackground,
-                          color: tagStyle.textColor,
-                          border: `${tagStyle.borderWidth || '1px'} solid ${tagStyle.borderColor || 'rgba(0, 0, 0, 0.1)'}`,
-                          boxShadow: tagStyle.shadow === 'none' ? 'none' : (tagStyle.shadow || 'none'),
-                        }}
-                      >
-                        +{labelsArray.length - 6} more
-                      </span>
-                    )}
-                  </>
-                )}
+            {/* Labels */}
+            <div className="mb-2">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {editLabels.length > 0 && (
+                    <>
+                      {editLabels.map((label: string, i: number) => (
+                        <span 
+                          key={i} 
+                          className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md"
+                          style={tagInlineStyles}
+                        >
+                          {label}
+                          <button
+                            type="button"
+                            onClick={() => removeLabel(label)}
+                            className="ml-1.5 text-xs hover:opacity-70"
+                            aria-label={`Remove ${label}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowLabelPicker(!showLabelPicker)}
+                    className="h-7 px-2 text-xs border-[1.5px] border-dashed border-black/30 hover:border-black rounded-none"
+                    style={{ boxShadow: '2px 2px 0 0 rgba(0,0,0,0.1)' }}
+                  >
+                    {showLabelPicker ? 'Hide Labels' : '+ Add Labels'}
+                  </Button>
+                </div>
               </div>
+
+              {/* Label Picker Panel */}
+              <AnimatePresence initial={false}>
+                {showLabelPicker && (
+                  <motion.div
+                    key="label-picker"
+                    initial={{ opacity: 0, y: -12, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: -8, height: 0 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                    className="overflow-hidden mt-2"
+                  >
+                    <motion.div
+                      layout
+                      transition={{ duration: 0.25, ease: 'easeOut' }}
+                      className="rounded-md border border-black/20 bg-white shadow-sm"
+                    >
+                      {/* Header */}
+                      <motion.div
+                        layout="position"
+                        className="sticky top-0 z-10 flex flex-col gap-3 border-b bg-white p-3 md:flex-row md:items-center md:justify-between"
+                      >
+                        <motion.h3
+                          layout="position"
+                          initial={{ opacity: 0, y: -6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2, delay: 0.05 }}
+                          className="text-xs font-semibold text-gray-900"
+                        >
+                          Select Labels
+                        </motion.h3>
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                          <Input
+                            value={labelSearch}
+                            onChange={(e) => setLabelSearch(e.target.value)}
+                            placeholder="Search labels..."
+                            className="h-7 w-full md:w-48 text-xs"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowLabelPicker(false)}
+                            className="h-7 w-full md:w-7 md:p-0"
+                            aria-label="Close label picker"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </motion.div>
+
+                      {/* Categories */}
+                      <div className="max-h-[40vh] overflow-y-auto p-3 space-y-3">
+                        {filteredLabelEntries.length > 0 ? (
+                          filteredLabelEntries.map(([category, labelList]) => (
+                            <motion.div key={category} layout className="space-y-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleCategory(category)}
+                                className="flex items-center gap-2 w-full text-left font-semibold text-xs text-foreground hover:text-foreground/80 transition-colors"
+                              >
+                                {expandedCategories.has(category) ? (
+                                  <ChevronDown className="h-3.5 w-3.5" />
+                                ) : (
+                                  <ChevronUp className="h-3.5 w-3.5" />
+                                )}
+                                <span>{category}</span>
+                              </button>
+                              <AnimatePresence initial={false}>
+                                {expandedCategories.has(category) && (
+                                  <motion.div
+                                    key={`${category}-labels`}
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                                    className="flex flex-wrap gap-1.5 pl-5"
+                                  >
+                                    {labelList.map((label: string) => {
+                                      const isSelected = editLabels.some(
+                                        l => l.toLowerCase() === label.toLowerCase()
+                                      );
+                                      return (
+                                        <motion.button
+                                          key={label}
+                                          type="button"
+                                          whileTap={{ scale: 0.96 }}
+                                          onClick={() => toggleLabel(label)}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium transition-all border select-none ${
+                                            isSelected
+                                              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
+                                              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
+                                          }`}
+                                        >
+                                          {label}
+                                        </motion.button>
+                                      );
+                                    })}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </motion.div>
+                          ))
+                        ) : (
+                          <motion.div
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="rounded-md border border-dashed border-black/10 bg-gray-50 p-3 text-xs text-gray-500 text-center"
+                          >
+                            No labels found. Try a different search.
+                          </motion.div>
+                        )}
+                      </div>
+
+                      {/* Footer - Custom Label Input */}
+                      <motion.div
+                        layout="position"
+                        className="sticky bottom-0 flex flex-col gap-2 border-t bg-white p-3"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="text"
+                            value={customLabel}
+                            onChange={(e) => setCustomLabel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addCustomLabel();
+                              }
+                            }}
+                            placeholder="Add custom label..."
+                            className="h-7 text-xs flex-1"
+                            maxLength={MAX_LABEL_LENGTH}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={addCustomLabel}
+                            disabled={!customLabel.trim()}
+                            className="h-7 px-3 text-xs"
+                          >
+                            Add
+                          </Button>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            <div className="flex items-center gap-3 pt-3 border-t-[1.5px] border-black/20 mt-6">
+            <div className="flex items-center gap-2 pt-2 border-t-[1.5px] border-black/20 mt-3">
               <Button
                 onClick={handleSaveEdit}
                 disabled={isSaving || !editDescription.trim()}
                 size="sm"
-                className="h-9 md:h-10 px-4 md:px-5 text-xs md:text-sm font-medium border-[1.5px] border-black rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                className="h-7 md:h-8 px-3 md:px-4 text-xs font-medium border-[1.5px] border-black rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
                 style={{ 
                   backgroundColor: '#000',
                   color: '#fff',
@@ -689,18 +916,18 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                 }}
               >
                 {isSaving ? 'Saving...' : 'Save'}
-                <Save className="h-4 w-4 ml-2" strokeWidth={1.5} />
+                <Save className="h-3.5 w-3.5 ml-1.5" strokeWidth={1.5} />
               </Button>
               <Button
                 onClick={handleCancelEdit}
                 variant="outline"
                 disabled={isSaving}
                 size="sm"
-                className="h-9 md:h-10 px-4 md:px-5 text-xs md:text-sm font-medium border-[1.5px] border-black rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                className="h-7 md:h-8 px-3 md:px-4 text-xs font-medium border-[1.5px] border-black rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
                 style={{ boxShadow: '2px 2px 0 0 #000' }}
               >
                 Cancel
-                <X className="h-4 w-4 ml-2" strokeWidth={1.5} />
+                <X className="h-3.5 w-3.5 ml-1.5" strokeWidth={1.5} />
               </Button>
             </div>
           </div>
@@ -709,44 +936,44 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     }
 
   return (
-    <div className="flex items-start gap-4 md:gap-5 pr-24 md:pr-36">
+    <div className={`flex items-start gap-3 md:gap-4 ${noOuterSpacing ? '' : 'pr-24 md:pr-36'}`}>
         <button
           onClick={() => navigate(`/profile/${postData.user_id}`)}
           className="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
           aria-label={`View ${userDisplay.name}'s profile`}
         >
-          <Avatar className="h-12 w-12 md:h-14 md:w-14">
+          <Avatar className="h-10 w-10 md:h-12 md:w-12">
             <AvatarImage src={getProxiedImageUrl(postData.user_picture)} alt={userDisplay.name} />
             <AvatarFallback className="text-sm md:text-base font-semibold">{getUserInitials({ displayName: postData.user_name })}</AvatarFallback>
           </Avatar>
         </button>
 
-        <div className="flex-1 min-w-0">
-          <div className="mb-3 md:mb-4">
+        <div className={`flex-1 min-w-0 ${noOuterSpacing ? 'max-w-3xl' : ''}`}>
+          <div className="mb-2">
             <div className="flex items-center gap-2 md:gap-2.5 flex-wrap">
               <button
                 onClick={() => navigate(`/profile/${postData.user_id}`)}
-                className="font-bold text-sm md:text-base hover:underline cursor-pointer focus:outline-none focus:underline tracking-tight"
+                className="font-bold text-xs md:text-sm hover:underline cursor-pointer focus:outline-none focus:underline tracking-tight"
                 aria-label={`View ${userDisplay.name}'s profile`}
               >
                 {userDisplay.name}
               </button>
               {userDisplay.subtitle && (
-                <span className="text-sm md:text-base text-muted-foreground font-medium">{userDisplay.subtitle}</span>
+                <span className="text-xs md:text-sm text-muted-foreground font-medium">{userDisplay.subtitle}</span>
               )}
               {postData.place_name ? (
                 <>
-                  <span className="text-sm md:text-base text-muted-foreground font-medium"> rated </span>
-                  <span className="font-bold text-sm md:text-base tracking-tight">{postData.place_name}</span>
+                  <span className="text-xs md:text-sm text-muted-foreground font-medium"> rated </span>
+                  <span className="font-bold text-xs md:text-sm tracking-tight">{postData.place_name}</span>
                 </>
               ) : postData.title ? (
                 <>
-                  <span className="text-sm md:text-base text-muted-foreground font-medium"> recommended </span>
-                  <span className="font-bold text-sm md:text-base tracking-tight">{postData.title}</span>
+                  <span className="text-xs md:text-sm text-muted-foreground font-medium"> recommended </span>
+                  <span className="font-bold text-xs md:text-sm tracking-tight">{postData.title}</span>
                 </>
               ) : null}
-              <span className="text-sm md:text-base text-muted-foreground">•</span>
-              <span className="text-sm md:text-base text-muted-foreground font-medium">{formatDate(postData.created_at)}</span>
+              <span className="text-xs md:text-sm text-muted-foreground">•</span>
+              <span className="text-xs md:text-sm text-muted-foreground font-medium">{formatDate(postData.created_at)}</span>
             </div>
           </div>
 
@@ -754,6 +981,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           let address =
             (postData.content_data && postData.content_data.display_address) ||
             postData.place_address ||
+            (postData as any).service_address ||
             (postData.content_data && (postData.content_data.address || postData.content_data.service_address));
           
           // Handle case where address might be a JSON string (legacy data from bug)
@@ -768,8 +996,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                     .filter(Boolean)
                     .join(', ');
                 } else {
-                  // If we can't parse it meaningfully, try to use place_address or fallback
-                  address = postData.place_address || null;
+                  // If we can't parse it meaningfully, try to use place_address, service_address, or fallback
+                  address = postData.place_address || (postData as any).service_address || null;
                 }
               } catch (e) {
                 // If parsing fails, it's not JSON, use as-is
@@ -800,7 +1028,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           });
           
           return (
-            <div className="flex items-center gap-2 md:gap-2.5 text-[10px] md:text-xs text-muted-foreground mb-4 font-medium">
+            <div className="flex items-center gap-2 md:gap-2.5 text-[10px] md:text-xs text-muted-foreground mb-2 font-medium">
               <MapPin className="h-3 w-3 md:h-3.5 md:w-3.5 flex-shrink-0" strokeWidth={1.5} />
               <span {...locationProps} className="truncate">
                 {address}
@@ -821,8 +1049,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         {renderRatingBadge()}
 
         {(postData.description || (postData as any).notes) && (
-          <div className="mb-4 md:mb-5">
-            <p className="text-xs md:text-sm leading-relaxed font-medium">
+          <div className="mb-2">
+            <p className="text-xs leading-relaxed font-medium">
               {renderWithMentions(postData.description || (postData as any).notes, (userId) => navigate(`/profile/${userId}`))}
             </p>
           </div>
@@ -835,10 +1063,10 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             (Array.isArray(highlights) && highlights.length > 0 && highlights.some(h => h && String(h).trim().length > 0))
           );
           return hasHighlights ? (
-            <div className="mb-4 md:mb-5">
+            <div className="mb-2">
               <div className="flex items-start gap-2">
-                <span className="text-xs md:text-sm text-muted-foreground font-medium min-w-0 flex-shrink-0">Highlights:</span>
-                <span className="text-xs md:text-sm text-foreground font-medium">
+                <span className="text-xs text-muted-foreground font-medium min-w-0 flex-shrink-0">Highlights:</span>
+                <span className="text-xs text-foreground font-medium">
                   {Array.isArray(highlights) ? highlights.filter(h => h && String(h).trim()).join(', ') : highlights}
                 </span>
               </div>
@@ -847,7 +1075,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         })()}
 
         {postData.labels && postData.labels.length > 0 && (
-          <div className="mb-4 md:mb-5">
+          <div className="mb-2">
             <div className="flex items-center gap-2 flex-wrap">
               {postData.labels.slice(0, 6).map((label: string, i: number) => (
                 <span 
@@ -885,37 +1113,37 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 };
 
   const renderInteractionButtons = () => (
-    <div className="flex items-center justify-between mt-4 pt-4">
-      <div className="flex items-center gap-3 md:gap-4">
+    <div className="flex items-center justify-between mt-2 pt-2">
+      <div className="flex items-center gap-1.5 md:gap-2">
         <Button
           variant="ghost"
           size="sm"
           onClick={handleLike}
-          className={`flex items-center gap-2 h-9 md:h-10 px-3 md:px-4 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02] ${
+          className={`flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02] ${
             isLiked ? 'text-red-600' : 'text-foreground'
           }`}
         >
-          <Heart className={`h-4 w-4 md:h-5 md:w-5 ${isLiked ? 'fill-current' : ''}`} strokeWidth={1.5} />
-          <span className="text-xs md:text-sm">{postData.likes_count}</span>
+          <Heart className={`h-3.5 w-3.5 md:h-4 md:w-4 ${isLiked ? 'fill-current' : ''}`} strokeWidth={1.5} />
+          <span className="text-xs">{postData.likes_count}</span>
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
           onClick={handleToggleComments}
-          className="flex items-center gap-2 h-9 md:h-10 px-3 md:px-4 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
+          className="flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
         >
-          <MessageCircle className="h-4 w-4 md:h-5 md:w-5" strokeWidth={1.5} />
-          <span className="text-xs md:text-sm">{postData.comments_count}</span>
+          <MessageCircle className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
+          <span className="text-xs">{postData.comments_count}</span>
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
           onClick={handleShare}
-          className="flex items-center justify-center h-9 w-9 md:h-10 md:w-10 rounded-none transition-all border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
+          className="flex items-center justify-center h-7 w-7 md:h-8 md:w-8 rounded-none transition-all border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
         >
-          <Share2 className="h-4 w-4 md:h-5 md:w-5" strokeWidth={1.5} />
+          <Share2 className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
         </Button>
       </div>
     </div>
@@ -958,22 +1186,22 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   };
 
   const renderComment = (comment: Comment, isReply: boolean = false) => (
-    <div key={comment.id} className={`flex items-start gap-3 md:gap-4 ${isReply ? 'ml-12 md:ml-16' : ''} mb-3`}>
-      <Avatar className="h-8 w-8 md:h-9 md:w-9 flex-shrink-0 mt-0.5 border-[1.5px] border-black/20">
+    <div key={comment.id} className={`flex items-start gap-2 md:gap-3 ${isReply ? 'ml-10 md:ml-12' : ''} mb-2`}>
+      <Avatar className="h-7 w-7 md:h-8 md:w-8 flex-shrink-0 mt-0.5 border-[1.5px] border-black/20">
         <AvatarImage src={getProxiedImageUrl(comment.user_picture)} alt={comment.user_name || 'User'} />
-        <AvatarFallback className="text-xs md:text-sm font-semibold">
+        <AvatarFallback className="text-xs font-semibold">
           {getUserInitials({ displayName: comment.user_name || 'User' })}
         </AvatarFallback>
       </Avatar>
       
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-xs md:text-sm font-bold tracking-tight">{comment.user_name || 'Anonymous User'}</span>
-          <span className="text-xs md:text-sm text-foreground font-medium">{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
+        <div className="flex items-baseline gap-1.5 mb-0.5">
+          <span className="text-xs font-bold tracking-tight">{comment.user_name || 'Anonymous User'}</span>
+          <span className="text-xs text-foreground font-medium">{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
         </div>
         
-        <div className="flex items-center gap-4 mt-2">
-          <span className="text-xs md:text-sm text-muted-foreground font-medium">
+        <div className="flex items-center gap-3 mt-1">
+          <span className="text-xs text-muted-foreground font-medium">
             {formatDate(comment.created_at)}
           </span>
           
@@ -983,7 +1211,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
               variant="ghost"
               size="sm"
               onClick={() => handleCommentLike(comment.id, comment.is_liked_by_current_user || false)}
-              className={`h-auto p-0 text-xs md:text-sm font-medium ${
+              className={`h-auto p-0 text-xs font-medium ${
                 comment.is_liked_by_current_user 
                   ? 'text-red-600' 
                   : 'text-muted-foreground hover:text-foreground'
@@ -998,7 +1226,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
               variant="ghost"
               size="sm"
               onClick={() => handleDeleteComment(comment.id)}
-              className="h-auto p-0 text-xs md:text-sm text-muted-foreground hover:text-destructive font-medium"
+              className="h-auto p-0 text-xs text-muted-foreground hover:text-destructive font-medium"
             >
               Delete
             </Button>
@@ -1007,7 +1235,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         
         {/* Render replies */}
         {comment.replies && comment.replies.length > 0 && (
-          <div className="mt-3 space-y-3">
+          <div className="mt-2 space-y-2">
             {comment.replies.map(reply => renderComment(reply, true))}
           </div>
         )}
@@ -1017,10 +1245,10 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   const renderCommentForm = () => (
     currentUser && (
-      <form onSubmit={handleAddComment} className="flex items-center gap-3 md:gap-4 pt-4 border-t border-black/10 mt-4">
-        <Avatar className="h-9 w-9 md:h-10 md:w-10 flex-shrink-0 border-[1.5px] border-black/20">
+      <form onSubmit={handleAddComment} className="flex items-center gap-2 md:gap-3 pt-2 border-t border-black/10 mt-2">
+        <Avatar className="h-7 w-7 md:h-8 md:w-8 flex-shrink-0 border-[1.5px] border-black/20">
           <AvatarImage src={getProxiedImageUrl(currentUser.profilePictureUrl)} alt={currentUser.displayName} />
-          <AvatarFallback className="text-xs md:text-sm font-semibold">
+          <AvatarFallback className="text-xs font-semibold">
             {getUserInitials({ displayName: currentUser.displayName || 'User' })}
           </AvatarFallback>
         </Avatar>
@@ -1076,7 +1304,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             }}
             placeholder="Add a comment..."
             disabled={isSubmitting}
-            className="flex-1 text-xs md:text-sm border-0 bg-transparent px-0 py-2 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground font-medium"
+            className="flex-1 text-xs border-0 bg-transparent px-0 py-1.5 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground font-medium"
           />
           {showMentionMenu && mentionSuggestions.length > 0 && (
             <div className="fixed z-50 w-64 border-[1.5px] border-black bg-popover text-popover-foreground" style={{ top: mentionPosition?.top || 0, left: mentionPosition?.left || 0, boxShadow: '3px 3px 0 0 #000' }}>
@@ -1116,7 +1344,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             variant="ghost"
             size="sm"
             disabled={!newComment.trim() || isSubmitting}
-            className="h-9 md:h-10 px-4 md:px-5 border-[1.5px] border-black bg-white rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none font-medium text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-7 md:h-8 px-3 md:px-4 border-[1.5px] border-black bg-white rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ 
               boxShadow: (!newComment.trim() || isSubmitting) ? 'none' : '2px 2px 0 0 #000',
               color: '#000'
@@ -1131,25 +1359,25 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
 
   const renderCommentsSection = () => (
     !readOnly && showComments && (
-      <div className="mt-6 pt-6 border-t border-black/10">
+      <div className="mt-3 pt-3 border-t border-black/10">
         {/* Loading state */}
         {isLoadingComments && (
-          <div className="flex items-center justify-center py-8">
-            <div className="text-xs md:text-sm text-muted-foreground font-medium">Loading comments...</div>
+          <div className="flex items-center justify-center py-4">
+            <div className="text-xs text-muted-foreground font-medium">Loading comments...</div>
           </div>
         )}
         
         {/* Comments display */}
         {!isLoadingComments && comments && comments.length > 0 && (
-          <div className={`space-y-3 ${MAX_COMMENTS_HEIGHT} overflow-y-auto mb-4`}>
+          <div className={`space-y-2 ${MAX_COMMENTS_HEIGHT} overflow-y-auto mb-2`}>
             {comments.map(comment => renderComment(comment))}
           </div>
         )}
         
         {/* No comments message */}
         {!isLoadingComments && comments && comments.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-xs md:text-sm text-muted-foreground font-medium">No comments yet. Be the first to comment!</p>
+          <div className="text-center py-4">
+            <p className="text-xs text-muted-foreground font-medium">No comments yet. Be the first to comment!</p>
           </div>
         )}
         
@@ -1241,11 +1469,11 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
       </AnimatePresence>
 
       <article 
-        className={noOuterSpacing ? "w-full" : "w-full mb-8 md:mb-10"}
+        className={noOuterSpacing ? "w-full" : "w-full mb-1.5 md:mb-2"}
         style={{ position: isEditing ? 'relative' : 'static', zIndex: isEditing ? 9999 : 'auto' }}
       >
         <div 
-          className={noOuterSpacing ? "relative group transition-all" : "relative bg-white p-6 md:p-8 group border border-black/10 transition-all"}
+          className={noOuterSpacing ? "relative group transition-all" : "relative bg-white p-3 md:p-4 group border border-black/10 transition-all"}
           onClick={(e) => isEditing && e.stopPropagation()}
         >
           {showLoginModal && (

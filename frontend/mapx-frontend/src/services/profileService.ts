@@ -7,8 +7,12 @@ export interface UserData {
   email: string;
   username?: string;
   profilePictureUrl?: string;
+  bio?: string | null;
+  city?: string | null;
   created_at: string;
   last_login_at: string;
+  followers_count?: number;
+  following_count?: number;
 }
 
 export type ThemeName = 'neo-brutal' | 'ocean' | 'sunset' | 'forest' | 'monochrome';

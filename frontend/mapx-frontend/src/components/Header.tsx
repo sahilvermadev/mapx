@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, Map, Users, Newspaper, LogOut, Plus, Loader2, Menu, X } from 'lucide-react';
+import { User, Map, Users, Newspaper, LogOut, Plus, Loader2, Menu, X, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { 
@@ -262,6 +262,17 @@ const Header: React.FC<HeaderProps> = ({
                 <Map className="h-4 w-4" />
                 <span className="text-sm">Map</span>
               </Button>
+
+              {/* Ask */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => navigate('/ask')}
+                className={getNavClasses('/ask')}
+              >
+                <HelpCircle className="h-4 w-4" />
+                <span className="text-sm">Ask</span>
+              </Button>
         </div>
 
         {/* Right: Notifications + User */}
@@ -410,6 +421,16 @@ const Header: React.FC<HeaderProps> = ({
               Map
             </Button>
 
+            {/* Ask */}
+            <Button
+              variant="ghost"
+              className={`w-full justify-start ${getNavClasses('/ask')}`}
+              onClick={() => handleNavClick('/ask')}
+            >
+              <HelpCircle className="h-4 w-4 mr-3" />
+              Ask
+            </Button>
+
             {/* Separator */}
             <div className={`h-px my-2 ${variant === 'dark' ? 'bg-white/20' : 'bg-border'}`} />
 
@@ -452,6 +473,7 @@ const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       )}
+
     </header>
   );
 };

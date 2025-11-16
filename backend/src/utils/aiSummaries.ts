@@ -1,14 +1,10 @@
 import Groq from 'groq-sdk';
-import OpenAI from 'openai';
 import '../config/env';
+import { validateSearchRelevance, generateNoRelevantResultsMessage, type SearchResultForValidation } from './relevanceValidator';
 
-// Initialize AI clients with modern models
+// Initialize AI client
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
-});
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export interface SearchContext {
@@ -18,6 +14,8 @@ export interface SearchContext {
         type: 'place';
         place_name: string;
         place_address?: string;
+        place_primary_type?: string;
+        place_types?: string[];
         total_recommendations: number;
         average_similarity: number;
         recommendations: Array<{
@@ -70,6 +68,46 @@ export async function generateAISummary(context: SearchContext, mode: SummaryMod
     return generateFallbackSummary(context);
   }
   
+  // Validate relevance before generating summary
+  try {
+    const resultsForValidation: SearchResultForValidation[] = context.results.map(result => {
+      const firstRec = result.recommendations[0];
+      const notes = (firstRec as any)?.notes || (firstRec as any)?.description;
+      const labels = firstRec?.labels || [];
+      
+      return {
+        average_similarity: result.average_similarity,
+        place_name: (result as any).place_name,
+        place_primary_type: (result as any).place_primary_type,
+        place_types: (result as any).place_types || [],
+        service_name: (result as any).service_name,
+        service_type: (result as any).service_type,
+        content_type: result.type === 'place' ? 'place' : 'service',
+        description: notes,
+        labels: labels,
+      };
+    });
+    
+    const relevanceCheck = await validateSearchRelevance(
+      context.query,
+      resultsForValidation,
+      0.65 // More lenient threshold - semantic search already filters at 0.7
+    );
+    
+    if (!relevanceCheck.isRelevant) {
+      console.log('🚫 [AI] Results not relevant to query, returning no-relevant-results message');
+      console.log('🚫 [AI] Relevance reason:', relevanceCheck.reason);
+      console.log('🚫 [AI] Relevance confidence:', relevanceCheck.confidence);
+      return generateNoRelevantResultsMessage(context.query);
+    }
+    
+    console.log('✅ [AI] Results validated as relevant, proceeding with summary generation');
+    console.log('✅ [AI] Relevance confidence:', relevanceCheck.confidence);
+  } catch (error) {
+    console.error('⚠️ [AI] Error during relevance validation, proceeding with summary:', error);
+    // Continue with summary generation if validation fails
+  }
+  
   console.log('🤖 [AI] Sample results:', context.results.slice(0, 2).map(r => ({
     type: r.type,
     name: (r as any).place_name || (r as any).service_name,
@@ -119,9 +157,6 @@ export async function generateAISummary(context: SearchContext, mode: SummaryMod
   }
 }
 
-// Removed OpenAI implementation - using only Groq models
-
-
 async function generateWithGroq(context: SearchContext, mode: SummaryMode = 'detailed'): Promise<string> {
   const groqStartTime = Date.now();
   console.log('🔍 Groq: Checking API key availability...');
@@ -147,29 +182,42 @@ async function generateWithGroq(context: SearchContext, mode: SummaryMode = 'det
     messages: [
       {
         role: "system",
-        content: "You are a careful, evidence-grounded local recommendation expert. You write concise, comparative guidance based ONLY on the provided data. You never invent facts not present in the data. Prefer specifics over generalities."
+        content: "You are a helpful local recommendation assistant. Your job is to provide useful answers based on the search results provided. Use the information found to give practical, actionable recommendations. Be positive and helpful - if results exist, use them to answer the user's question."
       },
       {
         role: "user",
-        content: `Search: "${context.query}"
+        content: `User searched for: "${context.query}"
 
-SEARCH DATA (use ONLY this data, do not add external knowledge):
+SEARCH RESULTS (use this information to answer the user's question):
 ${enrichedContext.searchResultsText}
 
 ---
-TASK: Write a concise, comparative and helpful summary that:
-- Identifies the top options and why (grounded in reviews, ratings, and match score)
-- Calls out strengths and drawbacks for each top option with specifics from the data
-- Notes important caveats (limited reviews, old dates, missing fields) when present
-- Gives practical next steps on how to choose among the options
+TASK: Write a helpful answer that USES the search results to answer the user's question.
 
-STRICTNESS:
-- Ground every claim in the SEARCH DATA. Do not infer beyond what is provided.
-- If data is limited, say so explicitly and explain the impact.
+IMPORTANT GUIDELINES:
+1. **USE THE INFORMATION**: If results exist, use them to answer the question. Don't say "unfortunately no results" if there ARE results.
+2. **BE HELPFUL**: Provide actionable recommendations based on what was found.
+3. **BE SPECIFIC**: Mention specific places/services, ratings, and reviews from the data.
+4. **BE POSITIVE**: If results match the query (even partially), present them positively.
+
+FORMAT:
+- Start with a brief answer to their question
+- Highlight the top 2-3 most relevant options with specific details (ratings, reviews)
+- Mention any important caveats (limited reviews, etc.) but don't let this overshadow the recommendations
+- End with a helpful next step
+
+EXAMPLES:
+- If searching for "dj" and finding "DJ Snake" with "disc jockey" tag → Say "I found DJ Snake, a disc jockey with a 4.0/5 rating..."
+- If searching for "asian food" and finding "Pan Asian Story" → Say "I found Enoki Pan Asian Story, which specializes in Pan Asian cuisine..."
+- If searching for "sweet shop" and finding places with "sweets" → Say "I found Aggarwal Lassi Wala and Sweet House, which offers sweets..."
+
+ONLY say "unfortunately no relevant information" if the results are COMPLETELY unrelated (e.g., searching for "hotel" but only finding "restaurants" with no lodging-related content).
 
 STYLE:
-- Professional, warm, and efficient. Avoid fluff. Prefer short paragraphs over bullets.
-- Mention concrete data points (e.g., ratings, number of reviews, recency) when helpful.
+- Conversational and helpful
+- Use specific details from the search results
+- Be concise but informative
+- Focus on what WAS found, not what wasn't
 `
       }
     ],
@@ -195,14 +243,10 @@ function enrichSearchContext(context: SearchContext, mode: SummaryMode = 'detail
   
   // Pre-calculate statistics
   const totalResults = context.results.length;
-  const totalPlaces = context.total_places;
-  const totalServices = totalResults - totalPlaces;
   const totalRecommendations = context.total_recommendations;
 
   let totalRatingSum = 0;
   let totalRatingsCount = 0;
-  let mostRecommendedResult: (typeof context.results[0]) | null = null;
-  let maxRecs = -1;
 
   const statsStartTime = Date.now();
   context.results.forEach(result => {
@@ -212,11 +256,6 @@ function enrichSearchContext(context: SearchContext, mode: SummaryMode = 'detail
         totalRatingsCount++;
       }
     });
-    
-    if (result.total_recommendations > maxRecs) {
-      maxRecs = result.total_recommendations;
-      mostRecommendedResult = result;
-    }
   });
   const statsEndTime = Date.now();
   console.log(`⏱️  Context Enrichment: Statistics calculation completed in ${statsEndTime - statsStartTime}ms`);
@@ -267,13 +306,23 @@ function enrichSearchContext(context: SearchContext, mode: SummaryMode = 'detail
       const n = getNotes(rec);
       return n && n.trim();
     });
+    // Collect all labels from recommendations for this result
+    const allLabels = new Set<string>();
+    limitedRecs.forEach(rec => {
+      if (rec.labels && Array.isArray(rec.labels)) {
+        rec.labels.forEach(label => allLabels.add(label));
+      }
+    });
+    const labelsDisplay = Array.from(allLabels).length > 0 
+      ? `🏷️ Tags: ${Array.from(allLabels).join(', ')}`
+      : '';
+    
     const keyReviewSummary = notesRecs
       .map(rec => {
-        const labels = rec.labels && rec.labels.length > 0 ? ` (Tags: ${rec.labels.join(', ')})` : '';
         const went = rec.went_with && rec.went_with.length > 0 ? ` (Went with: ${rec.went_with.join(', ')})` : '';
         const date = rec.visit_date ? ` [Visited: ${rec.visit_date}]` : '';
         const notes = getNotes(rec);
-        return `${rec.user_name || 'Anonymous'}: "${notes}"${labels}${went}${date}`;
+        return `${rec.user_name || 'Anonymous'}: "${notes}"${went}${date}`;
       })
       .join('; ');
     
@@ -324,16 +373,31 @@ function enrichSearchContext(context: SearchContext, mode: SummaryMode = 'detail
       const hasDetailedReviews = reviewCount > 0;
       const hasRatings = ratingCount > 0;
       
+      // Format place type information
+      const placeTypeInfo = [];
+      if (r.place_primary_type) {
+        placeTypeInfo.push(r.place_primary_type);
+      }
+      if (r.place_types && Array.isArray(r.place_types) && r.place_types.length > 0) {
+        // Add additional types that aren't already in primary_type
+        const additionalTypes = r.place_types
+          .filter((t: string) => t !== r.place_primary_type)
+          .slice(0, 3); // Limit to top 3 additional types
+        placeTypeInfo.push(...additionalTypes);
+      }
+      const typeDisplay = placeTypeInfo.length > 0 
+        ? placeTypeInfo.join(', ')
+        : 'Place';
+      
       return `
-**${r.place_name}** (Place)
+**${r.place_name}** (${typeDisplay})
 ${r.place_address ? `📍 ${r.place_address}` : ''}
-⭐ ${ratingText}
+${labelsDisplay ? `${labelsDisplay}\n` : ''}⭐ ${ratingText}
 💬 Reviews: ${hasDetailedReviews ? `${reviewCount} with notes` : 'No detailed reviews available'} | Reviewers: ${uniqueReviewers}
 ${mostRecent ? `🗓️ Recency: ${mostRecent}${oldest && oldest !== mostRecent ? ` (range since ${oldest})` : ''}` : ''}
 ${keyReviewSummary ? `Key feedback: ${keyReviewSummary}` : ''}
 ${positives ? `Pros: ${positives}` : ''}
 ${negatives ? `Cons: ${negatives}` : ''}
-📊 Match Score: ${matchScore}%
 📈 Data Quality: ${hasDetailedReviews && hasRatings ? 'High' : hasDetailedReviews || hasRatings ? 'Medium' : 'Low'}
       `.trim();
     } else {
@@ -349,13 +413,12 @@ ${negatives ? `Cons: ${negatives}` : ''}
       return `
 **${r.service_name}** (${r.service_type || 'Service'})
 ${r.service_address ? `📍 ${r.service_address}` : ''}
-⭐ ${ratingText}
+${labelsDisplay ? `${labelsDisplay}\n` : ''}⭐ ${ratingText}
 💬 Reviews: ${hasDetailedReviews ? `${reviewCount} with notes` : 'No detailed reviews available'} | Reviewers: ${uniqueReviewers}
 ${mostRecent ? `🗓️ Recency: ${mostRecent}${oldest && oldest !== mostRecent ? ` (range since ${oldest})` : ''}` : ''}
 ${keyReviewSummary ? `Key feedback: ${keyReviewSummary}` : ''}
 ${positives ? `Pros: ${positives}` : ''}
 ${negatives ? `Cons: ${negatives}` : ''}
-📊 Match Score: ${matchScore}%
 📈 Data Quality: ${hasDetailedReviews && hasRatings ? 'High' : hasDetailedReviews || hasRatings ? 'Medium' : 'Low'}
       `.trim();
     }
@@ -395,7 +458,6 @@ ${negatives ? `Cons: ${negatives}` : ''}
 - **Data Quality**: ${highQualityResults}/${limitedResults.length} options have both reviews and ratings
 - **Review Coverage**: ${totalReviews} detailed reviews across all options
 - **Rating Coverage**: ${totalRatings} ratings across all options
-- **Average Match Score**: ${Math.round(avgMatchScore * 100)}%
 - **Data Completeness**: ${totalReviews > 0 && totalRatings > 0 ? 'Good' : totalReviews > 0 || totalRatings > 0 ? 'Partial' : 'Limited'}
 ${mostRecentOverall ? `- **Most Recent Visit**: ${mostRecentOverall}` : ''}
 
@@ -417,8 +479,6 @@ ${mostRecentOverall ? `- **Most Recent Visit**: ${mostRecentOverall}` : ''}
   return {
     searchResultsText: finalSearchResultsText,
     totalResults,
-    totalPlaces,
-    totalServices,
     totalRecommendations,
     averageRating
   };
@@ -437,8 +497,6 @@ Try using different keywords or ask your friends to share their experiences firs
   const topResult = context.results[0];
   const topRecommendation = topResult.recommendations[0];
   
-  const highMatch = topResult.average_similarity > 0.8;
-  const mediumMatch = topResult.average_similarity > 0.6;
   const hasReviews = (() => {
     const n = (topRecommendation as any)?.notes ?? (topRecommendation as any)?.description ?? (topRecommendation as any)?.content_data?.notes;
     return typeof n === 'string' && n.trim();
@@ -453,17 +511,8 @@ Try using different keywords or ask your friends to share their experiences firs
     }).length, 0);
   const totalRatings = context.results.reduce((sum, result) => 
     sum + result.recommendations.filter(rec => rec.rating).length, 0);
-  const avgMatchScore = context.results.reduce((sum, result) => sum + result.average_similarity, 0) / context.results.length;
 
   let intro = `I found ${context.results.length} option${context.results.length > 1 ? 's' : ''} for you! `;
-  
-  if (avgMatchScore > 0.7) {
-    intro += `The matches look pretty good overall, with an average relevance of ${Math.round(avgMatchScore * 100)}%. `;
-  } else if (avgMatchScore > 0.5) {
-    intro += `There are some decent matches here, though you might want to refine your search for better results. `;
-  } else {
-    intro += `The matches are a bit limited - you might want to try different keywords. `;
-  }
 
   if (totalReviews > 0 && totalRatings > 0) {
     intro += `Good news is there are ${totalReviews} detailed reviews and ${totalRatings} ratings to help you decide. `;
@@ -475,9 +524,8 @@ Try using different keywords or ask your friends to share their experiences firs
 
   if ((topResult as any).type === 'place') {
     const r: any = topResult as any;
-    const matchQuality = highMatch ? 'really strong' : mediumMatch ? 'decent' : 'okay';
     
-    intro += `\n\n${r.place_name} looks like the most promising option with a ${matchQuality} match (${Math.round(topResult.average_similarity * 100)}%). `;
+    intro += `\n\n${r.place_name} looks like the most promising option. `;
     
     if (hasReviews) {
       intro += `People have shared some feedback about it, which you can see below. `;
@@ -492,9 +540,8 @@ Try using different keywords or ask your friends to share their experiences firs
     }
   } else {
     const r: any = topResult as any;
-    const matchQuality = highMatch ? 'really strong' : mediumMatch ? 'decent' : 'okay';
     
-    intro += `\n\n${r.service_name}${r.service_type ? ` (${r.service_type})` : ''} looks like the most promising option with a ${matchQuality} match (${Math.round(topResult.average_similarity * 100)}%). `;
+    intro += `\n\n${r.service_name}${r.service_type ? ` (${r.service_type})` : ''} looks like the most promising option. `;
     
     if (hasReviews) {
       intro += `People have shared some feedback about it, which you can see below. `;

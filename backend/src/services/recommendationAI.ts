@@ -61,7 +61,7 @@ class RecommendationAI {
       const prompt = `You are an intelligent AI assistant that analyzes user recommendations for a local knowledge sharing platform. Your job is to:
 
 1. Determine if the text is valid content (not gibberish, spam, or irrelevant)
-2. Identify what type of content it is (place, service, tip, contact, or unclear)
+2. Identify what type of content it is (place, service, or unclear)
 3. Extract any useful information already mentioned
 4. Identify what important information is missing and generate smart follow-up questions
 
@@ -85,7 +85,7 @@ Analyze this text and respond with a JSON object containing:
 {
   "isValid": boolean,
   "isGibberish": boolean,
-  "contentType": "place|service|tip|contact|unclear",
+  "contentType": "place|service|unclear",
   "extractedData": {
     "name": "extracted name if mentioned",
     "description": "the original text or a cleaned version",
@@ -114,8 +114,6 @@ Analyze this text and respond with a JSON object containing:
 Guidelines:
 - For places: ask ONLY for name and location if missing. DO NOT ask for contact information (phone/email), tips, best_times, highlights, or any other optional fields.
 - For services: ask ONLY for name and contact information if missing. DO NOT ask for tips, best_times, or any other optional fields.
-- For contacts: ask what they can help with, their services
-- For tips: ask where it applies, when it's useful
 - Generate questions that feel natural and helpful
 - Consider what information would be most valuable to other users
 - Be specific and contextual in your questions
@@ -405,15 +403,12 @@ Respond with JSON:
     
     // Simple content type detection
     let contentType: ContentType = CONTENT_TYPES.UNCLEAR;
-    if (['carpenter', 'plumber', 'electrician', 'mechanic', 'service'].some(word => lowerText.includes(word))) {
+    if (['carpenter', 'plumber', 'electrician', 'mechanic', 'service', 'contact', 'phone', 'number', 'call'].some(word => lowerText.includes(word))) {
       contentType = CONTENT_TYPES.SERVICE;
     } else if (['restaurant', 'cafe', 'shop', 'place', 'location'].some(word => lowerText.includes(word))) {
       contentType = CONTENT_TYPES.PLACE;
-    } else if (['tip', 'advice', 'suggestion'].some(word => lowerText.includes(word))) {
-      contentType = CONTENT_TYPES.TIP;
-    } else if (['contact', 'phone', 'number', 'call'].some(word => lowerText.includes(word))) {
-      contentType = CONTENT_TYPES.CONTACT;
     }
+    // Note: tip/advice/suggestion keywords now default to UNCLEAR since tip content type is deprecated
 
     const extractedData: any = { description: text };
     const enforcedMissing = this.ensureCategoryRequirements(contentType, extractedData, []);

@@ -92,7 +92,7 @@ const ContactReveal: React.FC<ContactRevealProps> = ({ contact, className, align
               </button>
             </div>
           )}
-          <div className="pt-2 text-[11px] text-muted-foreground">Contact details are private to this post. Click to copy.</div>
+          {/* <div className="pt-2 text-[11px] text-muted-foreground">Click to copy.</div> */}
         </div>
       )}
     </div>

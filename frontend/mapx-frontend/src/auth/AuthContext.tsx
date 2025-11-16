@@ -88,6 +88,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
   const isInitialized = useRef(false);
+  const isRefreshingRef = useRef(false);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -203,7 +204,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Initialize immediately - no timeout
     initAuth();
     
-    const onUnauthorized = () => {
+    // Set up periodic token refresh check for idle users (every 10 minutes)
+    // This ensures tokens are refreshed proactively even when user is idle
+    const tokenRefreshInterval = setInterval(async () => {
+      if (authService.isAuthenticated()) {
+        try {
+          await authService.ensureValidTokens();
+          // Re-check auth state after refresh attempt
+          const isAuth = authService.isAuthenticated();
+          const user = authService.getCurrentUser();
+          dispatch({
+            type: 'SET_AUTHENTICATED',
+            payload: { isAuth, user }
+          });
+        } catch (error) {
+          console.error('Periodic token refresh check failed:', error);
+        }
+      }
+    }, 10 * 60 * 1000); // Check every 10 minutes
+    
+    const onUnauthorized = async () => {
+      // Prevent concurrent refresh attempts using ref to persist across renders
+      if (isRefreshingRef.current) {
+        return;
+      }
+      
+      isRefreshingRef.current = true;
+      
+      try {
+        // Try to refresh tokens proactively before clearing user state
+        // This handles cases where token refresh failed in the interceptor
+        // but the refresh token might still be valid
+        const refreshResult = await authService.refreshAccessToken();
+        if (refreshResult.success) {
+          // Refresh succeeded, update auth state
+          const isAuth = authService.isAuthenticated();
+          const user = authService.getCurrentUser();
+          dispatch({
+            type: 'SET_AUTHENTICATED',
+            payload: { isAuth, user }
+          });
+          return;
+        }
+      } catch (error) {
+        console.error('Token refresh attempt in unauthorized handler failed:', error);
+      } finally {
+        isRefreshingRef.current = false;
+      }
+      
+      // Only clear user state if refresh truly failed
       dispatch({ 
         type: 'SET_AUTHENTICATED',
         payload: { isAuth: false, user: null }
@@ -213,6 +262,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.addEventListener('api:unauthorized', onUnauthorized as EventListener);
     
     return () => {
+      clearInterval(tokenRefreshInterval);
       window.removeEventListener('api:unauthorized', onUnauthorized as EventListener);
     };
   }, [checkAuth]);

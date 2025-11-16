@@ -29,20 +29,11 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults,
     setError(null);
     
     try {
-      // First get fast results without summary
-      const res = await recommendationsApi.semanticSearch(query.trim(), undefined, undefined, undefined, undefined, true);
+      // Single API call with fast summary mode for optimal UX
+      // The backend will return results immediately with a fast summary
+      const res = await recommendationsApi.semanticSearch(query.trim(), undefined, undefined, undefined, undefined, false, 'fast');
       setResponse(res);
       onResults?.(res);
-      
-      // Then fetch with fast summary for better UX
-      try {
-        const resWithSummary = await recommendationsApi.semanticSearch(query.trim(), undefined, undefined, undefined, undefined, false, 'fast');
-        setResponse(resWithSummary);
-        onResults?.(resWithSummary);
-      } catch (summaryError) {
-        console.warn('Failed to fetch AI summary:', summaryError);
-        // Keep the fast results even if summary fails
-      }
     } catch (err) {
       setError('Search failed. Please try again.');
       setResponse(null);
@@ -66,7 +57,7 @@ const FeedAISearch: React.FC<FeedAISearchProps> = ({ isAuthenticated, onResults,
         <div className="rounded-full bg-white border border-black/10 text-foreground h-12 md:h-14 px-5 md:px-6 flex items-center gap-3 shadow-sm">
           <input
             type="text"
-            placeholder="Ask anything..."
+            placeholder="Search..."
             value={query}
             onChange={(e) => {
               const v = e.target.value;

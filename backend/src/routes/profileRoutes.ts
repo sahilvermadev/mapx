@@ -181,21 +181,40 @@ router.get('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const result = await pool.query(
-      `SELECT id, display_name, email, profile_picture_url, username, created_at, last_login_at
-       FROM users 
-       WHERE id = $1`,
-      [userId]
-    );
+    // Get user data and follower/following counts in parallel
+    const [userResult, followerCountResult, followingCountResult] = await Promise.all([
+      pool.query(
+        `SELECT id, display_name, email, profile_picture_url, username, bio, city, created_at, last_login_at
+         FROM users 
+         WHERE id = $1`,
+        [userId]
+      ),
+      // Count followers (people who follow this user)
+      pool.query(
+        `SELECT COUNT(*) as count 
+         FROM user_follows 
+         WHERE following_id = $1`,
+        [userId]
+      ),
+      // Count following (people this user follows)
+      pool.query(
+        `SELECT COUNT(*) as count 
+         FROM user_follows 
+         WHERE follower_id = $1`,
+        [userId]
+      )
+    ]);
 
-    if (result.rows.length === 0) {
+    if (userResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    const userData = result.rows[0];
+    const userData = userResult.rows[0];
+    const followersCount = parseInt(followerCountResult.rows[0].count) || 0;
+    const followingCount = parseInt(followingCountResult.rows[0].count) || 0;
     
     res.json({
       success: true,
@@ -205,8 +224,12 @@ router.get('/:userId', async (req, res) => {
         email: userData.email,
         username: userData.username,
         profilePictureUrl: userData.profile_picture_url,
+        bio: userData.bio || null,
+        city: userData.city || null,
         created_at: userData.created_at,
-        last_login_at: userData.last_login_at
+        last_login_at: userData.last_login_at,
+        followers_count: followersCount,
+        following_count: followingCount
       }
     });
 
@@ -215,6 +238,111 @@ router.get('/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch user profile',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * PUT /api/profile/:userId
+ * Update user profile data (bio, city)
+ */
+router.put('/:userId', authenticateJWT, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const requesterId = getUserIdFromRequest(req as any);
+    
+    if (!requesterId || requesterId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not allowed to update this profile'
+      });
+    }
+
+    const { bio, city } = req.body;
+    
+    // Validate bio length (max 500 characters)
+    if (bio !== undefined && bio !== null && bio.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bio must be 500 characters or less'
+      });
+    }
+
+    // Validate city length (max 255 characters)
+    if (city !== undefined && city !== null && city.length > 255) {
+      return res.status(400).json({
+        success: false,
+        message: 'City must be 255 characters or less'
+      });
+    }
+
+    // Build update query dynamically based on provided fields
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (bio !== undefined) {
+      updates.push(`bio = $${paramIndex}`);
+      values.push(bio || null);
+      paramIndex++;
+    }
+
+    if (city !== undefined) {
+      updates.push(`city = $${paramIndex}`);
+      values.push(city || null);
+      paramIndex++;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update'
+      });
+    }
+
+    // Add updated_at
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(userId);
+
+    const query = `
+      UPDATE users 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING id, display_name, email, profile_picture_url, username, bio, city, created_at, last_login_at
+    `;
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const userData = result.rows[0];
+
+    res.json({
+      success: true,
+      data: {
+        id: userData.id,
+        displayName: userData.display_name,
+        email: userData.email,
+        username: userData.username,
+        profilePictureUrl: userData.profile_picture_url,
+        bio: userData.bio || null,
+        city: userData.city || null,
+        created_at: userData.created_at,
+        last_login_at: userData.last_login_at
+      }
+    });
+
+  } catch (error: any) {
+    logger.error('Error updating user profile', { error: error.message, stack: error.stack });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update user profile',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
@@ -436,14 +564,30 @@ router.get('/:userId/stats', async (req, res) => {
       citiesVisitedResult,
       reviewsResult
     ] = await Promise.all([
-      // Get total recommendations
+      // Get total recommendations (matching getUserRecommendations filters)
+      // Only count public/friends recommendations (question answers are included)
       pool.query(
-        'SELECT COUNT(*) as count FROM recommendations WHERE user_id = $1',
+        `SELECT COUNT(*) as count 
+         FROM recommendations r
+         WHERE r.user_id = $1
+         AND r.visibility IN ('public', 'friends')`,
         [userId]
       ),
-      // Get total likes (count of annotations liked by this user)
+      // Get total likes (count of visible annotations liked by this user)
+      // This matches the same filters as getUserLikedPosts
       pool.query(
-        'SELECT COUNT(*) as count FROM annotation_likes WHERE user_id = $1',
+        `SELECT COUNT(DISTINCT al.recommendation_id) as count
+         FROM annotation_likes al
+         JOIN recommendations r ON al.recommendation_id = r.id
+         JOIN places p ON r.place_id = p.id
+         JOIN users u ON r.user_id = u.id
+         WHERE al.user_id = $1
+         AND r.visibility IN ('public', 'friends')
+         AND NOT EXISTS (
+           SELECT 1 FROM user_blocks 
+           WHERE (blocker_id = $1 AND blocked_id = r.user_id) 
+           OR (blocker_id = r.user_id AND blocked_id = $1)
+         )`,
         [userId]
       ),
       // Get total questions
@@ -613,21 +757,27 @@ router.get('/:userId/likes', async (req, res) => {
       offset = 0
     } = req.query;
 
-    const { getUserLikedPosts } = await import('../db/social');
-    const likedPosts = await getUserLikedPosts(
-      userId, 
-      parseInt(limit as string), 
-      parseInt(offset as string)
-    );
+    const { getUserLikedPosts, getUserLikedPostsCount } = await import('../db/social');
+    const [likedPosts, totalCount] = await Promise.all([
+      getUserLikedPosts(
+        userId, 
+        parseInt(limit as string), 
+        parseInt(offset as string)
+      ),
+      getUserLikedPostsCount(userId)
+    ]);
+
+    const limitNum = parseInt(limit as string);
+    const offsetNum = parseInt(offset as string);
 
     res.json({
       success: true,
       data: likedPosts,
       pagination: {
-        total: likedPosts.length,
-        page: Math.floor(parseInt(offset as string) / parseInt(limit as string)) + 1,
-        limit: parseInt(limit as string),
-        totalPages: Math.ceil(likedPosts.length / parseInt(limit as string))
+        total: totalCount,
+        page: Math.floor(offsetNum / limitNum) + 1,
+        limit: limitNum,
+        totalPages: Math.ceil(totalCount / limitNum)
       }
     });
 
@@ -691,12 +841,23 @@ router.get('/:userId/saved', async (req, res) => {
 /**
  * DELETE /api/profile/recommendations/:annotationId
  * Delete a recommendation
+ * Uses authenticated user ID from JWT token for security
  */
-router.delete('/recommendations/:annotationId', async (req, res) => {
+router.delete('/recommendations/:annotationId', authenticateJWT, async (req, res) => {
   try {
     const { annotationId } = req.params;
     
-    const success = await deleteRecommendation(parseInt(annotationId), 'test-user-id');
+    // Get user ID from authenticated JWT token
+    const userId = (req as any).user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+    
+    const success = await deleteRecommendation(parseInt(annotationId), userId);
     
     if (!success) {
       return res.status(404).json({
@@ -790,7 +951,7 @@ router.get('/:userId/questions', async (req, res) => {
     const { limit = 20, offset = 0 } = req.query;
 
     const result = await pool.query(
-      `SELECT q.id, q.text, q.visibility, q.labels, q.metadata, q.created_at, q.updated_at,
+      `SELECT q.id, q.user_id, q.text, q.visibility, q.labels, q.metadata, q.created_at, q.updated_at,
               q.answers_count, q.last_answer_at, q.last_answer_user_id,
               u.display_name as user_name, u.profile_picture_url as user_picture
        FROM questions q

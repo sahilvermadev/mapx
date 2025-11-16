@@ -192,8 +192,11 @@ class AuthService {
     const accessToken = this.getAccessToken();
     if (!accessToken) return null;
 
-    // Check if token is expiring soon and refresh if needed
-    if (isTokenExpiringSoon(accessToken)) {
+    // Check if token is expired or expiring soon and refresh if needed
+    // Note: isTokenExpiringSoon already covers expired tokens (exp <= now + buffer),
+    // but checking isTokenExpired explicitly makes the intent clearer and handles
+    // edge cases where token expired but buffer check might not catch it
+    if (isTokenExpired(accessToken) || isTokenExpiringSoon(accessToken)) {
       const refreshResult = await this.refreshAccessToken();
       if (refreshResult.success && refreshResult.accessToken) {
         return refreshResult.accessToken;
@@ -301,8 +304,9 @@ class AuthService {
       return false;
     }
 
-    // Check if access token is expiring soon (within 2 minutes)
-    if (isTokenExpiringSoon(accessToken)) {
+    // Check if access token is expired or expiring soon (within 2 minutes)
+    // Refresh proactively to prevent authentication failures
+    if (isTokenExpired(accessToken) || isTokenExpiringSoon(accessToken)) {
       const refreshResult = await this.refreshAccessToken();
       return refreshResult.success;
     }

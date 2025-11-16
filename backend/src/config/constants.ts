@@ -11,8 +11,6 @@
 export const CONTENT_TYPES = {
   PLACE: 'place',
   SERVICE: 'service',
-  TIP: 'tip',
-  CONTACT: 'contact',
   UNCLEAR: 'unclear',
 } as const;
 
@@ -67,6 +65,8 @@ export const ERROR_MESSAGES = {
   INVALID_FIELD: (field: string, contentType: string) =>
     `${field} is not allowed for ${contentType} type recommendations`,
 } as const;
+
+
 
 
 

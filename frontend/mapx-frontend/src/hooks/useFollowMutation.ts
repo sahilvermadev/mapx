@@ -28,6 +28,11 @@ export const useFollowMutation = (currentUserId: string) => {
         exact: false 
       });
       queryClient.invalidateQueries({ queryKey: ['suggestedUsers', currentUserId] });
+      // Invalidate reviewed places so map markers update when following users
+      queryClient.invalidateQueries({ 
+        queryKey: ['reviewedPlaces', currentUserId],
+        exact: false 
+      });
     },
     onError: (error) => {
       console.error('❌ [REACT-QUERY] Follow action failed:', error);

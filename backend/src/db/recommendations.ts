@@ -1,6 +1,6 @@
 import pool from '../db';
 import { embeddingQueue } from '../services/embeddingQueue';
-import { onRecommendationCreated } from './questionCounters';
+import { onRecommendationCreated, onRecommendationDeleted } from './questionCounters';
 import { createQuestionAnswerNotification } from './notifications';
 import { COMMON_FEED_COLUMNS, COMMON_FEED_JOINS, USER_FOLLOWS_WHERE_CLAUSE, VISIBILITY_WHERE_CLAUSE, BLOCK_FILTER_WHERE_CLAUSE, ORDER_BY_CLAUSE } from './sqlFragments';
 import type { FeedPostRow } from '../types/feed';
@@ -8,7 +8,7 @@ import { handleError, createErrorHandler } from '../utils/errorHandling';
 
 export interface RecommendationData {
   user_id: string; // UUID
-  content_type: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  content_type: 'place' | 'service' | 'unclear';
   place_id?: number; // Optional, only for place-type recommendations
   service_id?: number; // Optional, only for service-type recommendations
   title?: string;
@@ -26,7 +26,7 @@ export interface RecommendationData {
 export interface Recommendation {
   id: number;
   user_id: string;
-  content_type: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  content_type: 'place' | 'service' | 'unclear';
   place_id?: number;
   title?: string;
   description: string;
@@ -193,6 +193,9 @@ export async function getRecommendationWithSocialData(
         p.lat as place_lat, 
         p.lng as place_lng, 
         p.google_place_id,
+        s.id as service_id,
+        s.name as service_name,
+        s.address as service_address,
         u.display_name as user_name, 
         u.profile_picture_url as user_picture,
         COUNT(DISTINCT ac.id) as comments_count,
@@ -202,6 +205,7 @@ export async function getRecommendationWithSocialData(
       FROM recommendations r
       JOIN users u ON r.user_id = u.id
       LEFT JOIN places p ON r.place_id = p.id
+      LEFT JOIN services s ON r.service_id = s.id
       LEFT JOIN annotation_comments ac ON r.id = ac.recommendation_id
       LEFT JOIN annotation_likes al ON r.id = al.recommendation_id
       LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $2
@@ -210,6 +214,7 @@ export async function getRecommendationWithSocialData(
       GROUP BY r.id, r.user_id, r.content_type, r.title, r.description, r.content_data,
                r.rating, r.visibility, r.labels, r.metadata, r.created_at, r.updated_at,
                p.id, p.name, p.address, p.lat, p.lng, p.google_place_id,
+               s.id, s.name, s.address,
                u.display_name, u.profile_picture_url, al2.id, sp.id`,
       [recommendationId, currentUserId]
     );
@@ -420,14 +425,65 @@ export async function updateRecommendation(
 
 /**
  * Delete recommendation
+ * Uses a transaction to ensure atomic deletion and counter updates
  */
 export async function deleteRecommendation(id: number, userId: string): Promise<boolean> {
-  const result = await pool.query(
-    'DELETE FROM recommendations WHERE id = $1 AND user_id = $2 RETURNING id',
-    [id, userId]
-  );
+  const client = await pool.connect();
   
-  return result.rows.length > 0;
+  try {
+    await client.query('BEGIN');
+    
+    // Delete and get question_id in one query using RETURNING
+    const result = await client.query(
+      'DELETE FROM recommendations WHERE id = $1 AND user_id = $2 RETURNING id, question_id',
+      [id, userId]
+    );
+    
+    const deleted = result.rows.length > 0;
+    const questionId = deleted ? result.rows[0].question_id : null;
+    
+    // Update question counters if this was an answer to a question
+    // This must succeed for the transaction to commit
+    if (deleted && questionId) {
+      // Update counters within the same transaction
+      const counterResult = await client.query(`
+        SELECT 
+          COUNT(*) as answers_count,
+          MAX(created_at) as last_answer_at,
+          (SELECT user_id FROM recommendations 
+           WHERE question_id = $1 
+           ORDER BY created_at DESC 
+           LIMIT 1) as last_answer_user_id
+        FROM recommendations 
+        WHERE question_id = $1
+      `, [questionId]);
+
+      const { answers_count, last_answer_at, last_answer_user_id } = counterResult.rows[0];
+
+      // Update the question with new counters within transaction
+      await client.query(`
+        UPDATE questions 
+        SET 
+          answers_count = $1,
+          last_answer_at = $2,
+          last_answer_user_id = $3,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4
+      `, [answers_count, last_answer_at, last_answer_user_id, questionId]);
+
+      console.log(`Updated question ${questionId} counters: ${answers_count} answers`);
+    }
+    
+    await client.query('COMMIT');
+    return deleted;
+    
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(`Failed to delete recommendation ${id}:`, error);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**

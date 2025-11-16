@@ -14,16 +14,12 @@ import AIResponseBanner from '@/components/SocialFeed/AIResponseBanner';
 import FeedGroups from '@/components/SocialFeed/FeedGroups';
 import SuggestedUsersCard from '@/components/SocialFeed/SuggestedUsersCard';
 import QuestionFeedPost from '@/components/QuestionFeedPost';
+import NewPostsBanner from '@/components/SocialFeed/NewPostsBanner';
 
 import { useAuth } from '@/auth';
-// import { AskQuestionModal } from '@/components/AskQuestionModal';
 import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
-// import { useAskQuestion } from '@/hooks/useAskQuestion';
 import { useQueryClient } from '@tanstack/react-query';
 import CityFilterBar, { type CitySummary } from '@/components/SocialFeed/CityFilterBar';
-import AskQuestionModal from '@/components/SocialFeed/AskQuestionModal';
-
-// (Ask Question modal moved to components)
 
 import { useFeedQuery } from '@/hooks/useFeedQuery';
 import { useSuggestedUsersQuery } from '@/hooks/useSuggestedUsersQuery';
@@ -31,6 +27,12 @@ import { useFollowMutation } from '@/hooks/useFollowMutation';
 
 import { type User, type FeedPost as FeedPostType } from '@/services/socialService';
 import type { SearchResponse } from '@/services/recommendationsApiService';
+import {
+  getLastViewedFeedTimestamp,
+  setLastViewedFeedTimestamp,
+  countNewPosts,
+  getFirstNewPostIndex,
+} from '@/utils/feedTimestamp';
 
 // Helper functions
 const getInitials = (name: string): string => 
@@ -54,27 +56,20 @@ const SocialFeedPage: React.FC = () => {
   
   // Local state
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
-  const [askOpen, setAskOpen] = useState(false);
   const [selectedCity, setSelectedCity] = useState<{ id?: string; name?: string } | undefined>(undefined);
   const [selectedCategoryKeys, setSelectedCategoryKeys] = useState<string[]>([]);
+  const [includeMyPostsInSearch, setIncludeMyPostsInSearch] = useState(false);
+  const [showNewPostsBanner, setShowNewPostsBanner] = useState(false);
+  const [newPostsCount, setNewPostsCount] = useState(0);
   
   // Refs
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const isSearchingRef = useRef(false);
   const lastSearchTimeRef = useRef(0);
   const cityBarRef = useRef<HTMLDivElement>(null);
-  
-  // Guard to prevent modal from opening during/after search operations
-  const setAskOpenSafe = useCallback((value: boolean) => {
-    if (value === true) {
-      const timeSinceSearch = Date.now() - lastSearchTimeRef.current;
-      // Block modal opening if search was just performed (within 500ms)
-      if (isSearchingRef.current || timeSinceSearch < 500) {
-        return;
-      }
-    }
-    setAskOpen(value);
-  }, []);
+  const postRefs = useRef<Map<string | number, HTMLDivElement>>(new Map());
+  const firstNewPostRef = useRef<HTMLDivElement | null>(null);
+  const initialScrollYRef = useRef<number>(0);
   
   // Search functionality
   const {
@@ -136,6 +131,104 @@ const SocialFeedPage: React.FC = () => {
       console.log(`📊 [REACT-QUERY] Stats: ${typedPosts.length} posts, ${typedSuggestedUsers.length} suggested users`);
     }
   }, [loading, suggestedUsersLoading, typedPosts.length, typedSuggestedUsers.length]);
+
+  // Calculate new posts count when feed loads
+  useEffect(() => {
+    if (!loading && typedPosts.length > 0 && !searchResponse) {
+      const lastViewed = getLastViewedFeedTimestamp();
+      const count = countNewPosts(typedPosts, lastViewed);
+      setNewPostsCount(count);
+      setShowNewPostsBanner(count > 0);
+      
+      // Reset ref when posts change
+      firstNewPostRef.current = null;
+    } else if (searchResponse) {
+      // Hide banner during search
+      setShowNewPostsBanner(false);
+    }
+  }, [loading, typedPosts, searchResponse]);
+
+  // Update last viewed timestamp when user leaves the page or when page becomes hidden
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && typedPosts.length > 0) {
+        // Update to the most recent post's timestamp when user switches tabs or minimizes
+        const mostRecentPost = typedPosts[0];
+        if (mostRecentPost?.created_at) {
+          setLastViewedFeedTimestamp(mostRecentPost.created_at);
+        }
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      if (typedPosts.length > 0) {
+        // Update to the most recent post's timestamp
+        const mostRecentPost = typedPosts[0];
+        if (mostRecentPost?.created_at) {
+          setLastViewedFeedTimestamp(mostRecentPost.created_at);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [typedPosts]);
+
+  // Scroll detection to auto-dismiss banner
+  useEffect(() => {
+    if (!showNewPostsBanner || newPostsCount === 0) return;
+
+    // Record initial scroll position when banner appears
+    initialScrollYRef.current = window.scrollY || window.pageYOffset;
+
+    let scrollTimeout: NodeJS.Timeout;
+    
+    const handleScroll = () => {
+      // Debounce scroll events
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        const currentScrollY = window.scrollY || window.pageYOffset;
+        const scrollDelta = currentScrollY - initialScrollYRef.current;
+        
+        // If user has scrolled down significantly (200px), dismiss banner
+        if (scrollDelta > 200) {
+          setShowNewPostsBanner(false);
+          if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+            setLastViewedFeedTimestamp(typedPosts[0].created_at);
+          }
+          return;
+        }
+        
+        // Also check if we've scrolled past the first new post
+        if (firstNewPostRef.current) {
+          const headerHeight = 64;
+          const cityBarHeight = window.innerWidth >= 1024 ? 64 : 56;
+          const totalOffset = headerHeight + cityBarHeight;
+          
+          const firstNewPostTop = firstNewPostRef.current.getBoundingClientRect().top;
+
+          // If user has scrolled past the first new post (accounting for fixed headers), dismiss banner
+          if (firstNewPostTop < totalOffset - 50) {
+            setShowNewPostsBanner(false);
+            // Update timestamp to the most recent post
+            if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+              setLastViewedFeedTimestamp(typedPosts[0].created_at);
+            }
+          }
+        }
+      }, 100); // Debounce by 100ms
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(scrollTimeout);
+    };
+  }, [showNewPostsBanner, newPostsCount, typedPosts]);
 
   // Infinite scroll effect
   useEffect(() => {
@@ -200,20 +293,82 @@ const SocialFeedPage: React.FC = () => {
   const handleSearchCleared = useCallback(() => {
     // If user clears the query input, just clear search state, don't open modal
     clearSearch();
+    setIncludeMyPostsInSearch(false);
   }, [clearSearch]);
 
+  const handleShowNewPosts = useCallback(() => {
+    if (firstNewPostRef.current) {
+      // Account for fixed header (64px) and city bar (56px mobile, 64px desktop)
+      const headerHeight = 64;
+      const cityBarHeight = window.innerWidth >= 1024 ? 64 : 56;
+      const offset = headerHeight + cityBarHeight + 20; // 20px padding
+      
+      const elementTop = firstNewPostRef.current.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({
+        top: Math.max(0, elementTop - offset),
+        behavior: 'smooth',
+      });
+    } else {
+      // Fallback: refresh the feed
+      queryClient.invalidateQueries({ queryKey: ['feed', currentUser?.id, selectedGroupIds] });
+    }
+  }, [currentUser?.id, selectedGroupIds, queryClient]);
+
+  const handleDismissBanner = useCallback(() => {
+    setShowNewPostsBanner(false);
+    // Update timestamp to current time (user has seen the new posts notification)
+    if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+      setLastViewedFeedTimestamp(typedPosts[0].created_at);
+    }
+  }, [typedPosts]);
+
   // Computed values - now using centralized getScore from hook
+  const { matchedRecIds, matchedAnswerRecIds, matchedQuestionIds } = useMemo(() => {
+    const recIds = new Set<number>();
+    const answerRecIds = new Set<number>();
+    const questionIds = new Set<number>();
+    if (searchResponse) {
+      for (const group of (searchResponse as any).results || []) {
+        if (Array.isArray((group as any).recommendations)) {
+          for (const rec of (group as any).recommendations) {
+            if (typeof rec.recommendation_id === 'number') recIds.add(rec.recommendation_id);
+          }
+        }
+      }
+      const qna = (searchResponse as any).qna;
+      if (qna?.answers) {
+        for (const a of qna.answers) {
+          const id = (a as any).recommendation_id ?? (a as any).id;
+          if (typeof id === 'number') answerRecIds.add(id);
+        }
+      }
+      if (qna?.questions) {
+        for (const q of qna.questions) {
+          if (typeof q.id === 'number') questionIds.add(q.id);
+        }
+      }
+    }
+    return { matchedRecIds: recIds, matchedAnswerRecIds: answerRecIds, matchedQuestionIds: questionIds };
+  }, [searchResponse]);
+
+  const matchedPosts = useMemo(() => {
+    if (!searchResponse) return typedPosts;
+    return (typedPosts as any[]).filter(p => {
+      if (p.type === 'recommendation') return matchedRecIds.has(p.recommendation_id);
+      if (p.type === 'answer') return matchedAnswerRecIds.has(p.recommendation_id);
+      if (p.type === 'question') return matchedQuestionIds.has(p.id);
+      return false;
+    });
+  }, [typedPosts, searchResponse, matchedRecIds, matchedAnswerRecIds, matchedQuestionIds]);
 
   const orderedPosts = useMemo(() => {
     if (searchResponse) {
-      // Sort posts by search score and attach the scores to each post
-      const sortedPosts = [...typedPosts].sort((a, b) => getScore(b) - getScore(a));
-      
-      // Use centralized method to attach scores
+      // Sort strictly matched posts by search score and attach scores
+      const sortedPosts = [...matchedPosts].sort((a, b) => getScore(b) - getScore(a));
       return attachScoresToPosts(sortedPosts);
     }
     return typedPosts;
-  }, [typedPosts, searchResponse, getScore, attachScoresToPosts]);
+  }, [typedPosts, matchedPosts, searchResponse, getScore, attachScoresToPosts]);
 
   // Build city summaries from live feed posts
   const deriveCityKey = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
@@ -367,8 +522,19 @@ const SocialFeedPage: React.FC = () => {
   };
 
   const filteredPosts = useMemo(() => {
-    if ((!selectedCity?.id && !selectedCity?.name && selectedCategoryKeys.length === 0)) return orderedPosts;
-    return (orderedPosts as any[]).filter(p => {
+    let base = orderedPosts as any[];
+
+    // During search, exclude my recommendation/answer posts unless explicitly included
+    if (searchResponse && !includeMyPostsInSearch && currentUser?.id) {
+      const myId = String(currentUser.id);
+      base = base.filter(
+        (p: any) =>
+          !(String(p.user_id) === myId && (p.type === 'recommendation' || p.type === 'answer'))
+      );
+    }
+
+    if ((!selectedCity?.id && !selectedCity?.name && selectedCategoryKeys.length === 0)) return base;
+    return (base as any[]).filter(p => {
       // City filter: require a match when a city is selected
       if (selectedCity && !matchesSelectedCity(p, selectedCity)) return false;
       // Categories filter: require at least one match when categories selected
@@ -378,7 +544,7 @@ const SocialFeedPage: React.FC = () => {
       }
       return true;
     });
-  }, [orderedPosts, selectedCity, selectedCategoryKeys]);
+  }, [orderedPosts, searchResponse, includeMyPostsInSearch, currentUser?.id, selectedCity, selectedCategoryKeys]);
 
   // Derive available categories for the current scope (Worldwide or selected city)
   const availableCategories = useMemo(() => {
@@ -432,7 +598,7 @@ const SocialFeedPage: React.FC = () => {
   const renderFeedContent = () => {
     if (loading) {
       return (
-        <div className="space-y-6">
+        <div className="space-y-1.5">
           {Array.from({ length: 3 }).map((_, i) => (
             <FeedPostSkeleton key={i} />
           ))}
@@ -469,32 +635,61 @@ const SocialFeedPage: React.FC = () => {
 
     const shouldGroup = Boolean(searchResponse);
     if (!shouldGroup) {
+      const lastViewed = getLastViewedFeedTimestamp();
+      const firstNewIndex = getFirstNewPostIndex(filteredPosts, lastViewed);
+      let firstNewPostSet = false; // Track if we've set the ref
+      
       return (
-        <div className="space-y-6">
-          {filteredPosts.map((post: any) => {
+        <div className="space-y-1.5">
+          {filteredPosts.map((post: any, index: number) => {
+            const postId = post.recommendation_id || post.id;
+            const isFirstNewPost = !firstNewPostSet && index === firstNewIndex && firstNewIndex >= 0;
+            
+            if (isFirstNewPost) {
+              firstNewPostSet = true;
+            }
+            
             if (post.type === 'question') {
               return (
-                <QuestionFeedPost
+                <div
                   key={`q-${post.id}`}
-                  question={post}
+                  ref={isFirstNewPost ? (el) => {
+                    if (el) {
+                      firstNewPostRef.current = el;
+                    }
+                  } : undefined}
+                  data-is-new-post={isFirstNewPost ? 'true' : undefined}
+                >
+                  <QuestionFeedPost
+                    question={post}
+                    currentUserId={currentUser?.id || ''}
+                    onQuestionUpdate={() => {
+                      // Invalidate and refetch the feed data
+                      queryClient.invalidateQueries({ queryKey: ['feed', currentUser?.id, selectedGroupIds] });
+                    }}
+                  />
+                </div>
+              );
+            }
+            return (
+              <div
+                key={post.recommendation_id}
+                ref={isFirstNewPost ? (el) => {
+                  if (el) {
+                    firstNewPostRef.current = el;
+                  }
+                } : undefined}
+                data-is-new-post={isFirstNewPost ? 'true' : undefined}
+              >
+                <FeedPost
+                  post={post}
                   currentUserId={currentUser?.id || ''}
-                  onQuestionUpdate={() => {
+                  onPostUpdate={() => {
                     // Invalidate and refetch the feed data
                     queryClient.invalidateQueries({ queryKey: ['feed', currentUser?.id, selectedGroupIds] });
                   }}
                 />
-              );
-            }
-            return (
-              <FeedPost
-                key={post.recommendation_id}
-                post={post}
-                currentUserId={currentUser?.id || ''}
-                onPostUpdate={() => {
-                  // Invalidate and refetch the feed data
-                  queryClient.invalidateQueries({ queryKey: ['feed', currentUser?.id, selectedGroupIds] });
-                }}
-              />
+              </div>
             );
           })}
           
@@ -668,6 +863,7 @@ const SocialFeedPage: React.FC = () => {
       </div>
       {/* Spacer to offset fixed bar height */}
       <div className="h-[56px] lg:h-[64px]" />
+      
       <div className="container mx-auto px-4 py-8">
         <div className={`grid grid-cols-1 gap-8 ${typedSuggestedUsers.length > 0 ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
           <div className={typedSuggestedUsers.length > 0 ? 'lg:col-span-3' : 'lg:col-span-1'}>
@@ -683,6 +879,15 @@ const SocialFeedPage: React.FC = () => {
               />
             </div>
             
+            {/* New Posts Banner - small floating element above posts */}
+            {showNewPostsBanner && newPostsCount > 0 && (
+              <NewPostsBanner
+                count={newPostsCount}
+                onShowNewPosts={handleShowNewPosts}
+                onDismiss={handleDismissBanner}
+              />
+            )}
+            
             {(searchResponse || streamingText) && (
               <div className="mb-12">
                 <AIResponseBanner
@@ -693,10 +898,22 @@ const SocialFeedPage: React.FC = () => {
                     recs: searchResponse.total_recommendations 
                   } : undefined}
                 />
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    id="toggle-include-own"
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={includeMyPostsInSearch}
+                    onChange={(e) => setIncludeMyPostsInSearch(e.target.checked)}
+                  />
+                  <label htmlFor="toggle-include-own" className="text-sm text-muted-foreground">
+                    Include my posts
+                  </label>
+                </div>
               </div>
             )}
             
-            <div className="space-y-8">
+            <div className="space-y-1.5">
               {renderFeedContent()}
             </div>
           </div>
@@ -712,20 +929,6 @@ const SocialFeedPage: React.FC = () => {
           )}
         </div>
       </div>
-      {/* Floating Ask button */}
-      <button
-        type="button"
-        className="fixed bottom-6 right-6 z-50 rounded-none border-2 border-black bg-yellow-300 px-6 py-3 text-black shadow-[6px_6px_0_0_#000] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[4px_4px_0_0_#000]"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setAskOpenSafe(true);
-        }}
-        aria-label="Ask a question"
-      >
-        <span className="font-extrabold tracking-wide">ASK</span>
-      </button>
-      <AskQuestionModal open={askOpen} initialText="" onClose={() => setAskOpenSafe(false)} />
     </div>
   );
 };

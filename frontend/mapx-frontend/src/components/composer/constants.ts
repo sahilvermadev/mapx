@@ -10,8 +10,6 @@
 export const CONTENT_TYPES = {
   PLACE: 'place',
   SERVICE: 'service',
-  TIP: 'tip',
-  CONTACT: 'contact',
   UNCLEAR: 'unclear',
 } as const;
 

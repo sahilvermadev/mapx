@@ -39,116 +39,6 @@ if (!_g._mxSummaryCache) _g._mxSummaryCache = new Map<string, { text: string; ts
 const EMBED_TTL_MS = 60_000;
 const SUMMARY_TTL_MS = 10 * 60_000;
 
-/**
- * Filter search results to only include semantically relevant recommendations
- * Uses keyword-based filtering and AI validation to ensure relevance
- */
-async function filterRelevantResults(
-  recommendations: any[], 
-  query: string
-): Promise<any[]> {
-  if (recommendations.length === 0) {
-    return [];
-  }
-
-  
-  // First pass: keyword-based filtering
-  const queryLower = query.toLowerCase();
-  const relevantKeywords = extractRelevantKeywords(queryLower);
-  
-  const keywordFiltered = recommendations.filter(rec => {
-    const description = (rec.description || '').toLowerCase();
-    const title = (rec.title || '').toLowerCase();
-    const contentData = rec.content_data || {};
-    const serviceType = (contentData.service_type || '').toLowerCase();
-    const placeName = (contentData.place_name || '').toLowerCase();
-    const serviceName = (contentData.service_name || '').toLowerCase();
-    
-    // Also check the raw content_data for any relevant fields
-    const allContentText = Object.values(contentData).join(' ').toLowerCase();
-    
-    // Check if any relevant keyword appears in the recommendation
-    const hasRelevantKeyword = relevantKeywords.some(keyword => 
-      description.includes(keyword) || 
-      title.includes(keyword) || 
-      serviceType.includes(keyword) ||
-      placeName.includes(keyword) ||
-      serviceName.includes(keyword) ||
-      allContentText.includes(keyword)
-    );
-    
-    return hasRelevantKeyword;
-  });
-  
-  
-  // If we have very few results after keyword filtering, be more lenient
-  if (keywordFiltered.length === 0 && recommendations.length > 0) {
-    // Return only high-similarity results (above 0.85) as a fallback
-    const highSimilarityResults = recommendations.filter(rec => rec.similarity > 0.85);
-    
-    // If still no results, return top 3 as fallback
-    if (highSimilarityResults.length === 0) {
-      return recommendations.slice(0, 3);
-    }
-    
-    return highSimilarityResults;
-  }
-  
-  return keywordFiltered;
-}
-
-/**
- * Extract relevant keywords from a search query
- */
-function extractRelevantKeywords(query: string): string[] {
-  const keywords = [];
-  
-  // Common service mappings with comprehensive keyword sets
-  const serviceMappings: Record<string, string[]> = {
-    'painter': ['painter', 'painting', 'paint', 'interior', 'exterior', 'wall', 'color', 'brush', 'coating', 'finish', 'mural', 'decorative'],
-    'electrician': ['electrician', 'electrical', 'wiring', 'electric', 'power', 'outlet', 'circuit', 'switch', 'light', 'installation'],
-    'plumber': ['plumber', 'plumbing', 'pipe', 'water', 'drain', 'toilet', 'faucet', 'leak', 'repair', 'installation'],
-    'carpenter': ['carpenter', 'carpentry', 'wood', 'furniture', 'cabinet', 'shelf', 'door', 'window', 'frame'],
-    'contractor': ['contractor', 'construction', 'renovation', 'remodel', 'building', 'repair', 'maintenance'],
-    'cleaner': ['cleaner', 'cleaning', 'housekeeping', 'maid', 'janitor', 'sanitize', 'disinfect'],
-    'gardener': ['gardener', 'gardening', 'landscape', 'lawn', 'plant', 'tree', 'flower', 'yard', 'garden'],
-    'mechanic': ['mechanic', 'auto', 'car', 'vehicle', 'repair', 'engine', 'brake', 'tire', 'maintenance'],
-    'chef': ['chef', 'cooking', 'catering', 'food', 'kitchen', 'restaurant', 'meal', 'recipe'],
-    'photographer': ['photographer', 'photography', 'photo', 'camera', 'wedding', 'event', 'portrait', 'studio']
-  };
-  
-  // Find matching service types
-  for (const [service, terms] of Object.entries(serviceMappings)) {
-    if (query.includes(service)) {
-      keywords.push(...terms);
-    }
-  }
-  
-  // Add the original query words
-  const words = query.split(/\s+/).filter(word => word.length > 2);
-  keywords.push(...words);
-  
-  // Add common service-related terms that might appear in descriptions
-  const commonServiceTerms = ['service', 'professional', 'expert', 'specialist', 'technician', 'worker', 'provider'];
-  keywords.push(...commonServiceTerms);
-  
-  // Add variations of common words
-  const queryWords = query.toLowerCase().split(/\s+/);
-  queryWords.forEach(word => {
-    if (word.length > 3) {
-      // Add plural/singular variations
-      if (word.endsWith('s')) {
-        keywords.push(word.slice(0, -1)); // painter -> paint
-      } else {
-        keywords.push(word + 's'); // paint -> paints
-      }
-    }
-  });
-  
-  return [...new Set(keywords)]; // Remove duplicates
-}
-
-
 // Helpers
 function normalizeContactInfo(raw: any, description?: string): { phone?: string; email?: string } {
   // Accept string or { phone, email }
@@ -183,7 +73,7 @@ function normalizeContactInfo(raw: any, description?: string): { phone?: string;
 // Interface for the recommendation request
 interface SaveRecommendationRequest {
   // Content classification
-  content_type?: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
+  content_type?: 'place' | 'service' | 'unclear';
   
   // Place data (optional, only for place-type recommendations)
   google_place_id?: string;
@@ -346,7 +236,15 @@ router.post('/save', async (req, res) => {
     }
 
     // Determine content type using client hint or inferred from provided fields
-    let finalContentType: 'place' | 'service' | 'tip' | 'contact' | 'unclear' = content_type || 'unclear';
+    // Reject deprecated types (tip, contact) if provided
+    const contentTypeStr = content_type as string | undefined;
+    if (contentTypeStr && (contentTypeStr === 'tip' || contentTypeStr === 'contact')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Content types "tip" and "contact" are no longer supported. Please use "place" or "service".'
+      });
+    }
+    let finalContentType: 'place' | 'service' | 'unclear' = (content_type === 'place' || content_type === 'service' || content_type === 'unclear') ? content_type : 'unclear';
     if (finalContentType === 'unclear' || !finalContentType) {
       // Infer from payload: if service identifiers exist, treat as service
       if (service_name || service_phone || service_email || service_type || service_business_name) {
@@ -975,13 +873,16 @@ router.put('/:recommendationId', async (req, res) => {
 /**
  * DELETE /api/recommendations/:recommendationId
  * Delete a specific recommendation
+ * Uses authenticated user ID from JWT token (req.user.id) for security
  */
 router.delete('/:recommendationId', async (req, res) => {
   try {
     const { recommendationId } = req.params;
     const recommendationIdNum = parseInt(recommendationId);
-    const { user_id } = req.body; // User ID should be provided in request body for authorization
-
+    
+    // Get user ID from authenticated JWT token (set by authenticateJWT middleware)
+    const userId = (req as any).user?.id;
+    
     if (isNaN(recommendationIdNum)) {
       return res.status(400).json({
         success: false,
@@ -989,14 +890,14 @@ router.delete('/:recommendationId', async (req, res) => {
       });
     }
 
-    if (!user_id) {
-      return res.status(400).json({
+    if (!userId) {
+      return res.status(401).json({
         success: false,
-        message: 'User ID is required for authorization'
+        message: 'Authentication required'
       });
     }
 
-    const success = await deleteRecommendation(recommendationIdNum, user_id);
+    const success = await deleteRecommendation(recommendationIdNum, userId);
 
     if (!success) {
       return res.status(404).json({
@@ -1105,11 +1006,6 @@ router.post('/search', async (req, res) => {
     }
 
     // Search for similar recommendations
-    // Check if there are any recommendations in the database
-    const totalRecsResult = await pool.query('SELECT COUNT(*) as count FROM recommendations WHERE embedding IS NOT NULL');
-    
-    // Check if user has any followed users
-    const followedUsersResult = await pool.query('SELECT COUNT(*) as count FROM user_follows WHERE follower_id = $1', [currentUserId]);
     const similarRecommendations = await searchRecommendationsBySimilarity(
       searchEmbedding,
       limit,
@@ -1156,68 +1052,98 @@ router.post('/search', async (req, res) => {
       }
     })();
 
-    // Get detailed information for each recommendation
-    const searchResults = await Promise.all(
-      relevantRecommendations.map(async (recommendation) => {
-        // Get place information (if applicable)
-        let placeInfo = {};
-        if (recommendation.place_id) {
-          const placeQuery = await pool.query(
-            'SELECT name, address, lat, lng, google_place_id FROM places WHERE id = $1',
-            [recommendation.place_id]
-          );
-          const place = placeQuery.rows[0] || {};
-          placeInfo = {
-            place_id: recommendation.place_id,
-            place_name: place.name || 'Unknown Place',
-            place_address: place.address,
-            place_lat: place.lat,
-            place_lng: place.lng,
-            google_place_id: place.google_place_id
-          };
-        }
+    // Batch fetch all related data to avoid N+1 query problem
+    // Collect all unique IDs first
+    const placeIds = [...new Set(relevantRecommendations.map(r => r.place_id).filter((id): id is number => id != null))];
+    const serviceIds = [...new Set(relevantRecommendations.map(r => (r as any).service_id).filter((id): id is number => id != null))];
+    const userIds = [...new Set(relevantRecommendations.map(r => r.user_id))];
 
-        // Get service information (if applicable)
-        let serviceInfo = {} as any;
-        if ((recommendation as any).service_id) {
-          const serviceQuery = await pool.query(
-            'SELECT id, name, service_type, business_name, address FROM services WHERE id = $1',
-            [(recommendation as any).service_id]
-          );
-          const service = serviceQuery.rows[0] || {};
-          serviceInfo = {
-            service_id: service.id,
-            service_name: service.name || 'Unknown Service',
-            service_type: service.service_type || null,
-            service_business_name: service.business_name || null,
-            service_address: service.address || null
-          };
-        }
+    // Batch fetch all places (1 query instead of N)
+    const placesMap = new Map<number, any>();
+    if (placeIds.length > 0) {
+      const placesQuery = await pool.query(
+        'SELECT id, name, address, lat, lng, google_place_id, primary_type, types FROM places WHERE id = ANY($1::int[])',
+        [placeIds]
+      );
+      placesQuery.rows.forEach((place: any) => {
+        placesMap.set(place.id, place);
+      });
+    }
 
-        // Get user information
-        const userQuery = await pool.query(
-          'SELECT display_name FROM users WHERE id = $1',
-          [recommendation.user_id]
-        );
-        const user = userQuery.rows[0] || {};
+    // Batch fetch all services (1 query instead of N)
+    const servicesMap = new Map<number, any>();
+    if (serviceIds.length > 0) {
+      const servicesQuery = await pool.query(
+        'SELECT id, name, service_type, business_name, address FROM services WHERE id = ANY($1::int[])',
+        [serviceIds]
+      );
+      servicesQuery.rows.forEach((service: any) => {
+        servicesMap.set(service.id, service);
+      });
+    }
 
-        return {
-          recommendation_id: recommendation.id,
-          content_type: recommendation.content_type,
-          title: recommendation.title,
-          description: recommendation.description,
-          content_data: recommendation.content_data,
-          user_name: user.display_name || 'Anonymous',
-          rating: recommendation.rating,
-          labels: recommendation.labels,
-          metadata: recommendation.metadata,
-          similarity: recommendation.similarity,
-          created_at: recommendation.created_at,
-          ...placeInfo,
-          ...serviceInfo
-        } as any;
-      })
-    );
+    // Batch fetch all users (1 query instead of N)
+    const usersMap = new Map<string, any>();
+    if (userIds.length > 0) {
+      const usersQuery = await pool.query(
+        'SELECT id, display_name FROM users WHERE id = ANY($1::uuid[])',
+        [userIds]
+      );
+      usersQuery.rows.forEach((user: any) => {
+        usersMap.set(user.id, user);
+      });
+    }
+
+    // Build search results using the pre-fetched data (no additional queries)
+    const searchResults = relevantRecommendations.map((recommendation) => {
+      // Get place information (if applicable)
+      let placeInfo = {};
+      if (recommendation.place_id) {
+        const place = placesMap.get(recommendation.place_id) || {};
+        placeInfo = {
+          place_id: recommendation.place_id,
+          place_name: place.name || 'Unknown Place',
+          place_address: place.address,
+          place_lat: place.lat,
+          place_lng: place.lng,
+          google_place_id: place.google_place_id,
+          place_primary_type: place.primary_type,
+          place_types: place.types || []
+        };
+      }
+
+      // Get service information (if applicable)
+      let serviceInfo = {} as any;
+      if ((recommendation as any).service_id) {
+        const service = servicesMap.get((recommendation as any).service_id) || {};
+        serviceInfo = {
+          service_id: service.id,
+          service_name: service.name || 'Unknown Service',
+          service_type: service.service_type || null,
+          service_business_name: service.business_name || null,
+          service_address: service.address || null
+        };
+      }
+
+      // Get user information
+      const user = usersMap.get(recommendation.user_id) || {};
+
+      return {
+        recommendation_id: recommendation.id,
+        content_type: recommendation.content_type,
+        title: recommendation.title,
+        description: recommendation.description,
+        content_data: recommendation.content_data,
+        user_name: user.display_name || 'Anonymous',
+        rating: recommendation.rating,
+        labels: recommendation.labels,
+        metadata: recommendation.metadata,
+        similarity: recommendation.similarity,
+        created_at: recommendation.created_at,
+        ...placeInfo,
+        ...serviceInfo
+      } as any;
+    });
 
     // Group results by place (for place-type recommendations) or by content type
     const groupedResults = new Map();
@@ -1239,6 +1165,8 @@ router.post('/search', async (req, res) => {
           place_lat: r.place_lat,
           place_lng: r.place_lng,
           google_place_id: r.google_place_id,
+          place_primary_type: r.place_primary_type,
+          place_types: r.place_types || [],
           recommendations: [],
           average_similarity: 0,
           total_recommendations: 0
