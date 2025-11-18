@@ -616,7 +616,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
       });
 
       return (
-        <div className="flex items-start gap-3 md:gap-4 pr-24 md:pr-36">
+        <div className="flex items-start gap-3 md:gap-4 pr-10 md:pr-12">
           <button
             onClick={() => navigate(`/profile/${postData.user_id}`)}
             className="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
@@ -628,7 +628,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             </Avatar>
           </button>
 
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 w-full">
             <div className="mb-2">
               <div className="flex items-center gap-2 md:gap-2.5 flex-wrap">
                 <button
@@ -936,7 +936,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     }
 
   return (
-    <div className={`flex items-start gap-3 md:gap-4 ${noOuterSpacing ? '' : 'pr-24 md:pr-36'}`}>
+    <div className={`flex items-start gap-3 md:gap-4 ${noOuterSpacing ? '' : 'pr-10 md:pr-12'}`}>
         <button
           onClick={() => navigate(`/profile/${postData.user_id}`)}
           className="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
@@ -948,7 +948,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           </Avatar>
         </button>
 
-        <div className={`flex-1 min-w-0 ${noOuterSpacing ? 'max-w-3xl' : ''}`}>
+        <div className={`flex-1 min-w-0 ${noOuterSpacing ? 'max-w-3xl' : 'w-full'}`}>
           <div className="mb-2">
             <div className="flex items-center gap-2 md:gap-2.5 flex-wrap">
               <button
