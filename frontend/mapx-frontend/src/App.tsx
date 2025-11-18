@@ -12,6 +12,7 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 // Lazy load page components for better performance
 const MapPage = lazy(() => import('./pages/MapPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
+const ManifestoPage = lazy(() => import('./pages/ManifestoPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const SocialFeedPage = lazy(() => import('./pages/SocialFeedPage'));
 const FriendsPage = lazy(() => import('./pages/FriendsPage'));
@@ -38,7 +39,7 @@ const AppContent: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const isMapRoute = location.pathname === '/map';
-  const isLandingRoute = location.pathname === '/landing';
+  const isLandingRoute = location.pathname === '/landing' || location.pathname === '/manifesto';
   const isRootRoute = location.pathname === '/';
   const { 
     logout, 
@@ -167,6 +168,7 @@ const AppContent: React.FC = () => {
           <Suspense fallback={<LoadingSkeleton />}>
             <Routes>
               <Route path="/landing" element={<LandingPage />} />
+              <Route path="/manifesto" element={<ManifestoPage />} />
               <Route path="/profile/:userId" element={<ProfilePage />} />
               <Route path="/feed" element={<SocialFeedPage />} />
               <Route path="/friends" element={<FriendsPage />} />

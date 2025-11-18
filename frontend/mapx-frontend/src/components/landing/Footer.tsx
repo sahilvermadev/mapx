@@ -1,68 +1,43 @@
-export function Footer() {
+type FooterProps = {
+  variant?: 'light' | 'dark';
+};
+
+export function Footer({ variant = 'light' }: FooterProps) {
+  const isDark = variant === 'dark';
+  
   return (
-    <footer className="border-t-4 border-black bg-white">
+    <footer className={`border-t-4 ${isDark ? 'border-white/20 bg-black' : 'border-black bg-white'}`}>
       <div className="container mx-auto px-6 py-16">
-        {/* Main Footer Content */}
-        <div className="grid md:grid-cols-4 gap-8 mb-12">
-          {/* Brand */}
-          <div>
-            <div className="text-xl font-bold mb-4 text-black">Recce</div>
-            <p className="text-gray-600 text-sm leading-relaxed">
-              AI-powered local discovery through your trusted network. 
-              Finally, recommendations you can trust.
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-10 mb-12">
+          <div className="space-y-4 max-w-md">
+            <div className={`text-xl font-bold ${isDark ? 'text-white' : 'text-black'}`}>Rekky</div>
+            <p className={`text-sm leading-relaxed ${isDark ? 'text-zinc-400' : 'text-gray-600'}`}>
+              Invite-only discovery for people who would rather keep the signal high and the noise out.
+              Private vaults, sealed AI, and circles that decide what leaves the room.
             </p>
           </div>
 
-          {/* Product */}
-          <div>
-            <h3 className="font-medium mb-4 text-gray-900">Product</h3>
-            <ul className="space-y-2 text-sm">
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Features</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">How it Works</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">AI Search</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Privacy</a></li>
-            </ul>
-          </div>
-
-          {/* Company */}
-          <div>
-            <h3 className="font-medium mb-4 text-gray-900">Company</h3>
-            <ul className="space-y-2 text-sm">
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">About</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Careers</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Press</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Blog</a></li>
-            </ul>
-          </div>
-
-          {/* Support */}
-          <div>
-            <h3 className="font-medium mb-4 text-gray-900">Support</h3>
-            <ul className="space-y-2 text-sm">
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Help Center</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Contact</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Community</a></li>
-              <li><a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Status</a></li>
-            </ul>
+          <div className="space-y-2 text-sm">
+            <p className={`uppercase tracking-[0.35em] ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
+              Contact
+            </p>
+            <p className={isDark ? 'text-white' : 'text-gray-900'}>hello@rekky.app</p>
+            <p className={`text-xs ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
+              No public roadmaps. Just DM if you actually need us.
+            </p>
           </div>
         </div>
 
         {/* Bottom Bar */}
-        <div className="border-t border-gray-200 pt-8">
+        <div className={`border-t pt-8 ${isDark ? 'border-white/20' : 'border-gray-200'}`}>
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="text-gray-600 text-sm">
-              © 2024 Recce. All rights reserved.
-            </div>
-            
-            <div className="flex gap-6 text-sm">
-              <a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Privacy</a>
-              <a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Terms</a>
-              <a href="#" className="text-gray-600 hover:text-gray-900 transition-colors">Cookies</a>
+            <div className={`text-sm ${isDark ? 'text-zinc-400' : 'text-gray-600'}`}>
+              © 2024 Rekky. All rights reserved.
             </div>
 
-            <div className="text-gray-600 text-sm">
-              hello@recce.app
-            </div>
+            <p className={`text-xs uppercase tracking-[0.35em] ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
+              No ads · No public profiles · No viral loops
+            </p>
           </div>
         </div>
       </div>

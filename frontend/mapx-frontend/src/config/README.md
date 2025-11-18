@@ -1,6 +1,30 @@
-# API Configuration
+# Configuration Directory
 
-This directory contains centralized configuration for API and backend URLs.
+This directory contains centralized configuration files for the MAPX application.
+
+## Files
+
+- **`apiConfig.ts`** - API and backend URL configuration
+- **`searchConfig.ts`** - Search functionality configuration
+- **`designSystem.ts`** - **Design system tokens and utilities** (see [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md))
+- **`DESIGN_SYSTEM.md`** - Complete design system documentation
+
+## Design System
+
+All UI design tokens, colors, typography, spacing, shadows, and animations are centralized in `designSystem.ts`. This ensures consistent design language across all components and pages.
+
+**Quick Start:**
+```typescript
+import designSystem from '@/config/designSystem';
+// or import specific tokens
+import { colors, spacing, shadows } from '@/config/designSystem';
+```
+
+See [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md) for complete documentation.
+
+---
+
+# API Configuration
 
 ## Overview
 

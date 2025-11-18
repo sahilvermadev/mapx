@@ -1,10 +1,13 @@
 import React, { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Header } from '@/components/landing/Header';
 import { Hero } from '@/components/landing/Hero';
-import { ProblemSolution } from '@/components/landing/ProblemSolution';
-import { Features } from '@/components/landing/Features';
-import { HowItWorks } from '@/components/landing/HowItWorks';
-import { CallToAction } from '@/components/landing/CallToAction';
+import { SignalNoiseSection } from '@/components/landing/SignalNoiseSection';
+import { TrustCommonsSection } from '@/components/landing/TrustCommonsSection';
+import { FlywheelSection } from '@/components/landing/FlywheelSection';
+import { PrinciplesSection } from '@/components/landing/PrinciplesSection';
+import { FinalCTA } from '@/components/landing/FinalCTA';
+import { ManifestoPreviewSection } from '@/components/landing/ManifestoPreviewSection';
 import { Footer } from '@/components/landing/Footer';
 import { LoginModal } from '@/auth';
 
@@ -16,19 +19,23 @@ import { LoginModal } from '@/auth';
  */
 const LandingPage: React.FC = () => {
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const navigate = useNavigate();
 
   const openLoginModal = useCallback(() => setShowLoginModal(true), []);
   const closeLoginModal = useCallback(() => setShowLoginModal(false), []);
+  const goToManifesto = useCallback(() => navigate('/manifesto'), [navigate]);
 
   return (
     <div className="min-h-screen bg-white">
       {showLoginModal && <LoginModal onClose={closeLoginModal} />}
       <Header onSignInClick={openLoginModal} />
-      <Hero />
-      <ProblemSolution />
-      <Features />
-      <HowItWorks />
-      <CallToAction />
+      <Hero onReadManifesto={goToManifesto} />
+      <SignalNoiseSection />
+      <ManifestoPreviewSection />
+      <TrustCommonsSection />
+      <FlywheelSection />
+      <PrinciplesSection />
+      <FinalCTA />
       <Footer />
     </div>
   );

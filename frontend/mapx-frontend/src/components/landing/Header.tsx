@@ -1,5 +1,5 @@
 import { Button } from "../ui/button";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/auth";
 
 interface HeaderProps {
@@ -25,20 +25,16 @@ export function Header({ onSignInClick, variant = 'light', hideNav = false, posi
       <div className="container mx-auto px-6 h-16 flex items-center justify-between relative">
         {/* Logo */}
         <div className="flex items-center space-x-2">
+          {!isAuthenticated ? (
+            <Link to="/landing" className="cursor-pointer">
+              <span className={variant === 'dark' ? 'text-xl font-bold text-white' : 'text-xl font-bold text-black'}>REKKY</span>
+            </Link>
+          ) : (
           <span className={variant === 'dark' ? 'text-xl font-bold text-white' : 'text-xl font-bold text-black'}>REKKY</span>
+          )}
         </div>
 
-        {/* Navigation - Centered */}
-        {!hideNav && (
-          <nav className="hidden md:flex items-center space-x-8 absolute left-1/2 transform -translate-x-1/2">
-            <a href="#features" className={variant === 'dark' ? 'text-white/70 hover:text-white transition-colors' : 'text-gray-600 hover:text-gray-900 transition-colors'}>
-              Features
-            </a>
-            <a href="#how-it-works" className={variant === 'dark' ? 'text-white/70 hover:text-white transition-colors' : 'text-gray-600 hover:text-gray-900 transition-colors'}>
-              How it Works
-            </a>
-          </nav>
-        )}
+        {/* Navigation intentionally minimal for landing */}
 
         {/* CTA Buttons */}
         <div className="flex items-center space-x-4">
