@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 export function ManifestoPreviewSection() {
   return (
     <section className="bg-black text-white py-24 px-4 sm:px-6">
-      <div className="max-w-5xl mx-auto border border-white/15 bg-white/5 p-8 sm:p-10 space-y-8">
+      <div className="max-w-5xl mx-auto border border-white/15 bg-white/5 rounded-2xl p-6 sm:p-10 space-y-8">
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Imagine</p>
           <h2 className="text-3xl sm:text-4xl font-medium tracking-tight leading-tight">

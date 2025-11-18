@@ -7,7 +7,7 @@ export function Footer({ variant = 'light' }: FooterProps) {
   
   return (
     <footer className={`border-t-4 ${isDark ? 'border-white/20 bg-black' : 'border-black bg-white'}`}>
-      <div className="container mx-auto px-6 py-16">
+      <div className="container mx-auto px-4 sm:px-6 py-12 sm:py-16">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-10 mb-12">
           <div className="space-y-4 max-w-md">
             <div className={`text-xl font-bold ${isDark ? 'text-white' : 'text-black'}`}>Rekky</div>
