@@ -24,7 +24,7 @@ const ManifestoPage: React.FC = () => {
               An attempt to build a better Discovery Engine
             </h1>
             <p className="text-base sm:text-lg text-zinc-300 leading-relaxed">
-              A 7-minute essay on why the open web can never again help you find the truly special — 
+              A 7-minute essay on why the open web can never again help you find what you're truly looking for — 
               and why small, private networks of real people are the only thing left that can.
             </p>
             <div className="flex flex-wrap gap-3 text-[11px] sm:text-xs uppercase tracking-[0.35em] text-zinc-500">

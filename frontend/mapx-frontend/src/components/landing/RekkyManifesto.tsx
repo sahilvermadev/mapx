@@ -140,22 +140,15 @@ export function RekkyManifesto() {
             The internet’s original sin was assuming that more speech automatically equals better speech. We now know that is false.
           </p>
           <p className="text-base sm:text-xl text-zinc-200 leading-relaxed">
-            Some kinds of knowledge—like who to trust with your backhand or your mental health, or where to eat on your one night
-            in town—are not improved by scale. Like Ostrom’s successfully governed commons, they thrive only under clear boundaries,
-            mutual monitoring, and sanctions enforced by the participants themselves.<sup>1</sup> They are improved by filtration, reputation,
-            and shared context—what Bourdieu would recognise as a field of restricted cultural production.<sup>2</sup>
+            Some kinds of knowledge — who to trust with your backhand, your mental health, or your one night in town — are not improved by scale. They get better when the group stays small enough that people actually watch each other, when boundaries are real, and when your reputation is on the line every time you open your mouth.
           </p>
           <p className="text-base sm:text-xl text-zinc-200 leading-relaxed">
-            Rekky is the bet that a small, protected, high-signal graph of real human relationships will beat the entire open web
-            at the only thing that still matters: helping you find the exceptional without wrecking it in the process.
+            Rekky is the bet that a small, protected, high-signal graph of real human relationships will beat the entire open web at the only thing that still matters: helping you find the exceptional without wrecking it in the process.
           </p>
           <p className="text-base sm:text-xl text-zinc-200 leading-relaxed">
-            If that bet is right (and everything I’ve seen in fifteen years of watching the internet eat itself alive suggests it is),
-            then yes—Rekky doesn’t just have a place on the internet.
+          The internet is incredible at many things. Finding and protecting the really good stuff just isn’t one of them. That’s all Rekky is trying to fix.
           </p>
-          <p className="text-base sm:text-xl text-zinc-200 leading-relaxed font-semibold">
-            It might be one of the last places left where the internet still works.
-          </p>
+
         </div>
 
         {/* Footnotes */}
