@@ -7,7 +7,7 @@ export function ManifestoPreviewSection() {
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Imagine</p>
           <h2 className="text-3xl sm:text-4xl font-medium tracking-tight leading-tight">
-            Sharing the best thing you found without wrecking it.
+            Sharing the best thing you found without exposing it to the world.
           </h2>
         </div>
 
@@ -37,7 +37,7 @@ export function ManifestoPreviewSection() {
 
           <div className="space-y-2">
             <p className="text-sm uppercase tracking-[0.25em] text-zinc-500">Promise</p>
-            <p>We built Rekky so the best things stop dying the day they get discovered.</p>
+            <p>We built Rekky so that the best things stop dying the day they get discovered.</p>
           </div>
         </div>
 
