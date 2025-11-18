@@ -12,7 +12,7 @@ export function Footer({ variant = 'light' }: FooterProps) {
           <div className="space-y-4 max-w-md">
             <div className={`text-xl font-bold ${isDark ? 'text-white' : 'text-black'}`}>Rekky</div>
             <p className={`text-sm leading-relaxed ${isDark ? 'text-zinc-400' : 'text-gray-600'}`}>
-              Invite-only discovery for people who would rather keep the signal high and the noise out.
+              Share only with the people that matter.
               Private vaults, sealed AI, and circles that decide what leaves the room.
             </p>
           </div>
@@ -23,7 +23,7 @@ export function Footer({ variant = 'light' }: FooterProps) {
             </p>
             <p className={isDark ? 'text-white' : 'text-gray-900'}>hello@rekky.app</p>
             <p className={`text-xs ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
-              No public roadmaps. Just DM if you actually need us.
+              No public roadmaps, email if you need us!
             </p>
           </div>
         </div>
@@ -32,11 +32,11 @@ export function Footer({ variant = 'light' }: FooterProps) {
         <div className={`border-t pt-8 ${isDark ? 'border-white/20' : 'border-gray-200'}`}>
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div className={`text-sm ${isDark ? 'text-zinc-400' : 'text-gray-600'}`}>
-              © 2024 Rekky. All rights reserved.
+              © 2025 Rekky. All rights reserved.
             </div>
 
             <p className={`text-xs uppercase tracking-[0.35em] ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
-              No ads · No public profiles · No viral loops
+              No ads · No viral loops
             </p>
           </div>
         </div>

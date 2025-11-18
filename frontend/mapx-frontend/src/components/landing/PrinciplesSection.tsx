@@ -1,7 +1,7 @@
 const principles = [
   {
     title: 'Skin in the game',
-    body: 'Reputation is the only moderation system that scales. Every rec is tied to someone who can look you in the eye next month.',
+    body: 'Reputation is the only moderation system that scales. Every rec is tied to someone who needs to look you in the eye next month.',
   },
   {
     title: 'Context over clicks',
@@ -9,11 +9,11 @@ const principles = [
   },
   {
     title: 'Fragility is real',
-    body: 'The best things die when they trend. Controlled distribution and zero export are survival mechanisms, not nice-to-haves.',
+    body: 'The best things die when they trend. Controlled distribution is a survival mechanism, not nice-to-haves.',
   },
   {
-    title: 'Small graphs win',
-    body: 'Ten obsessives with five years in a city capture more signal than a million anonymous reviews. We design for them.',
+    title: 'Small networks can win',
+    body: 'Ten connections with real lived experience in a city can capture more value than a thousand anonymous reviews.',
   },
 ];
 

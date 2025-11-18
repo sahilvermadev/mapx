@@ -3,9 +3,9 @@ export function FinalCTA() {
     <section className="bg-black text-white py-20 sm:py-28 px-4 sm:px-6">
       <div className="max-w-5xl mx-auto space-y-10">
         <div className="space-y-4">
-          <p className="text-xs uppercase tracking-[0.4em] text-zinc-400">Last quiet corner on the internet</p>
+          <p className="text-xs uppercase tracking-[0.4em] text-zinc-400">A quiet corner on the internet</p>
           <h2 className="text-3xl sm:text-4xl font-medium tracking-tight leading-tight">
-            Join the Rekky now, because we don't plan to ever go loud.
+            Join Rekky now, because we don't plan to go loud.
           </h2>
           <p className="text-base sm:text-lg text-zinc-300 leading-relaxed max-w-2xl">
             If you have people who actually move the needle
@@ -27,7 +27,7 @@ export function FinalCTA() {
           </a>
         </div> */}
         <p className="text-xs uppercase tracking-[0.35em] text-zinc-500 pt-6 border-t border-white/10">
-          No ads · No public profiles · No viral loops
+          No ads · No viral loops
         </p>
       </div>
     </section>

@@ -22,12 +22,12 @@ const steps = [
   {
     number: '05',
     title: 'AI narrows taste',
-    body: 'Models map micro-clusters (“quiet therapists in Amsterdam” vs “loud dinner parties in CDMX”).',
+    body: 'Models map micro-clusters (“quiet therapists in Amsterdam” vs “loud dinner parties in Bangkok).',
   },
   {
     number: '06',
     title: 'Discovery without chaos',
-    body: 'When you land in Lisbon, you get Ana’s two new saves and the one to skip—not a public listicle.',
+    body: 'When you land in Lisbon, you get a friend\'s two new saves and which one to skip—not a generic travel article.',
   },
 ];
 
@@ -38,10 +38,10 @@ export function FlywheelSection() {
         <div className="space-y-4">
           <p className="text-xs uppercase tracking-[0.4em] text-zinc-400">The Rekky flywheel</p>
           <h2 className="text-3xl sm:text-4xl font-medium tracking-tight leading-tight">
-            Participation can't destroy the resource.
+            Engagement doesn't expose the prize.
           </h2>
           <p className="text-lg text-zinc-300 leading-relaxed">
-            Each action strengthens the graph without exposing it. That's why no open platform will ever copy this loop.
+            Each interaction strengthens the graph without exposing it.
           </p>
         </div>
 
