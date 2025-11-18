@@ -9,7 +9,7 @@ export function Hero({ onReadManifesto }: HeroProps) {
         <div className="flex flex-col lg:flex-row gap-12 sm:gap-16 lg:gap-20 items-start">
           <div className="space-y-8 max-w-2xl w-full">
             <div className="text-[11px] sm:text-xs uppercase tracking-[0.3em] text-zinc-400">
-              Invite-only · Private network AI
+              Private network AI
             </div>
             <div className="space-y-6">
               <div className="space-y-2">
