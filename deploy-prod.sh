@@ -304,10 +304,52 @@ run_migrations() {
 refresh_embeddings() {
     echo "🔄 Refreshing recommendation embeddings..."
     echo ""
-    docker exec -it recce_backend_prod npx tsx scripts/refresh-embeddings.ts
-    echo ""
-    echo -e "${GREEN}✅ Embeddings refresh completed!${NC}"
-    log_deployment "Embeddings refreshed"
+    
+    # Call the API endpoint from inside the container using Node.js
+    docker exec recce_backend_prod node -e "
+        const http = require('http');
+        const options = {
+            hostname: 'localhost',
+            port: 5000,
+            path: '/api/recommendations/regenerate-embeddings',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        };
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                console.log(data);
+                try {
+                    const json = JSON.parse(data);
+                    if (json.success) {
+                        process.exit(0);
+                    } else {
+                        console.error('Failed:', json.message || json.error);
+                        process.exit(1);
+                    }
+                } catch (e) {
+                    console.error('Invalid JSON response');
+                    process.exit(1);
+                }
+            });
+        });
+        req.on('error', (e) => {
+            console.error('Request error:', e.message);
+            process.exit(1);
+        });
+        req.end();
+    "
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}✅ Embeddings refresh completed!${NC}"
+        log_deployment "Embeddings refreshed"
+    else
+        echo ""
+        echo -e "${RED}❌ Failed to refresh embeddings${NC}"
+        exit 1
+    fi
 }
 
 # Show deployment history
