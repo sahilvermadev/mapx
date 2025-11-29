@@ -17,3 +17,6 @@ backend/dist/
 frontend/dist/
 frontend/mapx-frontend/dist/
 *.tsbuildinfo
+
+# Temporary copies for Docker build
+backend/scripts/

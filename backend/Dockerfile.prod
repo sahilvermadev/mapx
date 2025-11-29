@@ -31,6 +31,9 @@ COPY --from=builder /app/dist ./dist
 # Copy migrations folder (needed for running migrations)
 COPY migrations ./migrations
 
+# Copy scripts folder (needed for refresh-embeddings and other utilities)
+COPY --from=builder /app/scripts ./scripts
+
 # Copy health check script
 COPY healthcheck.js ./
 

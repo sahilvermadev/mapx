@@ -112,6 +112,12 @@ deploy_services() {
     echo "🏗️  Building and deploying services..."
     echo ""
     
+    # Copy scripts into backend directory for Docker build context
+    if [ -d "scripts" ] && [ ! -d "backend/scripts" ]; then
+        echo "📋 Copying scripts into backend for Docker build..."
+        cp -r scripts backend/scripts
+    fi
+    
     if [ -z "$services" ]; then
         # Full deployment
         echo "📥 Pulling latest images..."
