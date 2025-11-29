@@ -8,6 +8,7 @@ import { getCurrentLocation } from '@/utils/geolocation';
 import { friendGroupsApi, type FriendGroup } from '@/services/friendGroupsService';
 import type { CitySummary } from './CityFilterBar';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { THEMES } from '@/services/profileService';
 
 interface UnifiedFeedFiltersProps {
@@ -189,10 +190,13 @@ const UnifiedFeedFilters: React.FC<UnifiedFeedFiltersProps> = ({
   };
   
   // Get theme for styling
-  const { theme: themeName } = useTheme();
-  const theme = themeName && THEMES[themeName as keyof typeof THEMES] 
-    ? THEMES[themeName as keyof typeof THEMES] 
-    : null;
+  // Get theme for styling - use profile theme if available (viewing someone else's profile)
+  const { theme: userThemeName } = useTheme();
+  const { profileTheme, profileThemeObject } = useProfileTheme();
+  const themeName = profileTheme || userThemeName;
+  const theme = profileThemeObject || (userThemeName && THEMES[userThemeName as keyof typeof THEMES] 
+    ? THEMES[userThemeName as keyof typeof THEMES]
+    : null);
   
   // Determine styling based on theme
   // Remove rounded corners and border to make it feel more cohesive with header

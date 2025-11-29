@@ -16,6 +16,7 @@ import type { LocationData } from '@/types/location';
 import { toast } from 'sonner';
 import { LoginModal } from '@/auth';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { THEMES, type ThemeName } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
 
@@ -121,10 +122,13 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
 }) => {
   const navigate = useNavigate();
   const { getLocationNavigationProps } = useLocationNavigation();
-  const { theme: themeName } = useTheme();
-  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
-    ? THEMES[themeName as keyof typeof THEMES] 
-    : null;
+  const { theme: userThemeName } = useTheme();
+  const { profileTheme, profileThemeObject } = useProfileTheme();
+  // Use profile theme if available (viewing someone else's profile), otherwise use viewer's theme
+  const themeName = profileTheme || userThemeName;
+  const selectedTheme = profileThemeObject || (userThemeName && THEMES[userThemeName as keyof typeof THEMES] 
+    ? THEMES[userThemeName as keyof typeof THEMES] 
+    : null);
   const questionCardBackground = themeName && QUESTION_CARD_BACKGROUNDS[themeName as keyof typeof QUESTION_CARD_BACKGROUNDS]
     ? QUESTION_CARD_BACKGROUNDS[themeName as keyof typeof QUESTION_CARD_BACKGROUNDS]
     : QUESTION_CARD_BACKGROUNDS['dark'];

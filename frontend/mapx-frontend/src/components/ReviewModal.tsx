@@ -14,7 +14,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
 import { CURATED_LABELS, MAX_VISIBLE_LABELS, MAX_LABEL_LENGTH } from '@/components/composer/constants';
-import { getTagInlineStyles } from '@/utils/themeUtils';
+import { getTagInlineStyles, getScrollbarStyles } from '@/utils/themeUtils';
 
 // Types
 export interface ReviewPayload {
@@ -145,11 +145,20 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
   const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number } | null>(null);
   
   // Theme support
-  const { theme } = useTheme();
-  const selectedTheme = THEMES[theme];
+  const { theme: themeName } = useTheme();
+  const selectedTheme = THEMES[themeName];
   const accentColor = selectedTheme.accentColor;
   const textOnAccent = getReadableTextColor(accentColor);
-  const tagInlineStyles = useMemo(() => getTagInlineStyles(theme), [theme]);
+  const tagInlineStyles = useMemo(() => getTagInlineStyles(themeName), [themeName]);
+  
+  /**
+   * Memoized scrollbar styles based on current theme
+   * These CSS variables are inherited by child elements with .label-menu-scrollbar class
+   */
+  const scrollbarStyles = useMemo(() => 
+    getScrollbarStyles(themeName, selectedTheme),
+    [themeName, selectedTheme]
+  );
 
   const filteredLabelEntries = useMemo(() => {
     const query = labelSearch.trim().toLowerCase();
@@ -650,19 +659,29 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                     <motion.div
                       layout
                       transition={{ duration: 0.25, ease: 'easeOut' }}
-                      className="rounded-md border border-black/20 bg-white shadow-sm"
+                      className="rounded-md border shadow-sm"
+                      style={{
+                        borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.2)',
+                        backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                        ...scrollbarStyles,
+                      }}
                     >
                       {/* Header */}
                       <motion.div
                         layout="position"
-                        className="sticky top-0 z-10 flex flex-col gap-3 border-b bg-white p-3 md:flex-row md:items-center md:justify-between"
+                        className="sticky top-0 z-10 flex flex-col gap-3 border-b p-3 md:flex-row md:items-center md:justify-between"
+                        style={{
+                          borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.1)',
+                          backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                        }}
                       >
                         <motion.h3
                           layout="position"
                           initial={{ opacity: 0, y: -6 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.2, delay: 0.05 }}
-                          className="text-sm font-semibold text-gray-900"
+                          className="text-sm font-semibold"
+                          style={{ color: selectedTheme?.textPrimary || '#000000' }}
                         >
                           Select Labels
                         </motion.h3>
@@ -672,6 +691,10 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                             onChange={(e) => setLabelSearch(e.target.value)}
                             placeholder="Search labels..."
                             className="h-8 w-full md:w-56"
+                            style={{
+                              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || '#FFFFFF',
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           />
                           <Button
                             type="button"
@@ -680,10 +703,13 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                             onClick={handleCloseLabelPicker}
                             className="h-8 w-full md:w-8 md:p-0"
                             aria-label="Close label picker"
+                            style={{
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           >
-                            <span className="md:hidden">Done</span>
+                            <span className="md:hidden" style={{ color: 'inherit' }}>Done</span>
                             <span className="hidden md:inline">
-                              <X className="h-4 w-4" />
+                              <X className="h-4 w-4" style={{ color: 'inherit' }} />
                             </span>
                           </Button>
                         </div>
@@ -698,7 +724,10 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -6 }}
                             transition={{ duration: 0.2 }}
-                            className="border-b border-dashed border-black/10 p-3"
+                            className="border-b border-dashed p-3"
+                            style={{
+                              borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+                            }}
                           >
                             <div className="flex flex-wrap items-center gap-2">
                               {labels.map((label, i) => (
@@ -725,21 +754,34 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                       </AnimatePresence>
 
                       {/* Categories */}
-                      <div className="max-h-[45vh] overflow-y-auto p-3 space-y-4">
+                      <div className="max-h-[45vh] overflow-y-auto p-3 space-y-4 label-menu-scrollbar">
                         {filteredLabelEntries.length > 0 ? (
                           filteredLabelEntries.map(([category, labelList]) => (
                             <motion.div key={category} layout className="space-y-2">
                               <button
                                 type="button"
                                 onClick={() => toggleCategory(category)}
-                                className="flex items-center gap-2 w-full text-left font-semibold text-sm text-foreground hover:text-foreground/80 transition-colors"
+                                className="flex items-center gap-2 w-full text-left font-semibold text-sm transition-colors"
+                                style={{
+                                  color: selectedTheme?.textSecondary || selectedTheme?.textMuted || selectedTheme?.textColor || '#6B7280',
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (selectedTheme) {
+                                    e.currentTarget.style.color = selectedTheme.textPrimary || selectedTheme.textColor || '#000000';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (selectedTheme) {
+                                    e.currentTarget.style.color = selectedTheme.textSecondary || selectedTheme.textMuted || selectedTheme.textColor || '#6B7280';
+                                  }
+                                }}
                               >
                                 {expandedCategories.has(category) ? (
-                                  <ChevronDown className="h-4 w-4" />
+                                  <ChevronDown className="h-4 w-4" style={{ color: 'inherit' }} />
                                 ) : (
-                                  <ChevronUp className="h-4 w-4" />
+                                  <ChevronUp className="h-4 w-4" style={{ color: 'inherit' }} />
                                 )}
-                                <span>{category}</span>
+                                <span style={{ color: 'inherit' }}>{category}</span>
                               </button>
                               <AnimatePresence initial={false}>
                                 {expandedCategories.has(category) && (
@@ -761,11 +803,29 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                                           type="button"
                                           whileTap={{ scale: 0.96 }}
                                           onClick={() => toggleLabel(label)}
-                                          className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none ${
-                                            isSelected
-                                              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
-                                              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
-                                          }`}
+                                          className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none"
+                                          style={isSelected ? {
+                                            backgroundColor: selectedTheme?.selectedBackground || selectedTheme?.hoverBackground || '#FEF3C7',
+                                            color: selectedTheme?.accentColor || selectedTheme?.textPrimary || '#92400E',
+                                            borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.3)',
+                                            boxShadow: `1px 1px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                                          } : {
+                                            backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                                            color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280',
+                                            borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.2)',
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            if (selectedTheme && !isSelected) {
+                                              e.currentTarget.style.borderColor = selectedTheme.borderColor || 'rgba(0, 0, 0, 0.3)';
+                                              e.currentTarget.style.boxShadow = `1px 1px 0 0 ${selectedTheme.borderColor || '#000000'}`;
+                                            }
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            if (selectedTheme && !isSelected) {
+                                              e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)';
+                                              e.currentTarget.style.boxShadow = 'none';
+                                            }
+                                          }}
                                         >
                                           {label}
                                         </motion.button>
@@ -781,7 +841,12 @@ const ReviewModal: React.FC<ReviewModalProps> = ({
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="rounded-md border border-dashed border-black/10 bg-gray-50 p-4 text-sm text-gray-500 text-center"
+                            className="rounded-md border border-dashed p-4 text-sm text-center"
+                            style={{
+                              borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+                              backgroundColor: selectedTheme?.hoverBackground || '#F9FAFB',
+                              color: selectedTheme?.textMuted || '#6B7280',
+                            }}
                           >
                             No labels found. Try a different search.
                           </motion.div>

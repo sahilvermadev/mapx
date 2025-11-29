@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import CitySearchPopover from './CitySearchPopover';
 import CategoryDropdown from './CategoryDropdown';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { THEMES } from '@/services/profileService';
 
 export interface CitySummary {
@@ -57,11 +58,13 @@ const CityFilterBar: React.FC<Props> = ({
   const summaryCategories = summary?.categories ?? [];
   const categories = useMemo(() => (overrideCategories ?? summaryCategories), [overrideCategories, summaryCategories]);
 
-  // Get theme for styling
-  const { theme: themeName } = useTheme();
-  const theme = themeName && THEMES[themeName as keyof typeof THEMES] 
-    ? THEMES[themeName as keyof typeof THEMES] 
-    : null;
+  // Get theme for styling - use profile theme if available (viewing someone else's profile)
+  const { theme: userThemeName } = useTheme();
+  const { profileTheme, profileThemeObject } = useProfileTheme();
+  const themeName = profileTheme || userThemeName;
+  const theme = profileThemeObject || (userThemeName && THEMES[userThemeName as keyof typeof THEMES] 
+    ? THEMES[userThemeName as keyof typeof THEMES] 
+    : null);
 
   // Container styling
   const containerStyles = 'w-full border rounded-xl';

@@ -12,7 +12,7 @@ export function useFeedSearchResults() {
   const [groupKeyToMeta, setGroupKeyToMeta] = useState<Record<string, { title: string; subtitle?: string }>>({});
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingBufferRef = useRef<string>('');
-  const rafIdRef = useRef<number | null>(null);
+  const rafIdRef = useRef<number | undefined>(undefined);
   
   // Use SearchScoreManager for centralized score management
   const scoreManager = useMemo(() => new SearchScoreManager(), []);
@@ -96,9 +96,9 @@ export function useFeedSearchResults() {
     streamingBufferRef.current = '';
     setStreamingText('');
     setIsSummaryLoading(true);
-    if (rafIdRef.current !== null) {
+    if (rafIdRef.current !== undefined) {
       cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
+      rafIdRef.current = undefined;
     }
     setSearchResponse({
       query: query.trim(),
@@ -108,7 +108,7 @@ export function useFeedSearchResults() {
       cards_allowed: true,
       search_metadata: {
         structured_search_used: false,
-        top_confidence: null,
+        top_confidence: undefined,
         used_current_location: false,
         filters_applied: [],
       },
@@ -133,7 +133,7 @@ export function useFeedSearchResults() {
             }
             
             // Cancel any pending RAF update
-            if (rafIdRef.current !== null) {
+            if (rafIdRef.current !== undefined) {
               cancelAnimationFrame(rafIdRef.current);
             }
             
@@ -141,7 +141,7 @@ export function useFeedSearchResults() {
             rafIdRef.current = requestAnimationFrame(() => {
               setStreamingText(filteredText);
               console.log(`✨ [HOOK] setStreamingText: length=${filteredText.length}`);
-              rafIdRef.current = null;
+              rafIdRef.current = undefined;
             });
           },
           onComplete: (response: SearchResponse) => {
@@ -228,6 +228,28 @@ export function useFeedSearchResults() {
     }
   }, [loadFromResponse]);
 
+  // Memoize bound methods to prevent recreation on every render
+  const getScore = useCallback((entity: { 
+    place_id?: number; 
+    service_id?: number; 
+    recommendation_id?: number;
+    [key: string]: any; // Allow posts with additional properties
+  }): number => {
+    return scoreManager.getScore({
+      place_id: entity.place_id,
+      service_id: entity.service_id,
+      recommendation_id: entity.recommendation_id,
+    });
+  }, [scoreManager]);
+
+  const attachScoresToPosts = useCallback((posts: any[]): any[] => {
+    return scoreManager.attachScoresToPosts(posts);
+  }, [scoreManager]);
+
+  const getAllScores = useCallback(() => {
+    return scoreManager.getAllScores();
+  }, [scoreManager]);
+
   return {
     searchResponse,
     streamingText,
@@ -237,10 +259,10 @@ export function useFeedSearchResults() {
     clearSearch,
     loadFromResponse,
     loadFromStream,
-    // Expose score manager methods
-    getScore: scoreManager.getScore.bind(scoreManager),
-    attachScoresToPosts: scoreManager.attachScoresToPosts.bind(scoreManager),
-    getAllScores: scoreManager.getAllScores.bind(scoreManager),
+    // Expose score manager methods (now memoized)
+    getScore,
+    attachScoresToPosts,
+    getAllScores,
   } as const;
 }
 

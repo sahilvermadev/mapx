@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Users } from 'lucide-react';
 
@@ -15,6 +15,7 @@ import FeedAISearch from '@/components/FeedAISearch';
 import { FeedFiltersProvider } from '@/contexts/FeedFiltersContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
+import type { CitySummary } from '@/components/SocialFeed/CityFilterBar';
 
 import { useAuth } from '@/auth';
 import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
@@ -34,23 +35,22 @@ import {
 
 const SocialFeedPage: React.FC = () => {
   // Get feed click time from sessionStorage, or use current time if not available
-  const getFeedClickTime = (): number => {
+  // Note: This function is called during render to initialize the ref, so no logging here
+  const getFeedClickTime = (): { time: number; hadStoredTime: boolean; timestamp?: string } => {
     const stored = sessionStorage.getItem('feedClickTime');
+    const timestamp = sessionStorage.getItem('feedClickTimestamp');
     if (stored) {
       const clickTime = parseFloat(stored);
-      const timestamp = sessionStorage.getItem('feedClickTimestamp');
-      console.log(`[PERF] SocialFeedPage: Found feed click time${timestamp ? ` (clicked at ${new Date(parseInt(timestamp)).toISOString()})` : ''}`);
       sessionStorage.removeItem('feedClickTime'); // Clean up after reading
       sessionStorage.removeItem('feedClickTimestamp');
-      return clickTime;
+      return { time: clickTime, hadStoredTime: true, timestamp: timestamp || undefined };
     }
     // Fallback to current time if navigating directly (not from header click)
-    const now = performance.now();
-    console.log(`[PERF] SocialFeedPage: No click time found, using mount time`);
-    return now;
+    return { time: performance.now(), hadStoredTime: false };
   };
   
-  const feedClickTime = useRef<number>(getFeedClickTime());
+  const feedClickInfo = useRef(getFeedClickTime());
+  const feedClickTime = useRef<number>(feedClickInfo.current.time);
   const pageLoadStartTime = useRef<number>(feedClickTime.current);
   const navigate = useNavigate();
   const { user: currentUser, isAuthenticated, isChecking } = useAuth();
@@ -60,8 +60,14 @@ const SocialFeedPage: React.FC = () => {
     ? THEMES[themeName as keyof typeof THEMES] 
     : null;
   
-  // Log component mount
+  // Log component mount (moved logging here to avoid render-time logs)
   useEffect(() => {
+    if (feedClickInfo.current.hadStoredTime) {
+      const timestamp = feedClickInfo.current.timestamp;
+      console.log(`[PERF] SocialFeedPage: Found feed click time${timestamp ? ` (clicked at ${new Date(parseInt(timestamp)).toISOString()})` : ''}`);
+    } else {
+      console.log(`[PERF] SocialFeedPage: No click time found, using mount time`);
+    }
     const mountTime = performance.now() - pageLoadStartTime.current;
     console.log(`[PERF] SocialFeedPage mounted in ${mountTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'click' : 'mount'})`);
   }, []);
@@ -77,7 +83,6 @@ const SocialFeedPage: React.FC = () => {
   // Refs
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const firstNewPostRef = useRef<HTMLDivElement | null>(null);
-  const initialScrollYRef = useRef<number>(0);
   
   // Search functionality
   const {
@@ -115,24 +120,36 @@ const SocialFeedPage: React.FC = () => {
   const error = feedError?.message || suggestedUsersError?.message || null;
   
   // Flatten all pages and deduplicate posts by recommendation_id or id
-  const flattenStartTime = performance.now();
-  const allPosts = feedData?.pages.flatMap(page => (page as { data: any[] }).data) || [];
-  const postsMap = new Map<number, any>();
-  allPosts.forEach(post => {
-    const postId = post.recommendation_id || post.id;
-    if (postId && !postsMap.has(postId)) {
-      postsMap.set(postId, post);
+  // Memoized to prevent recreation on every render
+  const typedPosts = useMemo(() => {
+    const flattenStartTime = performance.now();
+    const allPosts = feedData?.pages.flatMap(page => (page as { data: any[] }).data) || [];
+    const postsMap = new Map<number, any>();
+    allPosts.forEach(post => {
+      const postId = post.recommendation_id || post.id;
+      if (postId && !postsMap.has(postId)) {
+        postsMap.set(postId, post);
+      }
+    });
+    const posts = Array.from(postsMap.values());
+    const flattenTime = performance.now() - flattenStartTime;
+    if (flattenTime > 5) {
+      console.log(`[PERF] Post flattening/deduplication took ${flattenTime.toFixed(2)}ms for ${allPosts.length} posts`);
     }
-  });
-  const posts = Array.from(postsMap.values());
-  const typedPosts = posts as any[];
-  const flattenTime = performance.now() - flattenStartTime;
-  if (flattenTime > 5) {
-    console.log(`[PERF] Post flattening/deduplication took ${flattenTime.toFixed(2)}ms for ${allPosts.length} posts`);
-  }
+    return posts as any[];
+  }, [feedData]);
   const typedSuggestedUsers = suggestedUsers as User[];
   const hasActiveSearch = Boolean(searchResponse);
   const showSuggestedUsers = typedSuggestedUsers.length > 0 && !hasActiveSearch && !isSuggestedUsersClosed;
+
+  // Helper to convert slug to title case - memoized
+  const toTitle = useCallback((s?: string): string | undefined => {
+    if (!s) return undefined;
+    return s.split('-').map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(' ');
+  }, []);
+
+  // Use deferred value for posts to prevent blocking UI updates during city computation
+  const deferredPosts = useDeferredValue(typedPosts);
 
   // Effects
   useEffect(() => {
@@ -197,55 +214,75 @@ const SocialFeedPage: React.FC = () => {
     };
   }, [typedPosts]);
 
-  // Scroll detection to auto-dismiss banner
+  // Auto-dismiss banner when new posts come into view using IntersectionObserver
   useEffect(() => {
     if (!showNewPostsBanner || newPostsCount === 0) return;
 
-    // Record initial scroll position when banner appears
-    initialScrollYRef.current = window.scrollY || window.pageYOffset;
+    let observer: IntersectionObserver | null = null;
+    let timeoutId: NodeJS.Timeout;
 
-    let scrollTimeout: NodeJS.Timeout;
-    
-    const handleScroll = () => {
-      // Debounce scroll events
-      clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(() => {
-        const currentScrollY = window.scrollY || window.pageYOffset;
-        const scrollDelta = currentScrollY - initialScrollYRef.current;
-        
-        // If user has scrolled down significantly (200px), dismiss banner
-        if (scrollDelta > 200) {
-          setShowNewPostsBanner(false);
-          if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
-            setLastViewedFeedTimestamp(typedPosts[0].created_at);
-          }
-          return;
+    // Wait for the ref to be set (it's set during render)
+    // Use a small delay to ensure the DOM has been updated
+    timeoutId = setTimeout(() => {
+      if (!firstNewPostRef.current) {
+        // If ref is still not set, the first new post might not be in the current view
+        // In this case, we'll rely on the user scrolling or clicking the banner
+        return;
+      }
+
+      const element = firstNewPostRef.current;
+      
+      // Check if element is already visible (accounting for fixed headers)
+      const rect = element.getBoundingClientRect();
+      const headerHeight = 80; // Account for fixed header
+      const isAlreadyVisible = rect.top < window.innerHeight && rect.bottom > headerHeight;
+
+      // If already visible, dismiss immediately
+      if (isAlreadyVisible) {
+        setShowNewPostsBanner(false);
+        if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+          setLastViewedFeedTimestamp(typedPosts[0].created_at);
         }
-        
-        // Also check if we've scrolled past the first new post
-        if (firstNewPostRef.current) {
-          const headerHeight = 64;
-          const cityBarHeight = window.innerWidth >= 1024 ? 64 : 56;
-          const totalOffset = headerHeight + cityBarHeight;
-          
-          const firstNewPostTop = firstNewPostRef.current.getBoundingClientRect().top;
+        return;
+      }
 
-          // If user has scrolled past the first new post (accounting for fixed headers), dismiss banner
-          if (firstNewPostTop < totalOffset - 50) {
-            setShowNewPostsBanner(false);
-            // Update timestamp to the most recent post
-            if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
-              setLastViewedFeedTimestamp(typedPosts[0].created_at);
+      // Use IntersectionObserver to detect when the first new post enters the viewport
+      // This is more reliable than scroll position calculations
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            // When the first new post is visible in the viewport, dismiss the banner
+            if (entry.isIntersecting && entry.intersectionRatio > 0) {
+              setShowNewPostsBanner(false);
+              // Update timestamp to mark that user has seen the new posts
+              if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+                setLastViewedFeedTimestamp(typedPosts[0].created_at);
+              }
+              // Disconnect observer once we've dismissed the banner
+              if (observer) {
+                observer.disconnect();
+              }
             }
-          }
+          });
+        },
+        {
+          // Trigger when at least 10% of the element is visible
+          // This ensures the banner dismisses when the post is actually visible, not just barely in view
+          threshold: 0.1,
+          // Add root margin to account for fixed headers and trigger slightly earlier
+          rootMargin: '-80px 0px 0px 0px',
         }
-      }, 100); // Debounce by 100ms
-    };
+      );
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
+      observer.observe(element);
+    }, 100); // Small delay to ensure DOM is updated
+
+    // Cleanup function
     return () => {
-      window.removeEventListener('scroll', handleScroll);
-      clearTimeout(scrollTimeout);
+      clearTimeout(timeoutId);
+      if (observer) {
+        observer.disconnect();
+      }
     };
   }, [showNewPostsBanner, newPostsCount, typedPosts]);
 
@@ -280,6 +317,10 @@ const SocialFeedPage: React.FC = () => {
         ? prev.filter(id => id !== groupId)
         : [...prev, groupId]
     );
+  }, []);
+
+  const handleSelectCity = useCallback((c: { id?: string; name?: string } | undefined) => {
+    setSelectedCity(c);
   }, []);
 
   const handleNavigateToDiscover = useCallback(() => {
@@ -416,7 +457,7 @@ const SocialFeedPage: React.FC = () => {
     );
   };
 
-  const categoryKeyFromPost = (post: any): string | null => {
+  const categoryKeyFromPost = useCallback((post: any): string | null => {
     // Prefer backend-provided normalized field from places
     const primary: string | undefined = post?.place_primary_type;
     if (primary && typeof primary === 'string') return primary.toLowerCase();
@@ -432,8 +473,162 @@ const SocialFeedPage: React.FC = () => {
     if (post?.content_type === 'place') return 'restaurant';
     if (post?.content_type === 'service') return 'service';
     return null;
-  };
+  }, []);
 
+  // Compute city summaries from feed posts
+  const citySummariesRef = useRef<CitySummary[]>([]);
+  const citySummaries: CitySummary[] = useMemo(() => {
+    // Early return if no posts to avoid unnecessary computation
+    if (!deferredPosts || deferredPosts.length === 0) {
+      return citySummariesRef.current;
+    }
+
+    const byCity: Record<string, CitySummary> = {};
+    const friendMap = new Map<string, Set<string>>(); // city -> Set of user_ids
+    const friendFacesMap = new Map<string, Map<string, { id: string; name: string; photoUrl?: string }>>(); // city -> user_id -> friendFace
+
+    // Use Map for O(1) category lookups
+    const categoryMap = new Map<string, { key: string; label: string; count: number }>();
+
+    deferredPosts.forEach((post: any) => {
+      // Extract city slug from either place or service
+      const slug: string | undefined = post?.place_city_slug || post?.service_city_slug;
+      const country: string | undefined = post?.place_country_code || post?.service_country_code;
+      let name: string | undefined = slug ? toTitle(String(slug)) : undefined;
+      let key: string | undefined = slug;
+
+      if (!key || !name) return;
+
+      // Initialize city if it doesn't exist
+      if (!byCity[key]) {
+        byCity[key] = {
+          id: key,
+          name,
+          country,
+          recCount: 0,
+          friendCount: 0,
+          friendFaces: [],
+          categories: [],
+        };
+        friendMap.set(key, new Set());
+        friendFacesMap.set(key, new Map());
+      }
+
+      const summary = byCity[key];
+      summary.recCount += 1;
+
+      // Track unique friends per city
+      const userId = post?.user_id;
+      const userName = post?.user_name;
+      const userPicture = post?.user_picture;
+      
+      if (userId) {
+        const cityFriends = friendMap.get(key)!;
+        if (!cityFriends.has(userId)) {
+          cityFriends.add(userId);
+          summary.friendCount = cityFriends.size;
+          
+          // Add to friendFaces if not already present
+          const cityFriendFaces = friendFacesMap.get(key)!;
+          if (!cityFriendFaces.has(userId) && cityFriendFaces.size < 8) {
+            cityFriendFaces.set(userId, {
+              id: userId,
+              name: userName || 'User',
+              photoUrl: userPicture,
+            });
+          }
+        }
+      }
+
+      // Category buckets - use Map for faster lookup
+      const cat = categoryKeyFromPost(post);
+      if (cat) {
+        const cityCategoryKey = `${key}:${cat}`;
+        let bucket = categoryMap.get(cityCategoryKey);
+        if (!bucket) {
+          bucket = { key: cat, label: cat.charAt(0).toUpperCase() + cat.slice(1), count: 0 };
+          categoryMap.set(cityCategoryKey, bucket);
+          summary.categories.push(bucket);
+        }
+        bucket.count += 1;
+      }
+    });
+
+    // Update friendFaces from the map
+    Object.keys(byCity).forEach(cityKey => {
+      const friendFaces = friendFacesMap.get(cityKey);
+      if (friendFaces) {
+        byCity[cityKey].friendFaces = Array.from(friendFaces.values());
+      }
+    });
+
+    const result = Object.values(byCity)
+      .map(c => ({
+        ...c,
+        friendFaces: c.friendFaces.slice(0, 8),
+        categories: c.categories.sort((a, b) => (b.count || 0) - (a.count || 0))
+      }))
+      .sort((a, b) => b.recCount - a.recCount);
+    
+    // Update ref for next render
+    citySummariesRef.current = result;
+    
+    return result;
+  }, [deferredPosts, toTitle, categoryKeyFromPost]);
+
+  // Global summary (all recommendations)
+  const globalSummaryRef = useRef<CitySummary | undefined>(undefined);
+  const globalSummary: CitySummary | undefined = useMemo(() => {
+    // Early return if no posts
+    if (!deferredPosts || deferredPosts.length === 0) {
+      return globalSummaryRef.current;
+    }
+
+    const allFriends = new Set<string>();
+    const allFriendFaces = new Map<string, { id: string; name: string; photoUrl?: string }>();
+    const allCategories = new Map<string, { key: string; label: string; count: number }>();
+
+    deferredPosts.forEach((post: any) => {
+      // Track unique friends
+      const userId = post?.user_id;
+      const userName = post?.user_name;
+      const userPicture = post?.user_picture;
+      
+      if (userId && !allFriends.has(userId)) {
+        allFriends.add(userId);
+        if (allFriendFaces.size < 8) {
+          allFriendFaces.set(userId, {
+            id: userId,
+            name: userName || 'User',
+            photoUrl: userPicture,
+          });
+        }
+      }
+
+      // Track categories
+      const cat = categoryKeyFromPost(post);
+      if (cat) {
+        let bucket = allCategories.get(cat);
+        if (!bucket) {
+          bucket = { key: cat, label: cat.charAt(0).toUpperCase() + cat.slice(1), count: 0 };
+          allCategories.set(cat, bucket);
+        }
+        bucket.count += 1;
+      }
+    });
+
+    const result: CitySummary = {
+      id: 'worldwide',
+      name: 'Worldwide',
+      recCount: deferredPosts.length,
+      friendCount: allFriends.size,
+      friendFaces: Array.from(allFriendFaces.values()),
+      categories: Array.from(allCategories.values()).sort((a, b) => (b.count || 0) - (a.count || 0)),
+    };
+
+    globalSummaryRef.current = result;
+    return result;
+  }, [deferredPosts, categoryKeyFromPost]);
 
   // Heuristic: try to infer a normalized city id from a post
   const inferCityId = (post: any): string | undefined => {
@@ -741,6 +936,41 @@ const SocialFeedPage: React.FC = () => {
     </div>
   );
 
+  // Memoize the FeedFiltersProvider value to prevent infinite re-renders
+  const feedFiltersValue = useMemo(() => ({
+    cities: citySummaries,
+    selectedCityId: selectedCity?.id,
+    selectedCityName: selectedCity?.name,
+    globalSummary: globalSummary,
+    onSelectCity: handleSelectCity,
+    selectedCategoryKeys,
+    onToggleCategory: toggleCategory,
+    overrideCategories: availableCategories,
+    isAuthenticated: !!currentUser,
+    onStream: loadFromStream,
+    onCleared: handleSearchCleared,
+    searchPlaceholder: "Tell us what you're looking for...",
+    currentUserId: currentUser?.id || '',
+    selectedGroupIds,
+    onGroupToggle: handleGroupToggle,
+    hasActiveSearch,
+  }), [
+    citySummaries,
+    selectedCity?.id,
+    selectedCity?.name,
+    globalSummary,
+    selectedCategoryKeys,
+    toggleCategory,
+    availableCategories,
+    currentUser,
+    loadFromStream,
+    handleSearchCleared,
+    handleSelectCity,
+    selectedGroupIds,
+    handleGroupToggle,
+    hasActiveSearch,
+  ]);
+
   // Early returns for loading states
   if (isChecking || !currentUser) {
     return renderPageSkeleton();
@@ -749,24 +979,7 @@ const SocialFeedPage: React.FC = () => {
 
   return (
     <FeedFiltersProvider
-      value={{
-        cities: [],
-        selectedCityId: selectedCity?.id,
-        selectedCityName: selectedCity?.name,
-        globalSummary: undefined,
-        onSelectCity: (c: { id?: string; name?: string } | undefined) => setSelectedCity(c),
-        selectedCategoryKeys,
-        onToggleCategory: toggleCategory,
-        overrideCategories: availableCategories,
-        isAuthenticated: !!currentUser,
-        onStream: loadFromStream,
-        onCleared: handleSearchCleared,
-        searchPlaceholder: "Tell us what you're looking for...",
-        currentUserId: currentUser?.id || '',
-        selectedGroupIds,
-        onGroupToggle: handleGroupToggle,
-        hasActiveSearch,
-      }}
+      value={feedFiltersValue}
     >
       <div 
         className={`min-h-[calc(100vh-64px)] overflow-x-hidden ${hasActiveSearch ? 'pb-20' : ''}`} 

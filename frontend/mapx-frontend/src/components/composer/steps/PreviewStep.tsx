@@ -11,7 +11,7 @@ import { getProfilePictureUrl } from '@/config/apiConfig';
 import InlineLocationPicker from '@/components/InlineLocationPicker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
-import { getTagInlineStyles } from '@/utils/themeUtils';
+import { getTagInlineStyles, getScrollbarStyles } from '@/utils/themeUtils';
 import { RATING_MESSAGES, MAX_VISIBLE_LABELS, MAX_LABEL_LENGTH, INPUT_STYLE_PROPS, INPUT_CLASSES, CURATED_LABELS } from '../constants';
 
 interface PreviewStepProps {
@@ -94,6 +94,15 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
     ? THEMES[themeName as keyof typeof THEMES] 
     : null;
   const tagInlineStyles = useMemo(() => getTagInlineStyles(themeName), [themeName]);
+  
+  /**
+   * Memoized scrollbar styles based on current theme
+   * These CSS variables are inherited by child elements with .label-menu-scrollbar class
+   */
+  const scrollbarStyles = useMemo(() => 
+    getScrollbarStyles(themeName, selectedTheme),
+    [themeName, selectedTheme]
+  );
 
   // No special measurement logic — rely on native input size attribute for autosizing
 
@@ -427,16 +436,34 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                 {contentType === 'place' && onHighlightsChange && (
                   <div className="mb-4 md:mb-5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs md:text-sm text-foreground font-medium min-w-0 flex-shrink-0">Highlights:</span>
+                      {/**
+                       * Highlights label uses theme's textPrimary, falling back to textColor,
+                       * then to black. This ensures proper contrast in both light and dark themes.
+                       */}
+                      <span 
+                        className="text-xs md:text-sm font-medium min-w-0 flex-shrink-0"
+                        style={{
+                          color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000'
+                        }}
+                      >
+                        Highlights:
+                      </span>
                       <div className="flex items-center gap-1 flex-1 min-w-0">
+                        {/**
+                         * Highlights input text color follows the same fallback chain as the label
+                         * to maintain visual consistency and readability across all themes.
+                         */}
                         <Input
                           ref={highlightsInputRef}
                           type="text"
                           value={highlights || ''}
                           onChange={(e) => onHighlightsChange(e.target.value)}
                           placeholder="e.g., Margherita pizza, Tiramisu, Live music"
-                          className={`flex-1 text-xs md:text-sm text-foreground font-medium p-0 placeholder:text-muted-foreground ${INPUT_CLASSES.base} ${INPUT_CLASSES.transparent}`}
-                          style={INPUT_STYLE_PROPS}
+                          className={`flex-1 text-xs md:text-sm font-medium p-0 placeholder:text-muted-foreground ${INPUT_CLASSES.base} ${INPUT_CLASSES.transparent}`}
+                          style={{
+                            ...INPUT_STYLE_PROPS,
+                            color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                          }}
                         />
                         <button
                           type="button"
@@ -557,6 +584,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                         className="rounded-lg shadow-lg p-6 max-w-3xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col"
                         style={selectedTheme ? {
                           backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                          ...scrollbarStyles,
                         } : undefined}
                       >
                         <div className="flex items-center justify-between mb-4">
@@ -573,26 +601,47 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                             }}
                             className="p-1 hover:bg-muted rounded transition-colors"
                             aria-label="Close"
+                            style={{
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           >
-                            <X className="h-5 w-5" />
+                            <X className="h-5 w-5" style={{ color: 'inherit' }} />
                           </button>
                         </div>
 
                         {/* Labels by Category */}
-                        <div className="flex-1 overflow-y-auto space-y-4">
+                        <div className="flex-1 overflow-y-auto space-y-4 label-menu-scrollbar">
                           {Object.entries(CURATED_LABELS).map(([category, labelList]) => (
                             <div key={category} className="space-y-2">
+                              {/**
+                               * Category headers use a fallback chain: textSecondary -> textMuted -> textColor -> gray.
+                               * On hover, they switch to textPrimary for better visibility.
+                               * This provides clear visual hierarchy while maintaining theme consistency.
+                               */}
                               <button
                                 type="button"
                                 onClick={() => toggleCategory(category)}
-                                className="flex items-center gap-2 w-full text-left font-semibold text-sm text-foreground hover:text-foreground/80 transition-colors"
+                                className="flex items-center gap-2 w-full text-left font-semibold text-sm transition-colors"
+                                style={{
+                                  color: selectedTheme?.textSecondary || selectedTheme?.textMuted || selectedTheme?.textColor || '#6B7280',
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (selectedTheme) {
+                                    e.currentTarget.style.color = selectedTheme.textPrimary || selectedTheme.textColor || '#000000';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (selectedTheme) {
+                                    e.currentTarget.style.color = selectedTheme.textSecondary || selectedTheme.textMuted || selectedTheme.textColor || '#6B7280';
+                                  }
+                                }}
                               >
                                 {expandedCategories.has(category) ? (
-                                  <ChevronDown className="h-4 w-4" />
+                                  <ChevronDown className="h-4 w-4" style={{ color: 'inherit' }} />
                                 ) : (
-                                  <ChevronUp className="h-4 w-4" />
+                                  <ChevronUp className="h-4 w-4" style={{ color: 'inherit' }} />
                                 )}
-                                <span>{category}</span>
+                                <span style={{ color: 'inherit' }}>{category}</span>
                               </button>
                               {expandedCategories.has(category) && (
                                 <div className="flex flex-wrap gap-2 pl-6">
@@ -638,7 +687,22 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                         </div>
 
                         {/* Custom Label Input */}
-                        <div className="mt-4 pt-4 border-t flex items-center gap-2">
+                        {/**
+                         * Border separator uses borderColorMuted (subtle) as primary choice,
+                         * falling back to borderColor, then to a light gray.
+                         * This maintains visual separation without being too prominent.
+                         */}
+                        <div 
+                          className="mt-4 pt-4 border-t flex items-center gap-2"
+                          style={{
+                            borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.1)',
+                          }}
+                        >
+                          {/**
+                           * Custom label input uses theme's inputBackground if available,
+                           * otherwise falls back to cardBackground or transparent.
+                           * Text color follows the standard fallback: textPrimary -> textColor -> black.
+                           */}
                           <Input
                             type="text"
                             value={customLabel}
@@ -651,6 +715,10 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                             }}
                             placeholder="Add custom label..."
                             className="flex-1 text-sm shadow-none border-0 focus:ring-0 focus:outline-none focus:border-0 appearance-none"
+                            style={{
+                              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || 'transparent',
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           />
                           <Button
                             type="button"
@@ -658,17 +726,50 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                             disabled={!customLabel.trim()}
                             size="sm"
                             className="px-3"
+                            style={selectedTheme ? {
+                              backgroundColor: selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000',
+                              color: selectedTheme.buttonPrimary?.text || selectedTheme.textColor || '#FFFFFF',
+                            } : undefined}
+                            onMouseEnter={(e) => {
+                              if (selectedTheme && customLabel.trim()) {
+                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.hover || selectedTheme.accentColor || '#000000';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (selectedTheme && customLabel.trim()) {
+                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000';
+                              }
+                            }}
                           >
-                            <FaPlus className="h-3 w-3" />
+                            <FaPlus className="h-3 w-3" style={{ color: 'inherit' }} />
                           </Button>
                         </div>
 
                         {/* Done Button */}
-                        <div className="mt-4 pt-4 border-t flex justify-end">
+                        <div 
+                          className="mt-4 pt-4 border-t flex justify-end"
+                          style={{
+                            borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.1)',
+                          }}
+                        >
                           <Button
                             type="button"
                             onClick={() => setShowLabelPicker(false)}
                             className="px-6"
+                            style={selectedTheme ? {
+                              backgroundColor: selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000',
+                              color: selectedTheme.buttonPrimary?.text || selectedTheme.textColor || '#FFFFFF',
+                            } : undefined}
+                            onMouseEnter={(e) => {
+                              if (selectedTheme) {
+                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.hover || selectedTheme.accentColor || '#000000';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (selectedTheme) {
+                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000';
+                              }
+                            }}
                           >
                             Done
                           </Button>

@@ -127,6 +127,46 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/**
+ * Theme-aware scrollbar styling for labels menu
+ * 
+ * Browser Compatibility:
+ * - WebKit browsers (Chrome, Safari, Edge): Uses ::-webkit-scrollbar pseudo-elements
+ * - Firefox: Uses scrollbar-width and scrollbar-color properties
+ * - Other browsers: Will fall back to default browser scrollbar styling
+ * 
+ * CSS Variable Inheritance:
+ * The scrollbar colors are controlled via CSS custom properties (--scrollbar-track,
+ * --scrollbar-thumb, --scrollbar-thumb-hover) which are set on the parent modal
+ * container and inherited by child elements with the .label-menu-scrollbar class.
+ * 
+ * These CSS variables are dynamically set via inline styles based on the current theme.
+ * See getScrollbarStyles() in utils/themeUtils.ts for the implementation.
+ */
+.label-menu-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.label-menu-scrollbar::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, rgba(0, 0, 0, 0.1));
+  border-radius: 4px;
+}
+
+.label-menu-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, rgba(0, 0, 0, 0.3));
+  border-radius: 4px;
+}
+
+.label-menu-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, rgba(0, 0, 0, 0.5));
+}
+
+/* Firefox scrollbar - uses different properties than WebKit */
+.label-menu-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, rgba(0, 0, 0, 0.3)) var(--scrollbar-track, rgba(0, 0, 0, 0.1));
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

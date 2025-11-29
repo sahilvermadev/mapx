@@ -15,6 +15,7 @@ import NotificationsBell from '@/components/NotificationsBell';
 import UnifiedFeedFilters from '@/components/SocialFeed/UnifiedFeedFilters';
 import { useFeedFilters } from '@/contexts/FeedFiltersContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { THEMES } from '@/services/profileService';
 
 // Types
@@ -99,7 +100,14 @@ const Header: React.FC<HeaderProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme: themeName } = useTheme();
+  const { theme: userThemeName } = useTheme();
+  const { profileTheme, profileThemeObject } = useProfileTheme();
+  // Use profile theme if available (viewing someone else's profile), otherwise use viewer's theme
+  const themeName = profileTheme || userThemeName;
+  // Validate theme before accessing THEMES to prevent runtime errors
+  const theme = profileThemeObject || (userThemeName && THEMES[userThemeName as keyof typeof THEMES] 
+    ? THEMES[userThemeName as keyof typeof THEMES] 
+    : null);
   const buttonClasses = getButtonClasses(variant, themeName);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -296,10 +304,21 @@ const Header: React.FC<HeaderProps> = ({
   const showFeedFilters = isFeedPage && feedFilters && !feedFilters.hasActiveSearch;
   const headerRef = useRef<HTMLElement>(null);
 
-  // Get theme colors
-  const theme = themeName && THEMES[themeName as keyof typeof THEMES] 
-    ? THEMES[themeName as keyof typeof THEMES] 
-    : null;
+  // Debug logging for feed filters visibility
+  useEffect(() => {
+    console.log('[Header] Feed filters check:', {
+      pathname: location.pathname,
+      isFeedPage,
+      hasFeedFilters: !!feedFilters,
+      hasActiveSearch: feedFilters?.hasActiveSearch ?? false,
+      showFeedFilters,
+      citiesCount: feedFilters?.cities?.length ?? 0,
+      currentUserId: feedFilters?.currentUserId ?? 'none',
+      timestamp: performance.now(),
+    });
+  }, [location.pathname, feedFilters, isFeedPage, showFeedFilters]);
+
+  // Theme is already computed above from profile theme or user theme
   
   // Header styling based on variant and theme
   const headerStyle: React.CSSProperties | undefined = variant === 'dark' 
@@ -652,9 +671,12 @@ const Header: React.FC<HeaderProps> = ({
       {mobileMenuOpen && (
         <div 
           ref={mobileMenuRef}
-          className={`md:hidden absolute top-16 left-0 right-0 z-50 border-t ${
-            variant === 'dark' ? 'bg-black border-white/20' : 'bg-background border-border'
-          } shadow-lg`}
+          className="md:hidden absolute top-16 left-0 right-0 z-50 border-t shadow-lg"
+          style={{
+            backgroundColor: theme?.backgroundColor || (variant === 'dark' ? '#000000' : '#ffffff'),
+            borderColor: theme?.borderColorMuted || theme?.borderColor || (variant === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'),
+            color: theme?.textColor || (variant === 'dark' ? '#ffffff' : '#000000'),
+          }}
         >
           <div className="px-4 py-3 space-y-2">
             {/* Recommend */}
@@ -762,7 +784,12 @@ const Header: React.FC<HeaderProps> = ({
             </Button>
 
             {/* Separator */}
-            <div className={`h-px my-2 ${variant === 'dark' ? 'bg-white/20' : 'bg-border'}`} />
+            <div 
+              className="h-px my-2" 
+              style={{
+                backgroundColor: theme?.borderColorMuted || theme?.borderColor || (variant === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'),
+              }}
+            />
 
             {/* Profile */}
             {showProfileButton && currentUserId && (
@@ -821,7 +848,12 @@ const Header: React.FC<HeaderProps> = ({
             {/* Logout */}
             {showLogoutButton && onLogout && (
               <>
-                <div className={`h-px my-2 ${variant === 'dark' ? 'bg-white/20' : 'bg-border'}`} />
+                <div 
+                  className="h-px my-2" 
+                  style={{
+                    backgroundColor: theme?.borderColorMuted || theme?.borderColor || (variant === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'),
+                  }}
+                />
                 <Button
                   variant="ghost"
                   className={`w-full justify-start ${buttonClasses} text-red-600 hover:text-red-500 hover:bg-red-500/10`}

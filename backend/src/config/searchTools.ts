@@ -74,7 +74,7 @@ export const ASK_MY_NETWORK_TOOL = {
     properties: {
       intent: {
         type: 'string',
-        description: 'Restate the user’s need in plain language, e.g. "Need a killer vegetarian tasting menu in Bandra this week".'
+        description: 'Restate the user\'s need in plain language, e.g. "Need a killer vegetarian tasting menu in Bandra this week".'
       },
       reason: {
         type: 'string',
@@ -100,4 +100,3 @@ export type AskMyNetworkArgs = {
   urgency?: 'low' | 'normal' | 'high';
   preferred_circle?: string | null;
 };
-

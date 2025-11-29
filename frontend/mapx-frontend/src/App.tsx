@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfflineIndicator } from './hooks/useOffline';
 import { Toaster } from "sonner";
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { ProfileThemeProvider } from '@/contexts/ProfileThemeContext';
 import { FeedFiltersProvider } from '@/contexts/FeedFiltersContext';
 
 // Lazy load page components for better performance
@@ -203,11 +204,13 @@ const App: React.FC = () => {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ThemeProvider>
+          <ProfileThemeProvider>
           <Router>
             <Routes>
               <Route path="/*" element={<AppContent />} />
             </Routes>
           </Router>
+          </ProfileThemeProvider>
           </ThemeProvider>
         </AuthProvider>
       </QueryClientProvider>

@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { profileApi, type FilterOptions, type ProfilePreferences, THEMES, type ThemeName, type UserData } from '@/services/profileService';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { getReadableTextColor } from '@/utils/color';
 import { useAuth } from '@/auth';
 import { useQueryClient } from '@tanstack/react-query';
@@ -401,6 +402,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
 
   // Theme hook - must be called before any early returns
   const { setTheme } = useTheme();
+  const { setProfileTheme } = useProfileTheme();
   
   const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   
@@ -410,6 +412,20 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const selectedTheme = previewTheme ? THEMES[previewTheme] : THEMES['dark'];
   const accentColor = selectedTheme.accentColor;
   const backgroundColor = selectedTheme.backgroundColor;
+  
+  // When viewing someone else's profile, set their theme in the context so Header and other components can use it
+  useEffect(() => {
+    if (!isOwnProfile && previewTheme && THEMES[previewTheme]) {
+      // Validate theme before setting to prevent runtime errors
+      setProfileTheme(previewTheme as ThemeName);
+    } else {
+      setProfileTheme(null);
+    }
+    // Cleanup: clear profile theme when leaving profile page
+    return () => {
+      setProfileTheme(null);
+    };
+  }, [isOwnProfile, previewTheme, setProfileTheme]);
 
   // For own profile: Apply and persist theme preference globally
   // Only apply saved theme when customize panel is closed (not during preview)
@@ -948,7 +964,6 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                         borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
                         color: selectedTheme.inputText || selectedTheme.textPrimary || '#000000',
                         boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
-                        focusRingColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)',
                       } : undefined}
                     >
                       <option value="default">Default (System Sans)</option>

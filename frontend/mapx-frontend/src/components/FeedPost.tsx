@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
@@ -19,9 +19,10 @@ import ContactReveal from '@/components/ContactReveal';
 import { recommendationsApi } from '@/services/recommendationsApiService';
 import { toast } from 'sonner';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { THEMES } from '@/services/profileService';
 import { CURATED_LABELS, MAX_LABEL_LENGTH } from '@/components/composer/constants';
-import { getTagInlineStyles } from '@/utils/themeUtils';
+import { getTagInlineStyles, getScrollbarStyles } from '@/utils/themeUtils';
 
 // Types
 interface FeedPostProps {
@@ -97,11 +98,26 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   }
   const navigate = useNavigate();
   const { getLocationNavigationProps } = useLocationNavigation();
-  const { theme } = useTheme();
-  const selectedTheme = THEMES[theme];
+  const { theme: userTheme } = useTheme();
+  const { profileTheme, profileThemeObject } = useProfileTheme();
+  // Use profile theme if available (viewing someone else's profile), otherwise use viewer's theme
+  const themeName = profileTheme || userTheme;
+  // Validate theme before accessing THEMES to prevent runtime errors
+  const selectedTheme = profileThemeObject || (userTheme && THEMES[userTheme as keyof typeof THEMES] 
+    ? THEMES[userTheme as keyof typeof THEMES] 
+    : null);
   
-  // Get theme-specific tag styles
-  const tagStyle = selectedTheme.tagStyle || {
+  /**
+   * Memoized scrollbar styles based on current theme
+   * These CSS variables are inherited by child elements with .label-menu-scrollbar class
+   */
+  const scrollbarStyles = useMemo(() => 
+    getScrollbarStyles(themeName, selectedTheme),
+    [themeName, selectedTheme]
+  );
+  
+  // Get theme-specific tag styles with fallback
+  const tagStyle = selectedTheme?.tagStyle || {
     background: '#F5F5F5',
     textColor: '#000000',
     borderColor: 'rgba(0, 0, 0, 0.1)',
@@ -140,7 +156,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const [customLabel, setCustomLabel] = useState<string>('');
   
   // Get tag inline styles for theme
-  const tagInlineStyles = React.useMemo(() => getTagInlineStyles(theme), [theme]);
+  const tagInlineStyles = React.useMemo(() => getTagInlineStyles(themeName), [themeName]);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -769,6 +785,7 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                       style={{
                         borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.2)',
                         backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                        ...scrollbarStyles,
                       }}
                     >
                       {/* Header */}
@@ -796,6 +813,10 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                             onChange={(e) => setLabelSearch(e.target.value)}
                             placeholder="Search labels..."
                             className="h-7 w-full md:w-48 text-xs"
+                            style={{
+                              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || '#FFFFFF',
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           />
                           <Button
                             type="button"
@@ -804,28 +825,44 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                             onClick={() => setShowLabelPicker(false)}
                             className="h-7 w-full md:w-7 md:p-0"
                             aria-label="Close label picker"
+                            style={{
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           >
-                            <X className="h-3.5 w-3.5" />
+                            <X className="h-3.5 w-3.5" style={{ color: 'inherit' }} />
                           </Button>
                         </div>
                       </motion.div>
 
                       {/* Categories */}
-                      <div className="max-h-[40vh] overflow-y-auto p-3 space-y-3">
+                      <div className="max-h-[40vh] overflow-y-auto p-3 space-y-3 label-menu-scrollbar">
                         {filteredLabelEntries.length > 0 ? (
                           filteredLabelEntries.map(([category, labelList]) => (
                             <motion.div key={category} layout className="space-y-2">
                               <button
                                 type="button"
                                 onClick={() => toggleCategory(category)}
-                                className="flex items-center gap-2 w-full text-left font-semibold text-xs text-foreground hover:text-foreground/80 transition-colors"
+                                className="flex items-center gap-2 w-full text-left font-semibold text-xs transition-colors"
+                                style={{
+                                  color: selectedTheme?.textSecondary || selectedTheme?.textMuted || selectedTheme?.textColor || '#6B7280',
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (selectedTheme) {
+                                    e.currentTarget.style.color = selectedTheme.textPrimary || selectedTheme.textColor || '#000000';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (selectedTheme) {
+                                    e.currentTarget.style.color = selectedTheme.textSecondary || selectedTheme.textMuted || selectedTheme.textColor || '#6B7280';
+                                  }
+                                }}
                               >
                                 {expandedCategories.has(category) ? (
-                                  <ChevronDown className="h-3.5 w-3.5" />
+                                  <ChevronDown className="h-3.5 w-3.5" style={{ color: 'inherit' }} />
                                 ) : (
-                                  <ChevronUp className="h-3.5 w-3.5" />
+                                  <ChevronUp className="h-3.5 w-3.5" style={{ color: 'inherit' }} />
                                 )}
-                                <span>{category}</span>
+                                <span style={{ color: 'inherit' }}>{category}</span>
                               </button>
                               <AnimatePresence initial={false}>
                                 {expandedCategories.has(category) && (
@@ -911,6 +948,10 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                             placeholder="Add custom label..."
                             className="h-7 text-xs flex-1"
                             maxLength={MAX_LABEL_LENGTH}
+                            style={{
+                              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || '#FFFFFF',
+                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                            }}
                           />
                           <Button
                             type="button"
@@ -919,6 +960,21 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                             onClick={addCustomLabel}
                             disabled={!customLabel.trim()}
                             className="h-7 px-3 text-xs"
+                            style={selectedTheme ? {
+                              backgroundColor: selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000',
+                              color: selectedTheme.buttonPrimary?.text || selectedTheme.textColor || '#FFFFFF',
+                              borderColor: selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)',
+                            } : undefined}
+                            onMouseEnter={(e) => {
+                              if (selectedTheme && customLabel.trim()) {
+                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.hover || selectedTheme.accentColor || '#000000';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (selectedTheme && customLabel.trim()) {
+                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000';
+                              }
+                            }}
                           >
                             Add
                           </Button>
@@ -1456,11 +1512,8 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             style={{
               borderColor: selectedTheme?.borderColor || '#000000',
               backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
-              color: selectedTheme?.textPrimary || '#000000',
-            }}
-            style={{ 
+              color: (!newComment.trim() || isSubmitting) ? '#000' : (selectedTheme?.textPrimary || '#000000'),
               boxShadow: (!newComment.trim() || isSubmitting) ? 'none' : '2px 2px 0 0 #000',
-              color: '#000'
             }}
           >
             {isSubmitting ? 'Posting...' : 'Post'}

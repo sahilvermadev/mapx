@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
@@ -13,7 +13,7 @@ interface FilterButtonProps {
   className?: string;
 }
 
-const FilterButton: React.FC<FilterButtonProps> = ({
+const FilterButton = forwardRef<HTMLButtonElement, FilterButtonProps>(({
   icon,
   ariaLabel,
   isActive,
@@ -21,7 +21,7 @@ const FilterButton: React.FC<FilterButtonProps> = ({
   totalCount,
   onClick,
   className = '',
-}) => {
+}, ref) => {
   const { theme: themeName } = useTheme();
   const theme = themeName && THEMES[themeName as keyof typeof THEMES] 
     ? THEMES[themeName as keyof typeof THEMES] 
@@ -29,6 +29,7 @@ const FilterButton: React.FC<FilterButtonProps> = ({
 
   return (
     <Button
+      ref={ref}
       aria-label={ariaLabel}
       size="sm"
       variant="ghost"
@@ -94,7 +95,9 @@ const FilterButton: React.FC<FilterButtonProps> = ({
       )}
     </Button>
   );
-};
+});
+
+FilterButton.displayName = 'FilterButton';
 
 export default FilterButton;
 

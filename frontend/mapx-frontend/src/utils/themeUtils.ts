@@ -1,5 +1,6 @@
+import type { CSSProperties } from 'react';
 import { THEMES } from '@/services/profileService';
-import type { ThemeName } from '@/services/profileService';
+import type { ThemeName, Theme } from '@/services/profileService';
 
 /**
  * Get theme-specific tag styles with fallback defaults
@@ -38,6 +39,66 @@ export const getTagInlineStyles = (theme: ThemeName) => {
     boxShadow: tagStyle.shadow === 'none' ? 'none' : (tagStyle.shadow || 'none'),
   };
 };
+
+/**
+ * TypeScript type for CSS properties that include CSS custom properties (CSS variables)
+ * This allows type-safe usage of CSS variables like --scrollbar-track in inline styles
+ */
+export type CSSPropertiesWithVars = CSSProperties & {
+  [key: `--${string}`]: string;
+};
+
+/**
+ * Fallback colors for themes when theme-specific colors are not available
+ */
+export const THEME_FALLBACKS = {
+  dark: {
+    scrollbarTrack: 'rgba(255, 255, 255, 0.1)',
+    scrollbarThumb: 'rgba(255, 255, 255, 0.3)',
+    scrollbarThumbHover: 'rgba(255, 255, 255, 0.5)',
+  },
+  light: {
+    scrollbarTrack: 'rgba(0, 0, 0, 0.1)',
+    scrollbarThumb: 'rgba(0, 0, 0, 0.3)',
+    scrollbarThumbHover: 'rgba(0, 0, 0, 0.5)',
+  },
+} as const;
+
+/**
+ * Get scrollbar CSS variable styles based on theme
+ * 
+ * This function generates CSS custom properties for scrollbar styling that will be
+ * inherited by child elements with the `.label-menu-scrollbar` class.
+ * 
+ * @param themeName - The current theme name (e.g., 'dark', 'neo-brutal')
+ * @param selectedTheme - The theme object, or null if theme is not found
+ * @returns CSS properties object with scrollbar CSS variables
+ * 
+ * @example
+ * ```tsx
+ * const scrollbarStyles = getScrollbarStyles(themeName, selectedTheme);
+ * <div style={scrollbarStyles}>
+ *   <div className="label-menu-scrollbar">...</div>
+ * </div>
+ * ```
+ */
+export function getScrollbarStyles(
+  themeName: ThemeName | string | undefined,
+  selectedTheme: Theme | null
+): CSSPropertiesWithVars {
+  const isDark = themeName === 'dark';
+  
+  return {
+    '--scrollbar-track': selectedTheme?.borderColorMuted || 
+      (isDark ? THEME_FALLBACKS.dark.scrollbarTrack : THEME_FALLBACKS.light.scrollbarTrack),
+    '--scrollbar-thumb': isDark 
+      ? THEME_FALLBACKS.dark.scrollbarThumb 
+      : (selectedTheme?.borderColor || THEME_FALLBACKS.light.scrollbarThumb),
+    '--scrollbar-thumb-hover': isDark 
+      ? THEME_FALLBACKS.dark.scrollbarThumbHover 
+      : (selectedTheme?.textMuted || selectedTheme?.textSecondary || THEME_FALLBACKS.light.scrollbarThumbHover),
+  };
+}
 
 
 
