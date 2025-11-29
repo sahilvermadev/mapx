@@ -60,6 +60,7 @@ const QUESTION_CARD_BACKGROUNDS: Record<ThemeName, string> = {
   'sunset': '#FCF8F8', // Very light, desaturated pink
   'forest': '#F8FBF9', // Very light, desaturated green
   'monochrome': '#F8F8F8', // Light gray as suggested
+  'dark': '#1A1A1A', // Dark background for dark theme
 };
 
 import { getProfilePictureUrl } from '@/config/apiConfig';
@@ -70,25 +71,42 @@ const getProxiedImageUrl = (url?: string): string => {
 };
 
 // Loading skeleton component
-const LoadingSkeleton: React.FC<{ noOuterSpacing?: boolean }> = ({ noOuterSpacing }) => (
-  <article className={noOuterSpacing ? "w-full" : "w-full mb-1.5 md:mb-2"}>
-    <div className={noOuterSpacing ? "relative animate-pulse" : "relative rounded-lg border-2 border-black bg-white p-3 md:p-4 shadow-[4px_4px_0_0_#000] animate-pulse"}>
-      <div className="flex items-start gap-3 mb-2">
-        <div className="h-10 w-10 bg-gray-200 rounded-full"></div>
-        <div className="flex-1">
-          <div className="h-3 bg-gray-200 rounded w-1/3 mb-1.5"></div>
-          <div className="h-2.5 bg-gray-200 rounded w-1/4"></div>
+const LoadingSkeleton: React.FC<{ noOuterSpacing?: boolean }> = ({ noOuterSpacing }) => {
+  const { theme } = useTheme();
+  const selectedTheme = THEMES[theme];
+  const skeletonColor = selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || 'rgba(0, 0, 0, 0.1)';
+  
+  return (
+    <article className={noOuterSpacing ? "w-full" : "w-full mb-1.5 md:mb-2"}>
+      <div 
+        className={noOuterSpacing ? "relative animate-pulse" : "relative rounded-lg border-2 p-3 md:p-4 animate-pulse"}
+        style={noOuterSpacing ? undefined : selectedTheme ? {
+          backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+          borderColor: selectedTheme.borderColor || '#000000',
+          boxShadow: `4px 4px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+        } : {
+          borderColor: '#000000',
+          backgroundColor: '#FFFFFF',
+          boxShadow: '4px 4px 0 0 #000000',
+        }}
+      >
+        <div className="flex items-start gap-3 mb-2">
+          <div className="h-10 w-10 rounded-full" style={{ backgroundColor: skeletonColor }}></div>
+          <div className="flex-1">
+            <div className="h-3 rounded w-1/3 mb-1.5" style={{ backgroundColor: skeletonColor }}></div>
+            <div className="h-2.5 rounded w-1/4" style={{ backgroundColor: skeletonColor }}></div>
+          </div>
+        </div>
+        <div className="h-4 rounded w-3/4 mb-2" style={{ backgroundColor: skeletonColor }}></div>
+        <div className="flex gap-2">
+          <div className="h-7 rounded w-16" style={{ backgroundColor: skeletonColor }}></div>
+          <div className="h-7 rounded w-16" style={{ backgroundColor: skeletonColor }}></div>
+          <div className="h-7 rounded w-12" style={{ backgroundColor: skeletonColor }}></div>
         </div>
       </div>
-      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-      <div className="flex gap-2">
-        <div className="h-7 bg-gray-200 rounded w-16"></div>
-        <div className="h-7 bg-gray-200 rounded w-16"></div>
-        <div className="h-7 bg-gray-200 rounded w-12"></div>
-      </div>
-    </div>
-  </article>
-);
+    </article>
+  );
+};
 
 // Main component
 const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({ 
@@ -103,9 +121,13 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
 }) => {
   const navigate = useNavigate();
   const { getLocationNavigationProps } = useLocationNavigation();
-  const { theme } = useTheme();
-  const selectedTheme = THEMES[theme];
-  const questionCardBackground = QUESTION_CARD_BACKGROUNDS[theme];
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const questionCardBackground = themeName && QUESTION_CARD_BACKGROUNDS[themeName as keyof typeof QUESTION_CARD_BACKGROUNDS]
+    ? QUESTION_CARD_BACKGROUNDS[themeName as keyof typeof QUESTION_CARD_BACKGROUNDS]
+    : QUESTION_CARD_BACKGROUNDS['dark'];
   const [showLoginModal, setShowLoginModal] = useState(false);
   
   // Early returns for loading and invalid states
@@ -564,7 +586,7 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
   const renderInteractionButtons = useCallback(() => {
     if (isEditing) return null; // Hide interaction buttons when editing
     
-    const accentColor = selectedTheme.accentColor;
+    const accentColor = selectedTheme?.accentColor || '#000000';
     const textColor = getReadableTextColor(accentColor);
     const hoverColor = darkenColor(accentColor, 0.1); // Darken by 10% for hover
 
@@ -576,7 +598,23 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
               variant="ghost"
               size="sm"
               onClick={handleToggleAnswers}
-              className="flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
+              className="flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border bg-transparent"
+              style={selectedTheme ? {
+                borderColor: 'transparent',
+                color: selectedTheme.textPrimary || '#000000',
+              } : undefined}
+              onMouseEnter={(e) => {
+                if (selectedTheme) {
+                  e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || 'rgba(0, 0, 0, 0.4)';
+                  e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || selectedTheme.buttonGhost.hover || 'rgba(0, 0, 0, 0.02)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedTheme) {
+                  e.currentTarget.style.borderColor = 'transparent';
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
             >
               <MessageCircle className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
               <span className="text-xs">
@@ -650,7 +688,12 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
           duration: 0.2,
           ease: 'easeOut'
         }}
-        className="bg-white border border-black/10 rounded-lg p-3 md:p-4 pb-3 last:pb-3 border-b border-black/5 last:border-b-0 shadow-sm hover:shadow-md transition-all cursor-pointer group"
+        className="border rounded-lg p-3 md:p-4 pb-3 last:pb-3 border-b last:border-b-0 shadow-sm hover:shadow-md transition-all cursor-pointer group"
+        style={selectedTheme ? {
+          backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+          borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+          color: selectedTheme.textPrimary || '#000000',
+        } : undefined}
         onClick={() => answer.recommendation_id && navigate(`/post/${answer.recommendation_id}`)}
       >
         <div className="flex items-start gap-2 md:gap-3 pr-20 md:pr-24">
@@ -796,19 +839,45 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
         animate={{ opacity: 1, height: 'auto' }}
         exit={{ opacity: 0, height: 0 }}
         transition={{ duration: 0.2, ease: 'easeInOut' }}
-        className="mt-3 pt-3 border-t border-black/10"
+        className="mt-3 pt-3 border-t"
+        style={{ borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.1)' }}
       >
         {isLoadingAnswers && (
           <div className="space-y-2">
             {[1, 2].map((i) => (
-              <div key={i} className="bg-white border border-black/10 rounded-lg p-3 md:p-4 animate-pulse">
+              <div 
+                key={i} 
+                className="border rounded-lg p-3 md:p-4 animate-pulse"
+                style={selectedTheme ? {
+                  backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                  borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+                } : undefined}
+              >
                 <div className="flex items-start gap-2 md:gap-3">
-                  <div className="h-8 w-8 md:h-9 md:w-9 rounded-full bg-gray-200 border border-black/10"></div>
+                  <div 
+                    className="h-8 w-8 md:h-9 md:w-9 rounded-full border"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.borderColorMuted || selectedTheme.hoverBackground || '#E5E7EB',
+                      borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+                    } : undefined}
+                  ></div>
                   <div className="flex-1 space-y-2">
-                    <div className="h-3 bg-gray-200 rounded w-1/3"></div>
-                    <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                    <div className="h-10 bg-gray-200 rounded w-full"></div>
+                    <div 
+                      className="h-3 rounded w-1/3"
+                      style={{ backgroundColor: selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || '#E5E7EB' }}
+                    ></div>
+                    <div 
+                      className="h-3 rounded w-2/3"
+                      style={{ backgroundColor: selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || '#E5E7EB' }}
+                    ></div>
+                    <div 
+                      className="h-3 rounded w-1/2"
+                      style={{ backgroundColor: selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || '#E5E7EB' }}
+                    ></div>
+                    <div 
+                      className="h-10 rounded w-full"
+                      style={{ backgroundColor: selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || '#E5E7EB' }}
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -832,8 +901,15 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
             animate={{ opacity: 1, y: 0 }}
             className="text-center py-6"
           >
-            <MessageCircle className="h-10 w-10 md:h-12 md:w-12 mx-auto mb-3 text-muted-foreground/40" strokeWidth={1.5} />
-            <p className="text-xs md:text-sm text-muted-foreground font-medium mb-3">
+            <MessageCircle 
+              className="h-10 w-10 md:h-12 md:w-12 mx-auto mb-3" 
+              strokeWidth={1.5}
+              style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || 'rgba(0, 0, 0, 0.4)' }}
+            />
+            <p 
+              className="text-xs md:text-sm font-medium mb-3"
+              style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+            >
               {isOwnQuestion ? 'No answers yet. Waiting for others to answer!' : 'No answers yet. Be the first to answer!'}
             </p>
             {!isOwnQuestion && (
@@ -841,7 +917,23 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
                 variant="default"
                 size="sm"
                 onClick={handleAnswer}
-                className="flex items-center gap-1.5 h-7 md:h-8 px-3 md:px-4 rounded-none transition-all font-semibold border-[1.5px] border-black bg-blue-600 hover:bg-blue-700 text-white shadow-[2px_2px_0_0_#000] hover:shadow-[3px_3px_0_0_#000] hover:translate-x-[1px] hover:translate-y-[1px] mx-auto"
+                className="flex items-center gap-1.5 h-7 md:h-8 px-3 md:px-4 rounded-none transition-all font-semibold border-[1.5px] text-white shadow-[2px_2px_0_0_#000] hover:shadow-[3px_3px_0_0_#000] hover:translate-x-[1px] hover:translate-y-[1px] mx-auto"
+                style={selectedTheme ? {
+                  backgroundColor: selectedTheme.accentColor || '#2563EB',
+                  borderColor: selectedTheme.borderColor || '#000000',
+                  color: getReadableTextColor(selectedTheme.accentColor || '#2563EB'),
+                } : undefined}
+                onMouseEnter={(e) => {
+                  if (selectedTheme) {
+                    const hoverColor = darkenColor(selectedTheme.accentColor || '#2563EB', 0.1);
+                    e.currentTarget.style.backgroundColor = hoverColor;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (selectedTheme) {
+                    e.currentTarget.style.backgroundColor = selectedTheme.accentColor || '#2563EB';
+                  }
+                }}
               >
                 <MessageSquarePlus className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={2} />
                 <span className="text-xs">Answer this question</span>

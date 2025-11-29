@@ -10,6 +10,7 @@ import { FaPlus } from 'react-icons/fa';
 import { getProfilePictureUrl } from '@/config/apiConfig';
 import InlineLocationPicker from '@/components/InlineLocationPicker';
 import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 import { getTagInlineStyles } from '@/utils/themeUtils';
 import { RATING_MESSAGES, MAX_VISIBLE_LABELS, MAX_LABEL_LENGTH, INPUT_STYLE_PROPS, INPUT_CLASSES, CURATED_LABELS } from '../constants';
 
@@ -88,8 +89,11 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
   const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Get theme-specific tag styles
-  const { theme } = useTheme();
-  const tagInlineStyles = useMemo(() => getTagInlineStyles(theme), [theme]);
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const tagInlineStyles = useMemo(() => getTagInlineStyles(themeName), [themeName]);
 
   // No special measurement logic — rely on native input size attribute for autosizing
 
@@ -286,7 +290,7 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                     <ContactReveal
                       contact={contact}
                       className="relative ml-3 flex-shrink-0"
-                      buttonClassName="h-5 w-5 md:h-5 md:w-5 hover:bg-yellow-50 hover:ring-2 hover:ring-yellow-300/40"
+                      buttonClassName="h-5 w-5 md:h-5 md:w-5"
                       iconClassName="h-3 w-3"
                       align="right"
                     />
@@ -308,10 +312,18 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white rounded-lg shadow-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+                        className="rounded-lg shadow-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+                        style={selectedTheme ? {
+                          backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                        } : undefined}
                       >
                         <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-semibold">Change Location</h3>
+                          <h3 
+                            className="text-lg font-semibold"
+                            style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                          >
+                            Change Location
+                          </h3>
                           <button
                             type="button"
                             onClick={() => setShowLocationPicker(false)}
@@ -346,16 +358,26 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                           className="focus:outline-none hover:scale-110 transition-transform"
                         >
                           <Star
-                            className={`h-3.5 w-3.5 transition-colors ${
-                              (hoverRating || rating || 0) >= n
-                                ? 'fill-yellow-400 text-yellow-400'
-                                : 'text-gray-300'
-                            }`}
+                            className="h-3.5 w-3.5 transition-colors"
+                            style={{
+                              fill: (hoverRating || rating || 0) >= n
+                                ? (selectedTheme?.accentColor || '#FCD34D')
+                                : 'transparent',
+                              color: (hoverRating || rating || 0) >= n
+                                ? (selectedTheme?.accentColor || '#FCD34D')
+                                : (selectedTheme?.textMuted || selectedTheme?.textSecondary || '#D1D5DB'),
+                            }}
                             strokeWidth={1.5}
                           />
                         </button>
                         {/* Hover tooltip */}
-                        <div className={`${n >= 4 ? 'right-0 left-auto translate-x-0' : 'left-1/2 -translate-x-1/2'} absolute -bottom-8 transform bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-10 pointer-events-none`}>
+                        <div 
+                          className={`${n >= 4 ? 'right-0 left-auto translate-x-0' : 'left-1/2 -translate-x-1/2'} absolute -bottom-8 transform text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-10 pointer-events-none`}
+                          style={selectedTheme ? {
+                            backgroundColor: selectedTheme.cardBackground || '#1F2937',
+                            color: selectedTheme.textPrimary || '#FFFFFF',
+                          } : undefined}
+                        >
                           {RATING_MESSAGES[n as 1|2|3|4|5]}
                         </div>
                       </div>
@@ -451,7 +473,20 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => removeLabel(label)}
-                                  className="ml-1 md:ml-1.5 text-yellow-600 hover:text-yellow-800 focus:outline-none transition-colors text-xs"
+                                  className="ml-1 md:ml-1.5 focus:outline-none transition-colors text-xs"
+                                  style={selectedTheme ? {
+                                    color: selectedTheme.accentColor || '#D97706',
+                                  } : undefined}
+                                  onMouseEnter={(e) => {
+                                    if (selectedTheme) {
+                                      e.currentTarget.style.color = selectedTheme.accentColor || '#92400E';
+                                    }
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (selectedTheme) {
+                                      e.currentTarget.style.color = selectedTheme.accentColor || '#D97706';
+                                    }
+                                  }}
                                   aria-label={`Remove ${label} label`}
                                 >
                                   ×
@@ -473,7 +508,26 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                       <button
                         type="button"
                         onClick={() => setShowLabelPicker(true)}
-                        className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium transition-all duration-200 border-[1.5px] bg-white text-gray-600 border-gray-200 hover:bg-slate-50 hover:border-slate-300 hover:text-gray-900 hover:-translate-y-0.5"
+                        className="inline-flex items-center px-2 md:px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-medium transition-all duration-200 border-[1.5px] hover:-translate-y-0.5"
+                        style={selectedTheme ? {
+                          backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                          color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                          borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || '#E5E7EB',
+                        } : undefined}
+                        onMouseEnter={(e) => {
+                          if (selectedTheme) {
+                            e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || '#F9FAFB';
+                            e.currentTarget.style.borderColor = selectedTheme.borderColor || '#D1D5DB';
+                            e.currentTarget.style.color = selectedTheme.textPrimary || '#111827';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (selectedTheme) {
+                            e.currentTarget.style.backgroundColor = selectedTheme.cardBackground || '#FFFFFF';
+                            e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || selectedTheme.borderColor || '#E5E7EB';
+                            e.currentTarget.style.color = selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280';
+                          }
+                        }}
                         aria-label="Add label"
                       >
                         <FaPlus />
@@ -500,10 +554,18 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="bg-white rounded-lg shadow-lg p-6 max-w-3xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col"
+                        className="rounded-lg shadow-lg p-6 max-w-3xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col"
+                        style={selectedTheme ? {
+                          backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                        } : undefined}
                       >
                         <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-semibold">Select Labels</h3>
+                          <h3 
+                            className="text-lg font-semibold"
+                            style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                          >
+                            Select Labels
+                          </h3>
                           <button
                             type="button"
                             onClick={() => {
@@ -541,11 +603,29 @@ export const PreviewStep: React.FC<PreviewStepProps> = ({
                                         key={label}
                                         type="button"
                                         onClick={() => toggleLabel(label)}
-                                        className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none ${
-                                          isSelected
-                                            ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
-                                            : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
-                                        }`}
+                                        className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium transition-all border select-none hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none"
+                                        style={selectedTheme ? isSelected ? {
+                                          backgroundColor: selectedTheme.selectedBackground || selectedTheme.hoverBackground || 'rgba(251, 191, 36, 0.1)',
+                                          color: selectedTheme.accentColor || selectedTheme.textPrimary || '#92400E',
+                                          borderColor: selectedTheme.accentColor + '40' || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.3)',
+                                          boxShadow: `1px 1px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                                        } : {
+                                          backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                                          color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                                          borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)',
+                                        } : undefined}
+                                        onMouseEnter={(e) => {
+                                          if (selectedTheme && !isSelected) {
+                                            e.currentTarget.style.borderColor = selectedTheme.borderColor || 'rgba(0, 0, 0, 0.3)';
+                                            e.currentTarget.style.boxShadow = `1px 1px 0 0 ${selectedTheme.borderColor || '#000000'}`;
+                                          }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          if (selectedTheme && !isSelected) {
+                                            e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)';
+                                            e.currentTarget.style.boxShadow = 'none';
+                                          }
+                                        }}
                                       >
                                         {label}
                                       </button>

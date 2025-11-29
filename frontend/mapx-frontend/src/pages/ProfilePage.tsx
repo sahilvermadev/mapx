@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, startTransition } from 'react';
 import { useParams } from 'react-router-dom';
-import { motion, AnimatePresence, LayoutGroup, useMotionValue, useTransform } from 'framer-motion';
-import { Star, Heart, HelpCircle, Settings, MapPin, X } from 'lucide-react';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { Star, Heart, HelpCircle, Settings, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
@@ -42,25 +42,6 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const [editingBio, setEditingBio] = useState(userData?.bio || '');
   const [editingCity, setEditingCity] = useState(userData?.city || '');
   
-  // Cities visited modal state
-  const [showCitiesModal, setShowCitiesModal] = useState(false);
-  const [uniqueCities, setUniqueCities] = useState<Array<{ city_slug: string; city_name: string; country_code?: string; admin1_name?: string }>>([]);
-  const [citiesModalLoading, setCitiesModalLoading] = useState(false);
-  
-  // Mobile detection for cities modal
-  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
-  
-  // Drag handlers for mobile swipe-to-close
-  const y = useMotionValue(0);
-  const opacity = useTransform(y, [0, 300], [1, 0]);
-  
-  const handleCitiesModalDragEnd = useCallback((_event: unknown, info: { offset: { y: number } }) => {
-    if (isMobile && info.offset.y > 100) {
-      setShowCitiesModal(false);
-    } else {
-      y.set(0);
-    }
-  }, [isMobile, y]);
   
   // Search state (for city bar integration)
   const [searchQuery, setSearchQuery] = useState('');
@@ -407,121 +388,6 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
     setDeletedPostIds(new Set());
   }, [userId]);
 
-  // Load unique cities when modal opens
-  // Optimized: First try to extract from already-loaded places, then fetch more if needed
-  const loadUniqueCities = useCallback(async () => {
-    if (!userId) return;
-    
-    try {
-      setCitiesModalLoading(true);
-      
-      // First, extract cities from already-loaded places (much faster)
-      const citiesMap = new Map<string, { city_slug: string; city_name: string; country_code?: string; admin1_name?: string }>();
-      
-      // Extract from current places data
-      places.forEach((rec: any) => {
-        const citySlug = rec.place_city_slug || rec.city_slug;
-        const cityName = rec.place_city_name || rec.city_name;
-        
-        if (citySlug && cityName && !citiesMap.has(citySlug)) {
-          citiesMap.set(citySlug, {
-            city_slug: citySlug,
-            city_name: cityName,
-            country_code: rec.place_country_code || rec.country_code,
-            admin1_name: rec.place_admin1_name || rec.admin1_name,
-          });
-        }
-      });
-      
-      // Only fetch more if we have pagination info suggesting there are more places
-      // Check if there are more pages available
-      if (isInfiniteQuery(placesQuery)) {
-        const infiniteQuery = placesQuery as any;
-        const hasMorePages = infiniteQuery.hasNextPage;
-        
-        // If we have more pages and relatively few cities, fetch more to get complete list
-        // But limit to reasonable amount (e.g., 5 pages = 100 items max)
-        if (hasMorePages && citiesMap.size < 50) {
-          let offset = places.length;
-          let fetchedAll = false;
-          const maxFetch = 100; // Limit to 100 additional items
-          
-          while (!fetchedAll && offset < maxFetch) {
-            const result = await profileApi.getUserRecommendations(
-              userId,
-              {},
-              { field: 'created_at', direction: 'desc' },
-              { limit: 20, offset }
-            );
-            
-            if (!result.data || result.data.length === 0) {
-              fetchedAll = true;
-              break;
-            }
-            
-            result.data.forEach((rec: any) => {
-              const citySlug = rec.place_city_slug || rec.city_slug;
-              const cityName = rec.place_city_name || rec.city_name;
-              
-              if (citySlug && cityName && !citiesMap.has(citySlug)) {
-                citiesMap.set(citySlug, {
-                  city_slug: citySlug,
-                  city_name: cityName,
-                  country_code: rec.place_country_code || rec.country_code,
-                  admin1_name: rec.place_admin1_name || rec.admin1_name,
-                });
-              }
-            });
-            
-            offset += result.data.length;
-            if (result.data.length < 20) {
-              fetchedAll = true;
-            }
-          }
-        }
-      }
-      
-      setUniqueCities(Array.from(citiesMap.values()).sort((a, b) => a.city_name.localeCompare(b.city_name)));
-    } catch (e) {
-      console.error('Failed to load unique cities:', e);
-      setUniqueCities([]);
-    } finally {
-      setCitiesModalLoading(false);
-    }
-  }, [userId, places, placesQuery]);
-
-  // Load cities when modal opens
-  useEffect(() => {
-    if (showCitiesModal) {
-      loadUniqueCities();
-    }
-  }, [showCitiesModal, loadUniqueCities]);
-  
-  // Mobile detection for cities modal
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(max-width: 767px)');
-    const handleChange = (e: MediaQueryListEvent | MediaQueryList) => {
-      setIsMobile(e.matches);
-    };
-    handleChange(mediaQuery);
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    } else {
-      mediaQuery.addListener(handleChange);
-      return () => mediaQuery.removeListener(handleChange);
-    }
-  }, []);
-  
-  // Prevent body scroll on mobile when cities modal is open
-  useEffect(() => {
-    if (showCitiesModal && isMobile) {
-      document.body.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = '';
-      };
-    }
-  }, [showCitiesModal, isMobile]);
 
   // Debounce search input to reduce flicker and request churn
   useEffect(() => {
@@ -541,7 +407,7 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
   const isOwnProfile = currentUser?.id === userId;
   // Use preview theme when customize panel is open, otherwise use saved theme
   const previewTheme = showCustomize ? prefs.theme : prefsDisplay.theme;
-  const selectedTheme = previewTheme ? THEMES[previewTheme] : THEMES['monochrome'];
+  const selectedTheme = previewTheme ? THEMES[previewTheme] : THEMES['dark'];
   const accentColor = selectedTheme.accentColor;
   const backgroundColor = selectedTheme.backgroundColor;
 
@@ -721,10 +587,19 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="relative rounded-xl overflow-hidden min-h-[160px] md:min-h-[200px] lg:min-h-[240px] bg-gray-100">
+            <div 
+              className="relative rounded-xl overflow-hidden min-h-[160px] md:min-h-[200px] lg:min-h-[240px]"
+              style={{ backgroundColor: selectedTheme?.hoverBackground || selectedTheme?.borderColorMuted || '#F3F4F6' }}
+            >
               <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 lg:p-8">
-                <div className="inline-flex items-center gap-4 md:gap-5 lg:gap-6 bg-white border-[1.5px] border-black/10 p-4 md:p-5 lg:p-6 w-full max-w-fit">
-                  <Skeleton className="h-12 w-12 md:h-16 md:w-16 lg:h-20 lg:w-20 rounded-full border-[1.5px] border-black/20" />
+                <div 
+                  className="inline-flex items-center gap-4 md:gap-5 lg:gap-6 border-[1.5px] p-4 md:p-5 lg:p-6 w-full max-w-fit"
+                  style={selectedTheme ? {
+                    backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                    borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+                  } : undefined}
+                >
+                  <Skeleton className="h-12 w-12 md:h-16 md:w-16 lg:h-20 lg:w-20 rounded-full border-[1.5px]" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)' } : undefined} />
                   <div className="min-w-0 flex-1 space-y-3">
                     <Skeleton className="h-7 w-48" />
                     <Skeleton className="h-5 w-32" />
@@ -774,38 +649,6 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                 <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/15 pointer-events-none" />
               )}
               
-              {/* Places Visited Badge - Top Right */}
-              {userStats && userStats.total_cities_visited > 0 && (
-                <motion.div
-                  className="absolute top-4 right-4 md:top-6 md:right-6 z-10"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.3, delay: 0.1 }}
-                >
-                  <div 
-                    className="relative bg-white border-[1.5px] border-black px-3 py-1.5 cursor-pointer transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                    style={{ 
-                      boxShadow: '3px 3px 0 0 #000',
-                    }}
-                    onClick={() => setShowCitiesModal(true)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4" style={{ color: accentColor }} />
-                      <motion.span 
-                        className="text-sm font-bold tracking-tight"
-                        style={{ color: '#000' }}
-                        key={userStats.total_cities_visited}
-                        initial={{ scale: 1.2 }}
-                        animate={{ scale: 1 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        {userStats.total_cities_visited}
-                      </motion.span>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-              
               {/* Profile card positioned at bottom */}
               <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 lg:p-8">
                 <div className="inline-flex items-center gap-4 md:gap-5 lg:gap-6 bg-white border-[1.5px] border-black p-4 md:p-5 lg:p-6 w-full max-w-fit" style={{ boxShadow: '4px 4px 0 0 #000' }}>
@@ -815,17 +658,17 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                   </Avatar>
 
                   <div className="min-w-0 flex-1 pr-2 md:pr-0">
-                    <h1 className="text-xl md:text-2xl lg:text-3xl font-bold tracking-tight truncate mb-1" style={{ letterSpacing: '-0.02em' }}>
+                    <h1 className="text-xl md:text-2xl lg:text-3xl font-bold tracking-tight truncate mb-1" style={{ letterSpacing: '-0.02em', color: '#000000' }}>
                       {userData?.displayName || 'User'}
                     </h1>
                     <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-                      <p className="text-sm md:text-base text-muted-foreground truncate font-medium">@{userData?.username || 'no-username'}</p>
+                      <p className="text-sm md:text-base truncate font-medium" style={{ color: '#6B7280' }}>@{userData?.username || 'no-username'}</p>
                       {userData?.city && (
                         <>
-                          <span className="text-sm md:text-base text-muted-foreground">•</span>
+                          <span className="text-sm md:text-base" style={{ color: '#6B7280' }}>•</span>
                           <div className="flex items-center gap-1.5">
-                            <MapPin className="h-3.5 w-3.5 md:h-4 md:w-4 text-muted-foreground" strokeWidth={1.5} />
-                            <p className="text-sm md:text-base text-muted-foreground font-medium">{userData.city}</p>
+                            <MapPin className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} style={{ color: '#6B7280' }} />
+                            <p className="text-sm md:text-base font-medium" style={{ color: '#6B7280' }}>{userData.city}</p>
                           </div>
                         </>
                       )}
@@ -835,26 +678,26 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                       <div className="flex items-center gap-4 md:gap-5 mt-2 md:mt-3">
                         {userData.followers_count !== undefined && (
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm md:text-base font-semibold" style={{ color: accentColor }}>
+                            <span className="text-sm md:text-base font-semibold" style={{ color: '#000000' }}>
                               {userData.followers_count.toLocaleString()}
                             </span>
-                            <span className="text-sm md:text-base text-muted-foreground">
+                            <span className="text-sm md:text-base" style={{ color: '#6B7280' }}>
                               {userData.followers_count === 1 ? 'follower' : 'followers'}
                             </span>
                           </div>
                         )}
                         {userData.following_count !== undefined && (
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm md:text-base font-semibold" style={{ color: accentColor }}>
+                            <span className="text-sm md:text-base font-semibold" style={{ color: '#000000' }}>
                               {userData.following_count.toLocaleString()}
                             </span>
-                            <span className="text-sm md:text-base text-muted-foreground">following</span>
+                            <span className="text-sm md:text-base" style={{ color: '#6B7280' }}>following</span>
                           </div>
                         )}
                       </div>
                     )}
                     {userData?.bio && (
-                      <p className="text-sm md:text-base text-foreground mt-2 md:mt-3 leading-relaxed max-w-2xl">
+                      <p className="text-sm md:text-base mt-2 md:mt-3 leading-relaxed max-w-2xl" style={{ color: '#000000' }}>
                         {userData.bio}
                       </p>
                     )}
@@ -888,8 +731,14 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="flex items-center gap-6 p-8 bg-card border border-black/10 rounded-xl">
-              <Skeleton className="h-20 w-20 rounded-full border-[1.5px] border-black/20" />
+            <div 
+              className="flex items-center gap-6 p-8 border rounded-xl"
+              style={selectedTheme ? {
+                backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+              } : undefined}
+            >
+              <Skeleton className="h-20 w-20 rounded-full border-[1.5px]" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)' } : undefined} />
               <div className="min-w-0 flex-1 space-y-3">
                 <Skeleton className="h-7 w-48" />
                 <Skeleton className="h-5 w-32" />
@@ -972,7 +821,6 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                 onSelectCity={handleCitySelect}
                 onToggleCategory={toggleCategory}
                 globalSummary={globalSummary}
-                variant="profile"
                 searchValue={searchQuery}
                 onSearchChange={handleSearch}
                 searchPlaceholder="Search recommendations..."
@@ -984,32 +832,66 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
           {/* Customize Panel - Own profile only */}
           {isOwnProfile && showCustomize && (
             <section className="mb-8 md:mb-10">
-              <div className="bg-white border border-black/10 p-6 md:p-8 transition-all">
+              <div 
+                className="border p-6 md:p-8 transition-all"
+                style={selectedTheme ? {
+                  backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                  borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+                } : undefined}
+              >
                 {/* Art Deco divider */}
-                <div className="mb-6 h-px bg-gradient-to-r from-transparent via-black/20 to-transparent" />
+                <div 
+                  className="mb-6 h-px bg-gradient-to-r"
+                  style={selectedTheme ? {
+                    background: `linear-gradient(to right, transparent, ${selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)'}, transparent)`,
+                  } : undefined}
+                />
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                   <div>
-                    <label className="text-sm font-semibold block mb-3 tracking-tight">Banner Image</label>
+                    <label 
+                      className="text-sm font-semibold block mb-3 tracking-tight"
+                      style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                    >
+                      Banner Image
+                    </label>
                     <input 
                       id="banner-upload"
                       type="file" 
                       accept="image/*"
                       onChange={handleBannerUpload}
-                      className="block w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-4 file:rounded-none file:border-[1.5px] file:border-black file:bg-white file:text-black file:cursor-pointer file:font-medium hover:file:bg-gray-50 file:transition-all file:hover:translate-x-[1px] file:hover:translate-y-[1px] file:hover:shadow-none"
-                      style={{ 
-                        '--tw-shadow': '2px 2px 0 0 #000',
-                        boxShadow: 'var(--tw-shadow)'
-                      } as React.CSSProperties}
+                      className="block w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-none file:border-[1.5px] file:cursor-pointer file:font-medium file:transition-all file:hover:translate-x-[1px] file:hover:translate-y-[1px] file:hover:shadow-none"
+                      style={selectedTheme ? {
+                        color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                        boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                      } : undefined}
                     />
+                    <style>{`
+                      #banner-upload::file-selector-button {
+                        border-color: ${selectedTheme?.borderColor || '#000000'};
+                        background-color: ${selectedTheme?.cardBackground || '#FFFFFF'};
+                        color: ${selectedTheme?.textPrimary || '#000000'};
+                      }
+                      #banner-upload::file-selector-button:hover {
+                        background-color: ${selectedTheme?.hoverBackground || selectedTheme?.borderColorMuted || '#F9FAFB'};
+                      }
+                    `}</style>
                     {prefsDisplay.bannerUrl && (
-                      <div className="mt-3 text-xs text-muted-foreground font-medium">
+                      <div 
+                        className="mt-3 text-xs font-medium"
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                      >
                         Banner uploaded successfully. Click "Clear All" to remove it.
                       </div>
                     )}
                   </div>
                   <div>
-                    <label className="text-sm font-semibold block mb-3 tracking-tight">Theme</label>
+                    <label 
+                      className="text-sm font-semibold block mb-3 tracking-tight"
+                      style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                    >
+                      Theme
+                    </label>
                     <div className="grid grid-cols-2 gap-3">
                       {(Object.keys(THEMES) as ThemeName[]).map((themeName) => {
                         const theme = THEMES[themeName];
@@ -1019,25 +901,31 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                             key={themeName}
                             type="button"
                             onClick={() => setPrefs(prev => ({ ...prev, theme: themeName }))}
-                            className={`p-3 border-[1.5px] border-black text-left transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none ${
-                              isSelected ? 'shadow-none' : ''
-                            }`}
+                            className="p-3 border-[1.5px] text-left transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
                             style={{
                               backgroundColor: theme.backgroundColor,
-                              borderColor: '#000',
+                              borderColor: selectedTheme?.borderColor || '#000000',
                               color: theme.textColor,
-                              boxShadow: isSelected ? 'none' : '2px 2px 0 0 #000',
+                              boxShadow: isSelected ? 'none' : `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
                             }}
                           >
                             <div className="flex items-center gap-2 mb-1.5">
                               <div
-                                className="w-4 h-4 border-[1.5px] border-black"
-                                style={{ backgroundColor: theme.accentColor }}
+                                className="w-4 h-4 border-[1.5px]"
+                                style={{ 
+                                  backgroundColor: theme.accentColor,
+                                  borderColor: selectedTheme?.borderColor || '#000000',
+                                }}
                               />
                               <span className="text-sm font-semibold tracking-tight">{theme.displayName}</span>
                             </div>
                             {theme.patternEnabled && (
-                              <div className="text-xs opacity-70 font-medium">With pattern</div>
+                              <div 
+                                className="text-xs font-medium"
+                                style={{ opacity: 0.7 }}
+                              >
+                                With pattern
+                              </div>
                             )}
                           </button>
                         );
@@ -1045,12 +933,23 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                     </div>
                   </div>
                   <div>
-                    <label className="text-sm font-semibold block mb-3 tracking-tight">Font</label>
+                    <label 
+                      className="text-sm font-semibold block mb-3 tracking-tight"
+                      style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                    >
+                      Font
+                    </label>
                     <select 
-                      className="h-10 w-full border-[1.5px] border-black rounded-none px-3 bg-white font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black/20" 
+                      className="h-10 w-full border-[1.5px] rounded-none px-3 font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2" 
                       value={prefs.font || 'default'} 
                       onChange={(e) => setPrefs(prev => ({ ...prev, font: e.target.value as any }))}
-                      style={{ boxShadow: '2px 2px 0 0 #000' }}
+                      style={selectedTheme ? {
+                        backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || '#FFFFFF',
+                        borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
+                        color: selectedTheme.inputText || selectedTheme.textPrimary || '#000000',
+                        boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                        focusRingColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)',
+                      } : undefined}
                     >
                       <option value="default">Default (System Sans)</option>
                       <option value="serif">Serif (Classic)</option>
@@ -1060,7 +959,12 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-sm font-semibold block mb-3 tracking-tight">City</label>
+                    <label 
+                      className="text-sm font-semibold block mb-3 tracking-tight"
+                      style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                    >
+                      City
+                    </label>
                     <input
                       type="text"
                       value={editingCity}
@@ -1081,12 +985,22 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                       }}
                       placeholder="e.g., New York, London"
                       maxLength={255}
-                      className="h-10 w-full border-[1.5px] border-black rounded-none px-3 bg-white font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black/20"
-                      style={{ boxShadow: '2px 2px 0 0 #000' }}
+                      className="h-10 w-full border-[1.5px] rounded-none px-3 font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2"
+                      style={selectedTheme ? {
+                        backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || '#FFFFFF',
+                        borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
+                        color: selectedTheme.inputText || selectedTheme.textPrimary || '#000000',
+                        boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                      } : undefined}
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="text-sm font-semibold block mb-3 tracking-tight">Bio</label>
+                    <label 
+                      className="text-sm font-semibold block mb-3 tracking-tight"
+                      style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                    >
+                      Bio
+                    </label>
                     <textarea
                       value={editingBio}
                       onChange={(e) => setEditingBio(e.target.value)}
@@ -1107,10 +1021,23 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                       placeholder="Tell us about yourself..."
                       maxLength={500}
                       rows={4}
-                      className="w-full border-[1.5px] border-black rounded-none px-3 py-2 bg-white font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black/20 resize-none"
-                      style={{ boxShadow: '2px 2px 0 0 #000' }}
+                      className="w-full border-[1.5px] rounded-none px-3 py-2 font-medium transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none focus:outline-none focus:ring-2 focus:ring-offset-2 resize-none"
+                      style={selectedTheme ? {
+                        backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || '#FFFFFF',
+                        borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
+                        color: selectedTheme.inputText || selectedTheme.textPrimary || '#000000',
+                        boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                      } : undefined}
                     />
-                    <div className="mt-2 text-xs text-muted-foreground font-medium">
+                    <style>{`
+                      textarea::placeholder {
+                        color: ${selectedTheme?.inputPlaceholder || selectedTheme?.textMuted || '#9CA3AF'} !important;
+                      }
+                    `}</style>
+                    <div 
+                      className="mt-2 text-xs font-medium"
+                      style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                    >
                       {editingBio.length}/500 characters
                     </div>
                   </div>
@@ -1118,8 +1045,23 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                     <Button 
                       variant="outline" 
                       size="sm" 
-                      className="border-[1.5px] border-black rounded-none px-4 py-2 h-auto font-medium transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                      style={{ boxShadow: '2px 2px 0 0 #000' }}
+                      className="border-[1.5px] rounded-none px-4 py-2 h-auto font-medium transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                      style={selectedTheme ? {
+                        backgroundColor: 'transparent',
+                        borderColor: selectedTheme.borderColor || '#000000',
+                        color: selectedTheme.buttonGhost.text || selectedTheme.textPrimary || '#000000',
+                        boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                      } : undefined}
+                      onMouseEnter={(e) => {
+                        if (selectedTheme) {
+                          e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedTheme) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }
+                      }}
                       onClick={async () => {
                         if (!userId) return;
                         // Delete banner if it exists on server
@@ -1142,27 +1084,47 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                 </div>
                 
                 {/* Art Deco divider */}
-                <div className="mt-8 h-px bg-gradient-to-r from-transparent via-black/20 to-transparent" />
+                <div 
+                  className="mt-8 h-px bg-gradient-to-r"
+                  style={selectedTheme ? {
+                    background: `linear-gradient(to right, transparent, ${selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)'}, transparent)`,
+                  } : undefined}
+                />
                 
                 <div className="mt-6 flex justify-end gap-3">
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    className="border-[1.5px] border-black rounded-none px-5 py-2 h-auto font-medium transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                    style={{ boxShadow: '2px 2px 0 0 #000' }}
+                    className="border-[1.5px] rounded-none px-5 py-2 h-auto font-medium transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                    style={selectedTheme ? {
+                      backgroundColor: 'transparent',
+                      borderColor: selectedTheme.borderColor || '#000000',
+                      color: selectedTheme.buttonGhost.text || selectedTheme.textPrimary || '#000000',
+                      boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                    } : undefined}
+                    onMouseEnter={(e) => {
+                      if (selectedTheme) {
+                        e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedTheme) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }
+                    }}
                     onClick={() => setShowCustomize(false)}
                   >
                     Cancel
                   </Button>
                   <Button 
                     size="sm" 
-                    className="border-[1.5px] border-black rounded-none px-5 py-2 h-auto font-medium transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                    style={{ 
+                    className="border-[1.5px] rounded-none px-5 py-2 h-auto font-medium transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                    style={selectedTheme ? {
                       backgroundColor: accentColor, 
-                      borderColor: '#000', 
+                      borderColor: selectedTheme.borderColor || '#000000', 
                       color: textOnAccent,
-                      boxShadow: '3px 3px 0 0 #000'
-                    }}
+                      boxShadow: `3px 3px 0 0 ${selectedTheme.borderColor || '#000000'}`
+                    } : undefined}
                     onClick={async () => {
                       if (!userId) return;
                       try {
@@ -1203,21 +1165,25 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
               {Array.from({ length: 3 }).map((_, i) => (
                 <motion.div 
                   key={i} 
-                  className="bg-white border border-black/10 p-6 md:p-8"
+                  className="border p-6 md:p-8"
+                  style={selectedTheme ? {
+                    backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                    borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)',
+                  } : undefined}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.1, duration: 0.2 }}
                 >
                   <div className="flex items-start gap-4 md:gap-6">
-                    <Skeleton className="h-12 w-12 md:h-16 md:w-16 rounded-full border-[1.5px] border-black/20" />
+                    <Skeleton className="h-12 w-12 md:h-16 md:w-16 rounded-full border-[1.5px]" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)' } : undefined} />
                     <div className="flex-1 space-y-4">
                       <Skeleton className="h-5 w-[200px]" />
                       <Skeleton className="h-4 w-[150px]" />
                       <Skeleton className="h-24 w-full" />
                       <div className="flex gap-4">
-                        <Skeleton className="h-9 w-20 border border-black/10" />
-                        <Skeleton className="h-9 w-20 border border-black/10" />
-                        <Skeleton className="h-9 w-20 border border-black/10" />
+                        <Skeleton className="h-9 w-20 border" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)' } : undefined} />
+                        <Skeleton className="h-9 w-20 border" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)' } : undefined} />
+                        <Skeleton className="h-9 w-20 border" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.1)' } : undefined} />
                       </div>
                     </div>
                   </div>
@@ -1316,8 +1282,8 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
             <div className="mt-12 text-center">
               {loadingMore ? (
                 <div className="flex items-center justify-center gap-3">
-                  <Skeleton className="h-5 w-5 rounded-full border-[1.5px] border-black/20" />
-                  <Skeleton className="h-6 w-24 border-[1.5px] border-black/20" />
+                  <Skeleton className="h-5 w-5 rounded-full border-[1.5px]" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)' } : undefined} />
+                  <Skeleton className="h-6 w-24 border-[1.5px]" style={selectedTheme ? { borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)' } : undefined} />
                 </div>
               ) : (
                 <Button
@@ -1336,143 +1302,6 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
         </main>
         </div>
       </div>
-      
-      {/* Cities Visited Modal */}
-      <AnimatePresence>
-        {showCitiesModal && (
-          <>
-            {/* Backdrop overlay */}
-            <motion.div
-              className="fixed inset-0 bg-black/50 z-[1000] md:bg-black/40 backdrop-blur-sm"
-              onClick={() => setShowCitiesModal(false)}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            />
-            
-            {/* Modal Content */}
-            <motion.div
-              className="
-                fixed bg-white z-[1001] overflow-y-auto font-sans
-                inset-x-0 bottom-0 rounded-t-2xl border-t-[1.5px] border-black max-h-[90vh]
-                md:inset-x-auto md:inset-y-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:bottom-auto md:w-full md:max-w-2xl md:rounded-xl md:rounded-t-xl md:border-t-[1.5px] md:border-[1.5px] md:max-h-[80vh]
-              "
-              onMouseDown={(e) => e.stopPropagation()}
-              initial={isMobile ? { y: '100%' } : { scale: 0.95, opacity: 0, y: 20 }}
-              animate={isMobile ? { y: 0 } : { scale: 1, opacity: 1, y: 0 }}
-              exit={isMobile ? { y: '100%' } : { scale: 0.95, opacity: 0, y: 20 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              drag={isMobile ? 'y' : false}
-              dragConstraints={isMobile ? { top: 0 } : {}}
-              dragElastic={isMobile ? 0.2 : 0}
-              onDragEnd={handleCitiesModalDragEnd}
-              style={{ 
-                boxShadow: isMobile ? '0 -4px 0 0 #000' : '6px 6px 0 0 #000',
-                ...(isMobile ? { y, opacity } : {})
-              } as React.CSSProperties}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Cities Visited"
-            >
-              {/* Drag handle for mobile */}
-              <div
-                className="flex justify-center pt-4 pb-3 cursor-grab active:cursor-grabbing touch-none md:hidden"
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <div className="w-16 h-1.5 bg-gray-400 rounded-full border border-black/20" />
-              </div>
-              
-              {/* Header */}
-              <div className="flex items-center justify-between p-6 md:p-6 border-b-[1.5px] border-black">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-bold tracking-tight">Cities Visited</h2>
-                  <p className="text-sm md:text-base text-muted-foreground mt-2 font-medium">
-                    {userStats?.total_cities_visited || 0} {userStats?.total_cities_visited === 1 ? 'city' : 'cities'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowCitiesModal(false)}
-                  className="border-[1.5px] border-black p-2 hover:bg-gray-100 transition-all h-9 w-9 md:h-10 md:w-10 flex items-center justify-center rounded-none"
-                  style={{ 
-                    borderColor: '#000',
-                    boxShadow: '2px 2px 0 0 #000'
-                  }}
-                  aria-label="Close modal"
-                >
-                  <X className="h-5 w-5" strokeWidth={1.5} />
-                </button>
-              </div>
-              
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto p-6 md:p-6">
-                {citiesModalLoading ? (
-                  <div className="space-y-4">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <div key={i} className="flex items-center gap-4">
-                        <Skeleton className="h-14 w-14 rounded-full border-[1.5px] border-black/20" />
-                        <div className="flex-1 space-y-2.5">
-                          <Skeleton className="h-5 w-3/4" />
-                          <Skeleton className="h-4 w-1/2" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : uniqueCities.length === 0 ? (
-                  <div className="text-center py-16">
-                    <MapPin className="h-16 w-16 mx-auto text-muted-foreground mb-6 opacity-50" strokeWidth={1.5} />
-                    <p className="text-muted-foreground font-medium text-base">No cities visited yet</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {uniqueCities.map((city, index) => (
-                      <motion.div
-                        key={city.city_slug}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.02, duration: 0.2 }}
-                        className="flex items-center gap-4 p-4 border-[1.5px] border-black/20 hover:border-black bg-white hover:bg-gray-50/50 transition-all cursor-pointer"
-                        style={{ 
-                          boxShadow: '2px 2px 0 0 rgba(0,0,0,0.1)'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.boxShadow = '3px 3px 0 0 #000';
-                          e.currentTarget.style.borderColor = '#000';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.boxShadow = '2px 2px 0 0 rgba(0,0,0,0.1)';
-                          e.currentTarget.style.borderColor = 'rgba(0,0,0,0.2)';
-                        }}
-                      >
-                        <div 
-                          className="rounded-full border-[1.5px] border-black p-2.5 flex-shrink-0"
-                          style={{ backgroundColor: accentColor }}
-                        >
-                          <MapPin 
-                            className="h-5 w-5" 
-                            style={{ color: textOnAccent }}
-                            fill="currentColor"
-                            strokeWidth={1.5}
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-base md:text-lg truncate tracking-tight">{city.city_name}</h3>
-                          {(city.admin1_name || city.country_code) && (
-                            <p className="text-sm md:text-base text-muted-foreground truncate font-medium mt-0.5">
-                              {city.admin1_name ? `${city.admin1_name}, ` : ''}
-                              {city.country_code?.toUpperCase()}
-                            </p>
-                          )}
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

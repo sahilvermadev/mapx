@@ -1,32 +1,30 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Sparkles, Users } from 'lucide-react';
+import { Plus, Users } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import FeedPost from '@/components/FeedPost';
 import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
-import SimpleGroupFilter from '@/components/SimpleGroupFilter';
-import FeedAISearch from '@/components/FeedAISearch';
-import AIResponseBanner from '@/components/SocialFeed/AIResponseBanner';
-import FeedGroups from '@/components/SocialFeed/FeedGroups';
+import SearchResultsInline from '@/components/SearchResultsInline';
 import SuggestedUsersCard from '@/components/SocialFeed/SuggestedUsersCard';
 import QuestionFeedPost from '@/components/QuestionFeedPost';
 import NewPostsBanner from '@/components/SocialFeed/NewPostsBanner';
+import FeedGroups from '@/components/SocialFeed/FeedGroups';
+import FeedAISearch from '@/components/FeedAISearch';
+import { FeedFiltersProvider } from '@/contexts/FeedFiltersContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 
 import { useAuth } from '@/auth';
 import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
 import { useQueryClient } from '@tanstack/react-query';
-import CityFilterBar, { type CitySummary } from '@/components/SocialFeed/CityFilterBar';
 
 import { useFeedQuery } from '@/hooks/useFeedQuery';
 import { useSuggestedUsersQuery } from '@/hooks/useSuggestedUsersQuery';
 import { useFollowMutation } from '@/hooks/useFollowMutation';
 
 import { type User, type FeedPost as FeedPostType } from '@/services/socialService';
-import type { SearchResponse } from '@/services/recommendationsApiService';
 import {
   getLastViewedFeedTimestamp,
   setLastViewedFeedTimestamp,
@@ -34,40 +32,50 @@ import {
   getFirstNewPostIndex,
 } from '@/utils/feedTimestamp';
 
-// Helper functions
-const getInitials = (name: string): string => 
-  name.split(' ')
-    .map(n => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-
-import { getProfilePictureUrl } from '@/config/apiConfig';
-
-const getProxiedImageUrl = (url?: string): string => {
-  if (!url) return '';
-  return getProfilePictureUrl(url) || url;
-};
-
 const SocialFeedPage: React.FC = () => {
+  // Get feed click time from sessionStorage, or use current time if not available
+  const getFeedClickTime = (): number => {
+    const stored = sessionStorage.getItem('feedClickTime');
+    if (stored) {
+      const clickTime = parseFloat(stored);
+      const timestamp = sessionStorage.getItem('feedClickTimestamp');
+      console.log(`[PERF] SocialFeedPage: Found feed click time${timestamp ? ` (clicked at ${new Date(parseInt(timestamp)).toISOString()})` : ''}`);
+      sessionStorage.removeItem('feedClickTime'); // Clean up after reading
+      sessionStorage.removeItem('feedClickTimestamp');
+      return clickTime;
+    }
+    // Fallback to current time if navigating directly (not from header click)
+    const now = performance.now();
+    console.log(`[PERF] SocialFeedPage: No click time found, using mount time`);
+    return now;
+  };
+  
+  const feedClickTime = useRef<number>(getFeedClickTime());
+  const pageLoadStartTime = useRef<number>(feedClickTime.current);
   const navigate = useNavigate();
   const { user: currentUser, isAuthenticated, isChecking } = useAuth();
   const queryClient = useQueryClient();
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  
+  // Log component mount
+  useEffect(() => {
+    const mountTime = performance.now() - pageLoadStartTime.current;
+    console.log(`[PERF] SocialFeedPage mounted in ${mountTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'click' : 'mount'})`);
+  }, []);
   
   // Local state
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   const [selectedCity, setSelectedCity] = useState<{ id?: string; name?: string } | undefined>(undefined);
   const [selectedCategoryKeys, setSelectedCategoryKeys] = useState<string[]>([]);
-  const [includeMyPostsInSearch, setIncludeMyPostsInSearch] = useState(false);
   const [showNewPostsBanner, setShowNewPostsBanner] = useState(false);
+  const [isSuggestedUsersClosed, setIsSuggestedUsersClosed] = useState(false);
   const [newPostsCount, setNewPostsCount] = useState(0);
   
   // Refs
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const isSearchingRef = useRef(false);
-  const lastSearchTimeRef = useRef(0);
-  const cityBarRef = useRef<HTMLDivElement>(null);
-  const postRefs = useRef<Map<string | number, HTMLDivElement>>(new Map());
   const firstNewPostRef = useRef<HTMLDivElement | null>(null);
   const initialScrollYRef = useRef<number>(0);
   
@@ -75,10 +83,11 @@ const SocialFeedPage: React.FC = () => {
   const {
     searchResponse,
     streamingText,
+    isSummaryLoading,
     recIdToGroupKey,
     groupKeyToMeta,
     clearSearch,
-    loadFromResponse,
+    loadFromStream,
     getScore,
     attachScoresToPosts,
   } = useFeedSearchResults();
@@ -104,7 +113,9 @@ const SocialFeedPage: React.FC = () => {
   
   // Derived state
   const error = feedError?.message || suggestedUsersError?.message || null;
+  
   // Flatten all pages and deduplicate posts by recommendation_id or id
+  const flattenStartTime = performance.now();
   const allPosts = feedData?.pages.flatMap(page => (page as { data: any[] }).data) || [];
   const postsMap = new Map<number, any>();
   allPosts.forEach(post => {
@@ -115,7 +126,13 @@ const SocialFeedPage: React.FC = () => {
   });
   const posts = Array.from(postsMap.values());
   const typedPosts = posts as any[];
+  const flattenTime = performance.now() - flattenStartTime;
+  if (flattenTime > 5) {
+    console.log(`[PERF] Post flattening/deduplication took ${flattenTime.toFixed(2)}ms for ${allPosts.length} posts`);
+  }
   const typedSuggestedUsers = suggestedUsers as User[];
+  const hasActiveSearch = Boolean(searchResponse);
+  const showSuggestedUsers = typedSuggestedUsers.length > 0 && !hasActiveSearch && !isSuggestedUsersClosed;
 
   // Effects
   useEffect(() => {
@@ -127,8 +144,10 @@ const SocialFeedPage: React.FC = () => {
 
   useEffect(() => {
     if (!loading && !suggestedUsersLoading && typedPosts.length > 0) {
-      console.log('🎉 [REACT-QUERY] SocialFeedPage fully loaded!');
-      console.log(`📊 [REACT-QUERY] Stats: ${typedPosts.length} posts, ${typedSuggestedUsers.length} suggested users`);
+      const totalLoadTime = performance.now() - pageLoadStartTime.current;
+      console.log('🎉 [PERF] SocialFeedPage fully loaded!');
+      console.log(`📊 [PERF] Stats: ${typedPosts.length} posts, ${typedSuggestedUsers.length} suggested users`);
+      console.log(`⏱️ [PERF] Total page load time: ${totalLoadTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'button click' : 'component mount'})`);
     }
   }, [loading, suggestedUsersLoading, typedPosts.length, typedSuggestedUsers.length]);
 
@@ -271,37 +290,21 @@ const SocialFeedPage: React.FC = () => {
     setSelectedCategoryKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   }, []);
 
-  const handleSearchResults = useCallback((res: SearchResponse | null) => {
-    // Mark that we just did a search to prevent accidental modal opening
-    isSearchingRef.current = true;
-    lastSearchTimeRef.current = Date.now();
-    
-    // Process search results - always load response to maintain search state
-    // This allows UI to show results or "no results" message appropriately
-    if (res) {
-      loadFromResponse(res);
-    } else {
-      clearSearch();
-    }
-    
-    // Reset search flag after a delay to allow modal opening again
-    setTimeout(() => {
-      isSearchingRef.current = false;
-    }, 500);
-  }, [clearSearch, loadFromResponse]);
-
   const handleSearchCleared = useCallback(() => {
     // If user clears the query input, just clear search state, don't open modal
     clearSearch();
-    setIncludeMyPostsInSearch(false);
   }, [clearSearch]);
+
+  const handleFollowUpQuery = useCallback((text: string) => {
+    window.dispatchEvent(new CustomEvent('feed-search:submit', { detail: text }));
+  }, []);
 
   const handleShowNewPosts = useCallback(() => {
     if (firstNewPostRef.current) {
       // Account for fixed header (64px) and city bar (56px mobile, 64px desktop)
-      const headerHeight = 64;
-      const cityBarHeight = window.innerWidth >= 1024 ? 64 : 56;
-      const offset = headerHeight + cityBarHeight + 20; // 20px padding
+      // Header height is now dynamic via CSS variable
+      const headerHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-height') || '64');
+      const offset = headerHeight + 20; // 20px padding
       
       const elementTop = firstNewPostRef.current.getBoundingClientRect().top + window.scrollY;
       window.scrollTo({
@@ -324,6 +327,7 @@ const SocialFeedPage: React.FC = () => {
 
   // Computed values - now using centralized getScore from hook
   const { matchedRecIds, matchedAnswerRecIds, matchedQuestionIds } = useMemo(() => {
+    const startTime = performance.now();
     const recIds = new Set<number>();
     const answerRecIds = new Set<number>();
     const questionIds = new Set<number>();
@@ -348,6 +352,10 @@ const SocialFeedPage: React.FC = () => {
         }
       }
     }
+    const time = performance.now() - startTime;
+    if (time > 5) {
+      console.log(`[PERF] matchedRecIds computation took ${time.toFixed(2)}ms`);
+    }
     return { matchedRecIds: recIds, matchedAnswerRecIds: answerRecIds, matchedQuestionIds: questionIds };
   }, [searchResponse]);
 
@@ -362,38 +370,22 @@ const SocialFeedPage: React.FC = () => {
   }, [typedPosts, searchResponse, matchedRecIds, matchedAnswerRecIds, matchedQuestionIds]);
 
   const orderedPosts = useMemo(() => {
+    const startTime = performance.now();
+    let result;
     if (searchResponse) {
       // Sort strictly matched posts by search score and attach scores
       const sortedPosts = [...matchedPosts].sort((a, b) => getScore(b) - getScore(a));
-      return attachScoresToPosts(sortedPosts);
+      result = attachScoresToPosts(sortedPosts);
+    } else {
+      result = typedPosts;
     }
-    return typedPosts;
+    const time = performance.now() - startTime;
+    if (time > 5) {
+      console.log(`[PERF] orderedPosts computation took ${time.toFixed(2)}ms for ${result.length} posts`);
+    }
+    return result;
   }, [typedPosts, matchedPosts, searchResponse, getScore, attachScoresToPosts]);
 
-  // Build city summaries from live feed posts
-  const deriveCityKey = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
-
-  const getCityFromPost = (post: any): { id: string; name: string } | null => {
-    const address: string | undefined = post?.place_address || post?.service_address || post?.metadata?.address;
-    const titleLike: string | undefined = post?.place_name || post?.service_name || post?.title;
-    const tryCandidates: string[] = [];
-    if (typeof post?.metadata?.city === 'string') tryCandidates.push(post.metadata.city);
-    if (address) tryCandidates.push(address);
-    if (titleLike) tryCandidates.push(titleLike);
-    for (const cand of tryCandidates) {
-      if (!cand) continue;
-      const lc = cand.toLowerCase();
-      // Simple city detection for common patterns
-      if (lc.includes('delhi')) return { id: 'delhi', name: 'Delhi' };
-      if (lc.includes('mumbai') || lc.includes('bombay')) return { id: 'mumbai', name: 'Mumbai' };
-      if (lc.includes('gurgaon') || lc.includes('gurugram')) return { id: 'gurgaon', name: 'Gurgaon' };
-      if (lc.includes('bangalore') || lc.includes('bengaluru')) return { id: 'bangalore', name: 'Bangalore' };
-      if (lc.includes('new york') || lc.includes('nyc')) return { id: 'nyc', name: 'New York' };
-      if (lc.includes('london')) return { id: 'london', name: 'London' };
-      if (lc.includes('san francisco') || lc.includes('sf')) return { id: 'sf', name: 'San Francisco' };
-    }
-    return null;
-  };
 
   const textContains = (hay: any, needle: string): boolean => {
     if (!hay) return false;
@@ -442,62 +434,6 @@ const SocialFeedPage: React.FC = () => {
     return null;
   };
 
-  const citySummaries: CitySummary[] = useMemo(() => {
-    const byCity: Record<string, CitySummary> = {};
-    const toTitle = (s?: string) => s ? s.split('-').map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(' ') : undefined;
-
-    (typedPosts as any[]).forEach((p) => {
-      // Prefer normalized slugs from backend (places or services)
-      const slug: string | undefined = p?.place_city_slug || p?.service_city_slug;
-      const country: string | undefined = p?.place_country_code || p?.service_country_code;
-      let name: string | undefined = slug ? toTitle(String(slug)) : undefined;
-      let key: string | undefined = slug;
-      if (!key) {
-        // Fallback to heuristic inference for legacy posts
-        const city = getCityFromPost(p);
-        if (city) {
-          key = city.id || deriveCityKey(city.name);
-          name = city.name;
-        }
-      }
-      if (!key || !name) return;
-
-      if (!byCity[key]) {
-        byCity[key] = {
-          id: key,
-          name,
-          country,
-          recCount: 0,
-          friendCount: 0,
-          friendFaces: [],
-          categories: [],
-        };
-      }
-      const summary = byCity[key];
-      summary.recCount += 1;
-      // friend faces (unique by user)
-      const userId = String(p.user_id);
-      if (!summary.friendFaces.some(f => f.id === userId)) {
-        summary.friendFaces.push({ id: userId, name: p.user_name || 'Friend', photoUrl: p.user_picture });
-        summary.friendCount = summary.friendFaces.length;
-      }
-      // category buckets
-      const cat = categoryKeyFromPost(p);
-      if (cat) {
-        const bucket = summary.categories.find(c => c.key === cat);
-        if (bucket) bucket.count = (bucket.count || 0) + 1;
-        else summary.categories.push({ key: cat, label: cat.charAt(0).toUpperCase() + cat.slice(1), count: 1 });
-      }
-    });
-
-    return Object.values(byCity)
-      .map(c => ({
-        ...c,
-        friendFaces: c.friendFaces.slice(0, 8),
-        categories: c.categories.sort((a, b) => (b.count || 0) - (a.count || 0))
-      }))
-      .sort((a, b) => b.recCount - a.recCount);
-  }, [typedPosts]);
 
   // Heuristic: try to infer a normalized city id from a post
   const inferCityId = (post: any): string | undefined => {
@@ -522,19 +458,17 @@ const SocialFeedPage: React.FC = () => {
   };
 
   const filteredPosts = useMemo(() => {
+    const startTime = performance.now();
     let base = orderedPosts as any[];
 
-    // During search, exclude my recommendation/answer posts unless explicitly included
-    if (searchResponse && !includeMyPostsInSearch && currentUser?.id) {
-      const myId = String(currentUser.id);
-      base = base.filter(
-        (p: any) =>
-          !(String(p.user_id) === myId && (p.type === 'recommendation' || p.type === 'answer'))
-      );
+    if ((!selectedCity?.id && !selectedCity?.name && selectedCategoryKeys.length === 0)) {
+      const time = performance.now() - startTime;
+      if (time > 5) {
+        console.log(`[PERF] filteredPosts (no filters) took ${time.toFixed(2)}ms`);
+      }
+      return base;
     }
-
-    if ((!selectedCity?.id && !selectedCity?.name && selectedCategoryKeys.length === 0)) return base;
-    return (base as any[]).filter(p => {
+    const result = (base as any[]).filter(p => {
       // City filter: require a match when a city is selected
       if (selectedCity && !matchesSelectedCity(p, selectedCity)) return false;
       // Categories filter: require at least one match when categories selected
@@ -544,10 +478,23 @@ const SocialFeedPage: React.FC = () => {
       }
       return true;
     });
-  }, [orderedPosts, searchResponse, includeMyPostsInSearch, currentUser?.id, selectedCity, selectedCategoryKeys]);
+    const time = performance.now() - startTime;
+    if (time > 5) {
+      console.log(`[PERF] filteredPosts took ${time.toFixed(2)}ms, filtered ${base.length} -> ${result.length} posts`);
+    }
+    return result;
+  }, [orderedPosts, selectedCity, selectedCategoryKeys]);
 
   // Derive available categories for the current scope (Worldwide or selected city)
+  // Optimized: Only process first 100 posts to reduce computation overhead
   const availableCategories = useMemo(() => {
+    const startTime = performance.now();
+    
+    // Early return if no posts
+    if (orderedPosts.length === 0) {
+      return [];
+    }
+    
     const counts = new Map<string, number>();
     const push = (key: string) => counts.set(key, (counts.get(key) || 0) + 1);
 
@@ -555,44 +502,22 @@ const SocialFeedPage: React.FC = () => {
       ? (orderedPosts as any[]).filter(p => matchesSelectedCity(p, selectedCity))
       : (orderedPosts as any[]);
 
-    for (const p of sourcePosts) {
+    // Limit to first 100 posts for performance
+    const limitedPosts = sourcePosts.slice(0, 100);
+
+    for (const p of limitedPosts) {
       const key = categoryKeyFromPost(p);
       if (key) push(key);
     }
-    return Array.from(counts.entries())
+    const result = Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([key, count]) => ({ key, label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), count }));
-  }, [orderedPosts, selectedCity]);
-
-  const globalSummary: CitySummary | undefined = useMemo(() => {
-    const all = (typedPosts as any[]) || [];
-    if (all.length === 0) return {
-      id: 'worldwide',
-      name: 'Worldwide',
-      recCount: 0,
-      friendCount: 0,
-      friendFaces: [],
-      categories: [],
-    };
-    const uniqueUsers = new Map<string, { id: string; name: string; photoUrl?: string }>();
-    const catCounts = new Map<string, number>();
-    for (const p of all) {
-      const uid = String(p.user_id);
-      if (!uniqueUsers.has(uid)) uniqueUsers.set(uid, { id: uid, name: p.user_name || 'Friend', photoUrl: p.user_picture });
-      const cat = categoryKeyFromPost(p);
-      if (cat) catCounts.set(cat, (catCounts.get(cat) || 0) + 1);
+    const time = performance.now() - startTime;
+    if (time > 5) {
+      console.log(`[PERF] availableCategories computation took ${time.toFixed(2)}ms for ${limitedPosts.length} posts (of ${sourcePosts.length} total), found ${result.length} categories`);
     }
-    return {
-      id: 'worldwide',
-      name: 'Worldwide',
-      recCount: all.length,
-      friendCount: uniqueUsers.size,
-      friendFaces: Array.from(uniqueUsers.values()).slice(0, 8),
-      categories: Array.from(catCounts.entries())
-        .sort((a,b)=>b[1]-a[1])
-        .map(([key,count])=>({ key, label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), count })),
-    };
-  }, [typedPosts]);
+    return result;
+  }, [orderedPosts, selectedCity]);
 
   // Render functions
   const renderFeedContent = () => {
@@ -642,7 +567,6 @@ const SocialFeedPage: React.FC = () => {
       return (
         <div className="space-y-1.5">
           {filteredPosts.map((post: any, index: number) => {
-            const postId = post.recommendation_id || post.id;
             const isFirstNewPost = !firstNewPostSet && index === firstNewIndex && firstNewIndex >= 0;
             
             if (isFirstNewPost) {
@@ -737,42 +661,17 @@ const SocialFeedPage: React.FC = () => {
     );
   };
 
-  const renderSuggestedUser = (user: User) => (
-    <div key={user.id} className="flex items-center gap-3">
-      <Avatar className="h-10 w-10">
-        <AvatarImage src={getProxiedImageUrl(user.profile_picture_url)} alt={user.display_name} />
-        <AvatarFallback>{getInitials(user.display_name)}</AvatarFallback>
-      </Avatar>
-      
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm truncate">{user.display_name}</div>
-        <div className="text-xs text-muted-foreground">
-          {user.followers_count || 0} followers
-        </div>
-      </div>
-      
-      <Button
-        variant={user.is_following ? 'outline' : 'default'}
-        size="sm"
-        onClick={() => handleFollow(user.id)}
-        disabled={user.is_following}
-        className="rounded-none border-2 border-black shadow-[4px_4px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0_0_#000]"
-      >
-        {user.is_following ? 'Following' : 'Follow'}
-      </Button>
-    </div>
-  );
-
   const renderSuggestedUsersCard = () => (
     <SuggestedUsersCard 
       users={typedSuggestedUsers as any}
       onFollow={(id) => handleFollow(id)}
       onViewAll={handleNavigateToDiscover}
+      onClose={() => setIsSuggestedUsersClosed(true)}
     />
   );
 
   const renderPageSkeleton = () => (
-    <div className="min-h-[calc(100vh-64px)] overflow-x-hidden" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
+    <div className="min-h-[calc(100vh-64px)] overflow-x-hidden" style={{ backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)', color: selectedTheme?.textPrimary || 'var(--app-text)' }}>
       <div className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
           <div className="lg:col-span-3">
@@ -784,7 +683,14 @@ const SocialFeedPage: React.FC = () => {
             </div>
             <div className="space-y-6">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="bg-white rounded-lg p-6 shadow-sm border">
+                <div 
+                  key={i} 
+                  className="rounded-lg p-6 shadow-sm border"
+                  style={selectedTheme ? {
+                    backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                    borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                  } : undefined}
+                >
                   <div className="flex items-start space-x-4">
                     <Skeleton className="h-12 w-12 rounded-full" />
                     <div className="flex-1 space-y-3">
@@ -804,7 +710,13 @@ const SocialFeedPage: React.FC = () => {
           </div>
           <div className="lg:col-span-1">
             <div className="sticky top-24 space-y-4">
-              <div className="bg-white rounded-lg p-6 shadow-sm border">
+              <div 
+                className="rounded-lg p-6 shadow-sm border"
+                style={selectedTheme ? {
+                  backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                  borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                } : undefined}
+              >
                 <div className="space-y-4">
                   <Skeleton className="h-6 w-[150px]" />
                   <Skeleton className="h-4 w-[200px]" />
@@ -836,48 +748,38 @@ const SocialFeedPage: React.FC = () => {
 
 
   return (
-    <div className="min-h-[calc(100vh-64px)] overflow-x-hidden" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
-      {/* Secondary sticky header: City filter bar */}
-      {/* Fixed city filter bar under main header with mobile scroll bug prevention */}
+    <FeedFiltersProvider
+      value={{
+        cities: [],
+        selectedCityId: selectedCity?.id,
+        selectedCityName: selectedCity?.name,
+        globalSummary: undefined,
+        onSelectCity: (c: { id?: string; name?: string } | undefined) => setSelectedCity(c),
+        selectedCategoryKeys,
+        onToggleCategory: toggleCategory,
+        overrideCategories: availableCategories,
+        isAuthenticated: !!currentUser,
+        onStream: loadFromStream,
+        onCleared: handleSearchCleared,
+        searchPlaceholder: "Tell us what you're looking for...",
+        currentUserId: currentUser?.id || '',
+        selectedGroupIds,
+        onGroupToggle: handleGroupToggle,
+        hasActiveSearch,
+      }}
+    >
       <div 
-        ref={cityBarRef}
-        className="fixed top-16 left-0 right-0 z-40 bg-background"
+        className={`min-h-[calc(100vh-64px)] overflow-x-hidden ${hasActiveSearch ? 'pb-20' : ''}`} 
         style={{ 
-          transform: 'translateZ(0)',
-          WebkitTransform: 'translateZ(0)',
-          backfaceVisibility: 'hidden',
-          WebkitBackfaceVisibility: 'hidden',
-          overscrollBehavior: 'none'
+          backgroundColor: hasActiveSearch && selectedTheme 
+            ? selectedTheme.backgroundColor 
+            : 'var(--app-bg)', 
+          color: 'var(--app-text)' 
         }}
       >
-        <CityFilterBar
-          cities={citySummaries}
-          selectedCityId={selectedCity?.id}
-          selectedCityName={selectedCity?.name}
-          selectedCategoryKeys={selectedCategoryKeys}
-          onSelectCity={(c: { id?: string; name?: string } | undefined) => setSelectedCity(c)}
-          onToggleCategory={toggleCategory}
-          globalSummary={globalSummary}
-          overrideCategories={availableCategories}
-        />
-      </div>
-      {/* Spacer to offset fixed bar height */}
-      <div className="h-[56px] lg:h-[64px]" />
-      
       <div className="container mx-auto px-4 py-8">
-        <div className={`grid grid-cols-1 gap-8 ${typedSuggestedUsers.length > 0 ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
-          <div className={typedSuggestedUsers.length > 0 ? 'lg:col-span-3' : 'lg:col-span-1'}>
-            <div className="mb-6">
-              <FeedAISearch isAuthenticated={!!currentUser} onResults={handleSearchResults} onCleared={handleSearchCleared} />
-            </div>
-
-            <div className="mb-8">
-              <SimpleGroupFilter
-                currentUserId={currentUser.id}
-                selectedGroupIds={selectedGroupIds}
-                onGroupToggle={handleGroupToggle}
-              />
-            </div>
+        <div className={`grid grid-cols-1 gap-8 ${showSuggestedUsers ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
+          <div className={showSuggestedUsers ? 'lg:col-span-3' : 'lg:col-span-1'}>
             
             {/* New Posts Banner - small floating element above posts */}
             {showNewPostsBanner && newPostsCount > 0 && (
@@ -888,48 +790,105 @@ const SocialFeedPage: React.FC = () => {
               />
             )}
             
-            {(searchResponse || streamingText) && (
-              <div className="mb-12">
-                <AIResponseBanner
-                  text={searchResponse?.summary || streamingText}
-                  isLoading={Boolean(searchResponse && (!searchResponse.summary || searchResponse.summary.trim().length === 0))}
-                  totals={searchResponse ? { 
-                    places: searchResponse.total_places, 
-                    recs: searchResponse.total_recommendations 
-                  } : undefined}
+            {(searchResponse || isSummaryLoading) && (
+              <div className="mb-12 space-y-4">
+                <div className="flex">
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    className="h-10 w-10 rounded-full"
+                    onClick={handleSearchCleared}
+                    aria-label="Back to feed"
+                  >
+                    ←
+                  </Button>
+                </div>
+                <div className="relative z-20 search-results-container">
+                <SearchResultsInline
+                  searchResponse={searchResponse}
+                    summaryText={streamingText}
+                    followUpPrompts={searchResponse?.follow_up_prompts}
+                    isLoading={isSummaryLoading}
+                  onFollowUpQuery={handleFollowUpQuery}
                 />
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    id="toggle-include-own"
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={includeMyPostsInSearch}
-                    onChange={(e) => setIncludeMyPostsInSearch(e.target.checked)}
-                  />
-                  <label htmlFor="toggle-include-own" className="text-sm text-muted-foreground">
-                    Include my posts
-                  </label>
                 </div>
               </div>
             )}
             
-            <div className="space-y-1.5">
-              {renderFeedContent()}
-            </div>
+            {!searchResponse && (
+              <div className="space-y-1.5">
+                {renderFeedContent()}
+              </div>
+            )}
           </div>
 
           {/* Sidebar: Only render when we actually have suggestions to avoid layout flash */}
           
-            {typedSuggestedUsers.length > 0 && (
+            {showSuggestedUsers && (
             <div className="lg:col-span-1">
               <div className="sticky top-24 space-y-4">
                 {renderSuggestedUsersCard()}
               </div>
             </div>
           )}
-        </div>
       </div>
     </div>
+      {hasActiveSearch && (
+        <div 
+          className="pointer-events-none fixed inset-0 z-10" 
+          style={(() => {
+            if (!selectedTheme) {
+              return { backgroundColor: 'rgba(0, 0, 0, 0.3)' };
+            }
+            // Convert hex to rgb for rgba usage
+            const hex = selectedTheme.backgroundColor.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            return { backgroundColor: `rgba(${r}, ${g}, ${b}, 0.8)` }; // 80% opacity
+          })()}
+        />
+      )}
+      {hasActiveSearch && (
+        <>
+          {/* Gradient fade overlay to hide content behind search bar - starts at search bar level */}
+          <div 
+            className="fixed bottom-0 left-0 right-0 pointer-events-none z-30" 
+            style={(() => {
+              if (!selectedTheme) {
+                return {
+                  height: '88px',
+                  background: 'linear-gradient(to bottom, transparent 0%, rgba(255, 255, 255, 0.3) 20%, rgba(255, 255, 255, 0.7) 50%, rgb(255, 255, 255) 100%)'
+                };
+              }
+              // Convert hex to rgb for rgba usage
+              const hex = selectedTheme.backgroundColor.replace('#', '');
+              const r = parseInt(hex.substring(0, 2), 16);
+              const g = parseInt(hex.substring(2, 4), 16);
+              const b = parseInt(hex.substring(4, 6), 16);
+              return {
+                height: '88px',
+                background: `linear-gradient(to bottom, transparent 0%, rgba(${r}, ${g}, ${b}, 0.25) 20%, rgba(${r}, ${g}, ${b}, 0.7) 50%, rgba(${r}, ${g}, ${b}, 1) 100%)`
+              };
+            })()}
+          />
+          <div className="pointer-events-none fixed bottom-6 left-0 right-0 z-40">
+            <div className="pointer-events-auto container mx-auto px-4 w-full max-w-4xl">
+            <FeedAISearch
+              key="feed-search-bottom"
+              isAuthenticated={!!currentUser}
+              onStream={loadFromStream}
+              onCleared={handleSearchCleared}
+              variant="bottom"
+              placeholder="Ask a follow-up…"
+              autoFocus
+            />
+          </div>
+        </div>
+    </>
+      )}
+      </div>
+    </FeedFiltersProvider>
   );
 };
 

@@ -43,6 +43,9 @@ export const SEARCH_CONFIG = {
     
     // Log similarity scores for debugging (disabled in production)
     LOG_SIMILARITY_SCORES: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEBUG_LOGGING === 'true',
+    
+    // Enable diagnostic queries (network checks, location checks) - disabled in production for performance
+    ENABLE_DIAGNOSTIC_QUERIES: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEBUG_LOGGING === 'true',
   }
 } as const;
 

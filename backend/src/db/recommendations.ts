@@ -581,6 +581,9 @@ export async function getFeedPostsFromRecommendations(
   citySlug?: string,
   countryCode?: string
 ): Promise<FeedPostRow[]> {
+  const queryStartTime = Date.now();
+  console.log(`🗄️ [PERF] getFeedPostsFromRecommendations: Starting (limit: ${limit}, category: ${categoryFilter || 'none'}, city: ${citySlug || 'none'})`);
+  
   try {
     const params: any[] = [userId];
     let paramIdx = 1;
@@ -656,6 +659,9 @@ export async function getFeedPostsFromGroups(
     return getFeedPostsFromRecommendations(userId, limit, cursorCreatedAt, cursorId, categoryFilter);
   }
 
+  const queryStartTime = Date.now();
+  console.log(`🗄️ [PERF] getFeedPostsFromGroups: Starting (limit: ${limit}, groups: ${groupIds.length}, category: ${categoryFilter || 'none'})`);
+  
   try {
     const params: any[] = [userId, groupIds];
     let paramIdx = 2;
@@ -692,6 +698,10 @@ export async function getFeedPostsFromGroups(
       )
     `;
 
+    const sqlBuildTime = Date.now() - queryStartTime;
+    console.log(`📝 [PERF] getFeedPostsFromGroups: SQL built in ${sqlBuildTime}ms`);
+    
+    const dbExecStartTime = Date.now();
     const result = await pool.query(
       `SELECT 
         ${COMMON_FEED_COLUMNS}
@@ -703,6 +713,12 @@ export async function getFeedPostsFromGroups(
       LIMIT $${paramIdx + 1}`,
       params
     );
+    const dbExecTime = Date.now() - dbExecStartTime;
+    console.log(`✅ [PERF] getFeedPostsFromGroups: Database executed in ${dbExecTime}ms, returned ${result.rows.length} rows`);
+    
+    const totalTime = Date.now() - queryStartTime;
+    console.log(`⏱️ [PERF] getFeedPostsFromGroups: Total time ${totalTime}ms (SQL build: ${sqlBuildTime}ms, DB exec: ${dbExecTime}ms)`);
+    
     return result.rows;
   } catch (error) {
     const appError = handleError(error, {
@@ -726,18 +742,96 @@ export async function getUnifiedFeedPosts(
   citySlug?: string,
   countryCode?: string
 ): Promise<any[]> {
-  if (process.env.DEBUG_FEED === '1') {
-    console.log('[unifiedFeed] args:', { userId, limit, cursorCreatedAt, cursorId, includeQna, citySlug, countryCode });
-  }
+  const queryStartTime = Date.now();
+  console.log(`🗄️ [PERF] getUnifiedFeedPosts: Starting query (limit: ${limit}, includeQna: ${includeQna})`);
+  
   const params: any[] = [userId];
+  let paramIdx = 1;
   let cursorClause = '';
   if (cursorCreatedAt && cursorId) {
+    paramIdx += 2;
     params.push(cursorCreatedAt, cursorId);
-    cursorClause = ` AND (created_at, id) < ($2::timestamptz, $3::int)`;
+    cursorClause = ` AND (created_at, id) < ($${paramIdx - 1}::timestamptz, $${paramIdx}::int)`;
   }
-  // city filters will be applied at outer layer using projected columns
+  
+  // Calculate subquery limit: we need enough rows from each subquery to potentially fill the final limit
+  // Using (limit + 1) * 3 ensures we have enough rows even if distribution is uneven
+  const subqueryLimit = (limit + 1) * 3;
+  paramIdx += 1;
+  params.push(subqueryLimit);
+  const subqueryLimitParam = paramIdx;
 
-  // Base recommendations subquery (keeps existing fields for compatibility)
+  // CTE for followed users (including self)
+  const followedUsersCte = `
+    WITH followed_users AS (
+      SELECT following_id as user_id
+      FROM user_follows 
+      WHERE follower_id = $1
+      UNION
+      SELECT $1::uuid as user_id
+    ),
+    blocked_pairs AS (
+      SELECT DISTINCT
+        CASE WHEN blocker_id = $1 THEN blocked_id ELSE blocker_id END as blocked_user_id
+      FROM user_blocks
+      WHERE blocker_id = $1 OR blocked_id = $1
+    ),
+    visible_recommendations AS (
+      SELECT r.id
+      FROM recommendations r
+      WHERE r.user_id IN (SELECT user_id FROM followed_users)
+        AND r.visibility IN ('public','friends')
+        AND r.question_id IS NULL
+        AND r.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+      ORDER BY r.created_at DESC
+      LIMIT $${subqueryLimitParam}
+    ),
+    visible_questions AS (
+      SELECT q.id
+      FROM questions q
+      WHERE q.user_id IN (SELECT user_id FROM followed_users)
+        AND q.visibility IN ('public','friends')
+        AND q.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+      ORDER BY q.created_at DESC
+      LIMIT $${subqueryLimitParam}
+    ),
+    visible_answers AS (
+      SELECT r.id
+      FROM recommendations r
+      WHERE r.user_id IN (SELECT user_id FROM followed_users)
+        AND r.visibility IN ('public','friends')
+        AND r.question_id IS NOT NULL
+        AND r.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+      ORDER BY r.created_at DESC
+      LIMIT $${subqueryLimitParam}
+    ),
+    comments_agg AS (
+      SELECT 
+        ac.recommendation_id,
+        COUNT(*) AS comments_count
+      FROM annotation_comments ac
+      WHERE ac.recommendation_id IN (
+        SELECT id FROM visible_recommendations
+        UNION
+        SELECT id FROM visible_answers
+      )
+      GROUP BY ac.recommendation_id
+    ),
+    likes_agg AS (
+      SELECT 
+        al.recommendation_id,
+        COUNT(*) AS likes_count
+      FROM annotation_likes al
+      WHERE al.recommendation_id IN (
+        SELECT id FROM visible_recommendations
+        UNION
+        SELECT id FROM visible_answers
+      )
+      GROUP BY al.recommendation_id
+    )
+  `;
+
+  // Base recommendations subquery with optimized joins
   const recSubquery = `
     SELECT 
       r.id as id,
@@ -767,38 +861,19 @@ export async function getUnifiedFeedPosts(
       u.display_name as user_name,
       u.profile_picture_url as user_picture,
       NULL::int as answers_count,
-      COALESCE(acagg.comments_count, 0) as comments_count,
-      COALESCE(alagg.likes_count, 0) as likes_count,
+      COALESCE(ca.comments_count, 0) as comments_count,
+      COALESCE(la.likes_count, 0) as likes_count,
       CASE WHEN al2.id IS NOT NULL THEN true ELSE false END as is_liked_by_current_user,
       CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved
-    FROM recommendations r
+    FROM visible_recommendations vr
+    JOIN recommendations r ON r.id = vr.id
     JOIN users u ON r.user_id = u.id
     LEFT JOIN places p ON r.place_id = p.id
     LEFT JOIN services s ON r.service_id = s.id
-    LEFT JOIN (
-      SELECT recommendation_id, COUNT(*) AS comments_count
-      FROM annotation_comments
-      GROUP BY recommendation_id
-    ) acagg ON acagg.recommendation_id = r.id
-    LEFT JOIN (
-      SELECT recommendation_id, COUNT(*) AS likes_count
-      FROM annotation_likes
-      GROUP BY recommendation_id
-    ) alagg ON alagg.recommendation_id = r.id
+    LEFT JOIN comments_agg ca ON ca.recommendation_id = r.id
+    LEFT JOIN likes_agg la ON la.recommendation_id = r.id
     LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
     LEFT JOIN saved_places sp ON r.id = sp.recommendation_id AND sp.user_id = $1
-    WHERE r.user_id IN (
-      SELECT following_id FROM user_follows WHERE follower_id = $1
-      UNION
-      SELECT $1  -- Include user's own recommendations
-    )
-    AND r.visibility IN ('public','friends')
-    AND r.question_id IS NULL
-    AND NOT EXISTS (
-      SELECT 1 FROM user_blocks 
-      WHERE (blocker_id = $1 AND blocked_id = r.user_id) 
-         OR (blocker_id = r.user_id AND blocked_id = $1)
-    )
   `;
 
   const questionsSubquery = `
@@ -834,19 +909,9 @@ export async function getUnifiedFeedPosts(
       0 as likes_count,
       false as is_liked_by_current_user,
       false as is_saved
-    FROM questions q
+    FROM visible_questions vq
+    JOIN questions q ON q.id = vq.id
     JOIN users u ON u.id = q.user_id
-    WHERE q.user_id IN (
-      SELECT following_id FROM user_follows WHERE follower_id = $1
-      UNION
-      SELECT $1  -- Include user's own questions
-    )
-    AND q.visibility IN ('public','friends')
-    AND NOT EXISTS (
-      SELECT 1 FROM user_blocks 
-      WHERE (blocker_id = $1 AND blocked_id = q.user_id) 
-         OR (blocker_id = q.user_id AND blocked_id = $1)
-    )
   `;
 
   const answersSubquery = `
@@ -878,36 +943,19 @@ export async function getUnifiedFeedPosts(
       u.display_name as user_name,
       u.profile_picture_url as user_picture,
       NULL::int as answers_count,
-      COALESCE(acagg.comments_count, 0) as comments_count,
-      COALESCE(alagg.likes_count, 0) as likes_count,
+      COALESCE(ca.comments_count, 0) as comments_count,
+      COALESCE(la.likes_count, 0) as likes_count,
       CASE WHEN al2.id IS NOT NULL THEN true ELSE false END as is_liked_by_current_user,
       CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved
-    FROM recommendations r
+    FROM visible_answers va
+    JOIN recommendations r ON r.id = va.id
     JOIN users u ON r.user_id = u.id
     LEFT JOIN places p ON r.place_id = p.id
     LEFT JOIN services s ON r.service_id = s.id
-    LEFT JOIN (
-      SELECT recommendation_id, COUNT(*) AS comments_count
-      FROM annotation_comments
-      GROUP BY recommendation_id
-    ) acagg ON acagg.recommendation_id = r.id
-    LEFT JOIN (
-      SELECT recommendation_id, COUNT(*) AS likes_count
-      FROM annotation_likes
-      GROUP BY recommendation_id
-    ) alagg ON alagg.recommendation_id = r.id
+    LEFT JOIN comments_agg ca ON ca.recommendation_id = r.id
+    LEFT JOIN likes_agg la ON la.recommendation_id = r.id
     LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
     LEFT JOIN saved_places sp ON r.id = sp.recommendation_id AND sp.user_id = $1
-    WHERE r.user_id IN (
-      SELECT following_id FROM user_follows WHERE follower_id = $1
-    )
-    AND r.question_id IS NOT NULL
-    AND r.visibility IN ('public','friends')
-    AND NOT EXISTS (
-      SELECT 1 FROM user_blocks 
-      WHERE (blocker_id = $1 AND blocked_id = r.user_id) 
-         OR (blocker_id = r.user_id AND blocked_id = $1)
-    )
   `;
 
   // Ensure all subqueries have identical column order and types for UNION
@@ -922,18 +970,22 @@ export async function getUnifiedFeedPosts(
   // Outer city filters on projected columns
   let cityWhere = '';
   if (citySlug) {
+    paramIdx += 1;
     params.push(citySlug);
-    cityWhere += ` AND (place_city_slug = $${params.length} OR service_city_slug = $${params.length})`;
+    cityWhere += ` AND (place_city_slug = $${paramIdx} OR service_city_slug = $${paramIdx})`;
   }
   if (countryCode) {
+    paramIdx += 1;
     params.push(countryCode);
-    cityWhere += ` AND (place_country_code = $${params.length} OR service_country_code = $${params.length})`;
+    cityWhere += ` AND (place_country_code = $${paramIdx} OR service_country_code = $${paramIdx})`;
   }
 
   // limit param must be last
+  paramIdx += 1;
   params.push(limit + 1);
 
   const sql = `
+    ${followedUsersCte}
     SELECT * FROM (
       ${unionSql}
     ) unified
@@ -941,24 +993,46 @@ export async function getUnifiedFeedPosts(
     ${cursorClause}
     ${cityWhere}
     ORDER BY created_at DESC
-    LIMIT $${params.length}
+    LIMIT $${paramIdx}
   `;
 
+  const sqlBuildTime = Date.now() - queryStartTime;
+  console.log(`📝 [PERF] getUnifiedFeedPosts: SQL built in ${sqlBuildTime}ms`);
+  
   if (process.env.DEBUG_FEED === '1') {
     console.log('[unifiedFeed] SQL (trimmed):', sql.replace(/\s+/g, ' ').slice(0, 400) + '...');
     console.log('[unifiedFeed] params:', params);
   }
+  
+  const dbExecStartTime = Date.now();
   const result = await pool.query(sql, params);
+  const dbExecTime = Date.now() - dbExecStartTime;
+  
+  // Breakdown by post type to understand subquery contribution
+  const rows = result.rows || [];
+  const typeBreakdown = {
+    recommendation: rows.filter(r => r.type === 'recommendation').length,
+    question: rows.filter(r => r.type === 'question').length,
+    answer: rows.filter(r => r.type === 'answer').length,
+  };
+  
+  console.log(`✅ [PERF] getUnifiedFeedPosts: Database executed in ${dbExecTime}ms, returned ${rows.length} rows`);
+  console.log(`📊 [PERF] Result breakdown: ${typeBreakdown.recommendation} recommendations, ${typeBreakdown.question} questions, ${typeBreakdown.answer} answers`);
+  
   if (process.env.DEBUG_FEED === '1') {
-    const rows = result.rows || [];
     const counts = {
       total: rows.length,
       placeInCity: rows.filter(r => r.place_city_slug && r.place_city_slug === citySlug).length,
       serviceInCity: rows.filter(r => r.service_city_slug && r.service_city_slug === citySlug).length,
       serviceOutOfCity: rows.filter(r => r.service_city_slug && citySlug && r.service_city_slug !== citySlug).length,
+      ...typeBreakdown,
     };
     console.log('[unifiedFeed] result counts:', counts);
   }
+  
+  const totalTime = Date.now() - queryStartTime;
+  console.log(`⏱️ [PERF] getUnifiedFeedPosts: Total time ${totalTime}ms (SQL build: ${sqlBuildTime}ms, DB exec: ${dbExecTime}ms)`);
+  
   return result.rows;
 }
 

@@ -68,9 +68,11 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   const [showCelebration, setShowCelebration] = useState(false);
   
   // Theme support
-  const { theme } = useTheme();
-  const selectedTheme = THEMES[theme];
-  const accentColor = selectedTheme.accentColor;
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const accentColor = selectedTheme?.accentColor || '#000000';
   const textOnAccent = getReadableTextColor(accentColor);
   
   // Use the custom hooks for state management
@@ -105,8 +107,23 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     if (composer.currentStep === 'analyzing') {
       return 'w-full max-w-4xl p-4 md:p-6 lg:p-8';
     }
-    return 'w-full max-w-4xl rounded-lg border-2 border-black bg-white p-4 md:p-6 lg:p-8 shadow-[6px_6px_0_0_#000]';
+    return 'w-full max-w-4xl rounded-lg border-2 p-4 md:p-6 lg:p-8';
   }, [composer.currentStep]);
+  
+  const stepContainerStyle = useMemo(() => {
+    if (composer.currentStep === 'analyzing') {
+      return undefined;
+    }
+    return selectedTheme ? {
+      backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+      borderColor: selectedTheme.borderColor || '#000000',
+      boxShadow: `6px 6px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+    } : {
+      backgroundColor: '#FFFFFF',
+      borderColor: '#000000',
+      boxShadow: '6px 6px 0 0 #000000',
+    };
+  }, [composer.currentStep, selectedTheme]);
 
   // Auto-focus input when completing step is shown
   useEffect(() => {
@@ -584,7 +601,10 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               transition: { duration: 0.3, ease: 'easeInOut' }
             }}
             className="fixed inset-0 z-40 pt-16"
-            style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}
+            style={{ 
+              backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)', 
+              color: selectedTheme?.textPrimary || 'var(--app-text)' 
+            }}
           >
             <div className="h-full flex flex-col">
               <div className="flex-1 overflow-y-auto">
@@ -599,6 +619,7 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                       transition: { duration: 0.2 }
                     }}
                     className={stepContainerClassName}
+                    style={stepContainerStyle}
                   >
                     <AnimatePresence mode="wait">
                       {composer.currentStep === 'writing' && renderWritingStep()}

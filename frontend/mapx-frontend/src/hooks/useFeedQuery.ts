@@ -14,6 +14,7 @@ export const useFeedQuery = (
     initialPageParam: null as { createdAt: string; id: number } | null,
     queryFn: async ({ pageParam }) => {
       const startTime = performance.now();
+      console.log(`[PERF] useFeedQuery: Starting fetch${pageParam ? ' (next page)' : ' (initial)'}`);
       
       let response;
       const cursorOpts = pageParam ? {
@@ -30,15 +31,19 @@ export const useFeedQuery = (
         category: opts?.category
       };
       
+      const apiStartTime = performance.now();
       if (selectedGroupIds.length > 0) {
         response = await feedApi.getFeed(currentUserId, FEED_LIMIT, 0, selectedGroupIds, cursorOpts);
       } else {
         response = await feedApi.getFeed(currentUserId, FEED_LIMIT, 0, undefined, cursorOpts);
       }
+      const apiTime = performance.now() - apiStartTime;
       
       const endTime = performance.now();
+      const totalTime = endTime - startTime;
       
       if (!response.success) {
+        console.error(`[PERF] useFeedQuery: API call failed after ${totalTime.toFixed(2)}ms`);
         throw new Error(response.error || 'Failed to load feed');
       }
       
@@ -51,6 +56,8 @@ export const useFeedQuery = (
       const nextCursor = pagination?.nextCursor;
       const hasNext = pagination?.hasNext ?? (data.length === FEED_LIMIT);
       
+      console.log(`[PERF] useFeedQuery: Completed in ${totalTime.toFixed(2)}ms (API: ${apiTime.toFixed(2)}ms, processing: ${(totalTime - apiTime).toFixed(2)}ms), received ${data.length} posts`);
+      
       return {
         data,
         nextPage: hasNext && nextCursor ? { createdAt: nextCursor.createdAt, id: nextCursor.id } : undefined,
@@ -58,10 +65,10 @@ export const useFeedQuery = (
     },
     getNextPageParam: (lastPage) => lastPage.nextPage,
     enabled: !!currentUserId,
-    staleTime: 30 * 1000, // 30 seconds - very responsive updates
+    staleTime: 5 * 60 * 1000, // 5 minutes - reduce unnecessary refetches
     gcTime: 15 * 60 * 1000, // 15 minutes - increased for better caching
     retry: 1,
     refetchOnWindowFocus: false, // Prevent unnecessary refetches
-    refetchOnMount: true, // Refetch when component mounts to get latest data
+    refetchOnMount: false, // Don't refetch on mount - use cached data if available
   });
 };

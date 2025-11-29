@@ -251,3 +251,6 @@ If something goes wrong, you can rollback:
 - Google OAuth redirect URIs must match exactly - make sure to update both the redirect URI and JavaScript origin.
 - Keep the old domain's SSL certificate until you're sure everything is working, then you can remove it.
 
+
+
+

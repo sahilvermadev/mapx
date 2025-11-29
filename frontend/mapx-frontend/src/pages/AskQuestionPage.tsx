@@ -24,9 +24,11 @@ const AskQuestionPage: React.FC = () => {
   const askMutation = useAskQuestion();
   
   // Theme support
-  const { theme } = useTheme();
-  const selectedTheme = THEMES[theme];
-  const accentColor = selectedTheme.accentColor;
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const accentColor = selectedTheme?.accentColor || '#000000';
   const textOnAccent = getReadableTextColor(accentColor);
 
   // Redirect if not authenticated
@@ -70,25 +72,61 @@ const AskQuestionPage: React.FC = () => {
 
   if (isChecking) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-primary"></div>
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{ 
+          backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)',
+          color: selectedTheme?.textPrimary || 'var(--app-text)',
+        }}
+      >
+        <div 
+          className="animate-spin rounded-full h-8 w-8 border-4"
+          style={{ 
+            borderColor: selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || '#E5E7EB',
+            borderTopColor: accentColor,
+          }}
+        ></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center p-4 bg-background">
+    <div 
+      className="min-h-[calc(100vh-64px)] flex items-center justify-center p-4"
+      style={{ 
+        backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)',
+        color: selectedTheme?.textPrimary || 'var(--app-text)',
+      }}
+    >
       <div className="w-full max-w-2xl">
-        <div className="rounded-lg border-2 border-black bg-white shadow-[8px_8px_0_0_#000] p-6 md:p-8">
-          <div className="mb-6 pb-4 border-b-2 border-black">
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Ask your friends</h1>
-            <p className="text-sm md:text-base text-gray-600 mt-2">
+        <div 
+          className="rounded-lg border-2 p-6 md:p-8"
+          style={selectedTheme ? {
+            backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+            borderColor: selectedTheme.borderColor || '#000000',
+            boxShadow: `8px 8px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+          } : undefined}
+        >
+          <div 
+            className="mb-6 pb-4 border-b-2"
+            style={{ borderColor: selectedTheme?.borderColor || '#000000' }}
+          >
+            <h1 
+              className="text-2xl md:text-3xl font-bold"
+              style={{ color: selectedTheme?.textPrimary || '#111827' }}
+            >
+              Ask your friends
+            </h1>
+            <p 
+              className="text-sm md:text-base mt-2"
+              style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+            >
               What are you looking for? Ask your friends for recommendations.
             </p>
           </div>
           
           <Textarea
-            className="min-h-[200px] md:min-h-[240px] text-sm md:text-base rounded-md border-2 border-black/30 bg-white shadow-sm focus:shadow-md focus:border-black transition-shadow resize-none placeholder:text-gray-500"
+            className="min-h-[200px] md:min-h-[240px] text-sm md:text-base rounded-md border-2 shadow-sm focus:shadow-md transition-shadow resize-none"
             placeholder="What are you looking for?"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -100,21 +138,62 @@ const AskQuestionPage: React.FC = () => {
               }
             }}
             autoFocus
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || '#FFFFFF',
+              borderColor: selectedTheme.inputBorder || selectedTheme.borderColorMuted || 'rgba(0, 0, 0, 0.3)',
+              color: selectedTheme.inputText || selectedTheme.textPrimary || '#000000',
+            } : undefined}
           />
+          <style>{`
+            textarea::placeholder {
+              color: ${selectedTheme?.inputPlaceholder || selectedTheme?.textMuted || '#9CA3AF'} !important;
+            }
+            textarea:focus {
+              border-color: ${selectedTheme?.borderColor || '#000000'} !important;
+            }
+          `}</style>
           
-          <div className="flex items-center justify-between mt-6 pt-4 border-t-2 border-black">
+          <div 
+            className="flex items-center justify-between mt-6 pt-4 border-t-2"
+            style={{ borderColor: selectedTheme?.borderColor || '#000000' }}
+          >
             <Button 
               variant="outline" 
               onClick={handleBack}
-              className="rounded-md border-2 border-black shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all bg-white"
+              className="rounded-md border-2 shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
+              style={selectedTheme ? {
+                backgroundColor: 'transparent',
+                borderColor: selectedTheme.borderColor || '#000000',
+                color: selectedTheme.buttonGhost.text || selectedTheme.textPrimary || '#000000',
+                boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+              } : undefined}
+              onMouseEnter={(e) => {
+                if (selectedTheme) {
+                  e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedTheme) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
             >
               Cancel
             </Button>
             <Button 
               onClick={submit} 
               disabled={askMutation.isPending || !text.trim()}
-              className="rounded-md border-2 border-black shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0"
-              style={{ backgroundColor: accentColor, borderColor: '#000', color: textOnAccent }}
+              className="rounded-md border-2 shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0"
+              style={selectedTheme ? {
+                backgroundColor: (askMutation.isPending || !text.trim()) 
+                  ? (selectedTheme.borderColorMuted || selectedTheme.hoverBackground || '#E5E7EB')
+                  : accentColor,
+                borderColor: selectedTheme.borderColor || '#000000',
+                color: (askMutation.isPending || !text.trim())
+                  ? (selectedTheme.textMuted || '#6B7280')
+                  : textOnAccent,
+                boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+              } : undefined}
             >
               {askMutation.isPending ? 'Posting…' : 'Post question'}
             </Button>

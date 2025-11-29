@@ -765,19 +765,28 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                     <motion.div
                       layout
                       transition={{ duration: 0.25, ease: 'easeOut' }}
-                      className="rounded-md border border-black/20 bg-white shadow-sm"
+                      className="rounded-md border shadow-sm"
+                      style={{
+                        borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.2)',
+                        backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                      }}
                     >
                       {/* Header */}
                       <motion.div
                         layout="position"
-                        className="sticky top-0 z-10 flex flex-col gap-3 border-b bg-white p-3 md:flex-row md:items-center md:justify-between"
+                        className="sticky top-0 z-10 flex flex-col gap-3 border-b p-3 md:flex-row md:items-center md:justify-between"
+                        style={{
+                          borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+                          backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                        }}
                       >
                         <motion.h3
                           layout="position"
                           initial={{ opacity: 0, y: -6 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.2, delay: 0.05 }}
-                          className="text-xs font-semibold text-gray-900"
+                          className="text-xs font-semibold"
+                          style={{ color: selectedTheme?.textPrimary || '#000000' }}
                         >
                           Select Labels
                         </motion.h3>
@@ -840,9 +849,18 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                                           onClick={() => toggleLabel(label)}
                                           className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium transition-all border select-none ${
                                             isSelected
-                                              ? 'bg-yellow-50 text-yellow-800 border-black/30 shadow-[1px_1px_0_0_#000]'
-                                              : 'bg-white text-gray-600 border-black/20 hover:border-black/30 hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
+                                              ? 'shadow-[1px_1px_0_0_#000]'
+                                              : 'hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
                                           }`}
+                                          style={isSelected ? {
+                                            backgroundColor: selectedTheme?.selectedBackground || '#FEF3C7',
+                                            color: selectedTheme?.textPrimary || '#92400E',
+                                            borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.3)',
+                                          } : {
+                                            backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                                            color: selectedTheme?.textMuted || '#6B7280',
+                                            borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.2)',
+                                          }}
                                         >
                                           {label}
                                         </motion.button>
@@ -858,7 +876,12 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                             initial={{ opacity: 0, y: 6 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="rounded-md border border-dashed border-black/10 bg-gray-50 p-3 text-xs text-gray-500 text-center"
+                            className="rounded-md border border-dashed p-3 text-xs text-center"
+                            style={{
+                              borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+                              backgroundColor: selectedTheme?.hoverBackground || '#F9FAFB',
+                              color: selectedTheme?.textMuted || '#6B7280',
+                            }}
                           >
                             No labels found. Try a different search.
                           </motion.div>
@@ -868,7 +891,11 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                       {/* Footer - Custom Label Input */}
                       <motion.div
                         layout="position"
-                        className="sticky bottom-0 flex flex-col gap-2 border-t bg-white p-3"
+                        className="sticky bottom-0 flex flex-col gap-2 border-t p-3"
+                        style={{
+                          borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+                          backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                        }}
                       >
                         <div className="flex items-center gap-2">
                           <Input
@@ -1065,8 +1092,20 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           return hasHighlights ? (
             <div className="mb-2">
               <div className="flex items-start gap-2">
-                <span className="text-xs text-muted-foreground font-medium min-w-0 flex-shrink-0">Highlights:</span>
-                <span className="text-xs text-foreground font-medium">
+                <span 
+                  className="text-xs font-medium min-w-0 flex-shrink-0"
+                  style={{
+                    color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280',
+                  }}
+                >
+                  Highlights:
+                </span>
+                <span 
+                  className="text-xs font-medium"
+                  style={{
+                    color: selectedTheme?.textPrimary || '#000000',
+                  }}
+                >
                   {Array.isArray(highlights) ? highlights.filter(h => h && String(h).trim()).join(', ') : highlights}
                 </span>
               </div>
@@ -1119,31 +1158,100 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
           variant="ghost"
           size="sm"
           onClick={handleLike}
-          className={`flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02] ${
-            isLiked ? 'text-red-600' : 'text-foreground'
-          }`}
+          className="flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent"
+          style={{
+            color: isLiked ? '#DC2626' : (selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000'),
+            borderColor: 'transparent',
+            backgroundColor: 'transparent',
+          }}
+          onMouseEnter={(e) => {
+            if (selectedTheme) {
+              e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
         >
-          <Heart className={`h-3.5 w-3.5 md:h-4 md:w-4 ${isLiked ? 'fill-current' : ''}`} strokeWidth={1.5} />
-          <span className="text-xs">{postData.likes_count}</span>
+          <Heart 
+            className={`h-3.5 w-3.5 md:h-4 md:w-4 ${isLiked ? 'fill-current' : ''}`} 
+            strokeWidth={1.5}
+            style={{
+              color: isLiked ? '#DC2626' : (selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000'),
+            }}
+          />
+          <span 
+            className="text-xs"
+            style={{
+              color: isLiked ? '#DC2626' : (selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000'),
+            }}
+          >
+            {postData.likes_count}
+          </span>
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
           onClick={handleToggleComments}
-          className="flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
+          className="flex items-center gap-1.5 h-7 md:h-8 px-2 md:px-3 rounded-none transition-all font-medium border border-transparent bg-transparent"
+          style={{
+            color: selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000',
+            borderColor: 'transparent',
+            backgroundColor: 'transparent',
+          }}
+          onMouseEnter={(e) => {
+            if (selectedTheme) {
+              e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
         >
-          <MessageCircle className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
-          <span className="text-xs">{postData.comments_count}</span>
+          <MessageCircle 
+            className="h-3.5 w-3.5 md:h-4 md:w-4" 
+            strokeWidth={1.5}
+            style={{
+              color: selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000',
+            }}
+          />
+          <span 
+            className="text-xs"
+            style={{
+              color: selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000',
+            }}
+          >
+            {postData.comments_count}
+          </span>
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
           onClick={handleShare}
-          className="flex items-center justify-center h-7 w-7 md:h-8 md:w-8 rounded-none transition-all border border-transparent bg-transparent hover:border-black/40 hover:bg-black/[0.02]"
+          className="flex items-center justify-center h-7 w-7 md:h-8 md:w-8 rounded-none transition-all border border-transparent bg-transparent"
+          style={{
+            color: selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000',
+            borderColor: 'transparent',
+            backgroundColor: 'transparent',
+          }}
+          onMouseEnter={(e) => {
+            if (selectedTheme) {
+              e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
         >
-          <Share2 className="h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
+          <Share2 
+            className="h-3.5 w-3.5 md:h-4 md:w-4" 
+            strokeWidth={1.5}
+            style={{
+              color: selectedTheme?.buttonGhost.text || selectedTheme?.textPrimary || '#000000',
+            }}
+          />
         </Button>
       </div>
     </div>
@@ -1344,7 +1452,12 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             variant="ghost"
             size="sm"
             disabled={!newComment.trim() || isSubmitting}
-            className="h-7 md:h-8 px-3 md:px-4 border-[1.5px] border-black bg-white rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-7 md:h-8 px-3 md:px-4 border-[1.5px] rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              borderColor: selectedTheme?.borderColor || '#000000',
+              backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+              color: selectedTheme?.textPrimary || '#000000',
+            }}
             style={{ 
               boxShadow: (!newComment.trim() || isSubmitting) ? 'none' : '2px 2px 0 0 #000',
               color: '#000'
@@ -1429,7 +1542,13 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
               transition={{ duration: 0.2 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="bg-white border-[1.5px] border-black rounded-lg p-6 md:p-8 max-w-md w-full shadow-[6px_6px_0_0_#000]">
+              <div 
+                className="border-[1.5px] rounded-lg p-6 md:p-8 max-w-md w-full shadow-[6px_6px_0_0_#000]"
+                style={{
+                  backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                  borderColor: selectedTheme?.borderColor || '#000000',
+                }}
+              >
                 <div className="flex items-start gap-4 mb-6">
                   <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 border-[1.5px] border-red-300 flex items-center justify-center">
                     <Trash2 className="h-6 w-6 text-red-600" strokeWidth={2} />
@@ -1473,7 +1592,12 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
         style={{ position: isEditing ? 'relative' : 'static', zIndex: isEditing ? 9999 : 'auto' }}
       >
         <div 
-          className={noOuterSpacing ? "relative group transition-all" : "relative bg-white p-3 md:p-4 group border border-black/10 transition-all"}
+          className={noOuterSpacing ? "relative group transition-all" : "relative p-3 md:p-4 group border transition-all"}
+          style={noOuterSpacing ? undefined : {
+            backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+            borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+            color: selectedTheme?.textPrimary || '#000000',
+          }}
           onClick={(e) => isEditing && e.stopPropagation()}
         >
           {showLoginModal && (

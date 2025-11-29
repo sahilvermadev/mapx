@@ -137,6 +137,9 @@ export async function generateRecommendationEmbedding(recommendationData: {
   // Structured payloads
   content_data?: Record<string, any>;
   metadata?: Record<string, any>;
+  // New fields for richer embeddings
+  created_at?: Date | string;
+  personal_overlap_percent?: number; // Percentage of shared places/connections with current user
 }): Promise<number[]> {
   const textParts: string[] = [];
 
@@ -214,6 +217,34 @@ export async function generateRecommendationEmbedding(recommendationData: {
   flattenRecord(recommendationData.content_data, 'Details');
   flattenRecord(recommendationData.metadata, 'Metadata');
 
+  // Add freshness information
+  if (recommendationData.created_at) {
+    const createdAt = typeof recommendationData.created_at === 'string' 
+      ? new Date(recommendationData.created_at) 
+      : recommendationData.created_at;
+    const daysSince = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+    
+    if (daysSince <= 90) {
+      const daysAgo = Math.floor(daysSince);
+      if (daysAgo === 0) {
+        textParts.push('Freshness: visited-today');
+      } else if (daysAgo === 1) {
+        textParts.push('Freshness: visited-yesterday');
+      } else {
+        textParts.push(`Freshness: visited-${daysAgo}-days-ago`);
+      }
+    } else {
+      const monthsAgo = Math.floor(daysSince / 30);
+      textParts.push(`Freshness: visited-${monthsAgo}-months-ago`);
+    }
+  }
+
+  // Add personal overlap (shared places/connections percentage)
+  if (typeof recommendationData.personal_overlap_percent === 'number') {
+    const overlapPercent = Math.round(recommendationData.personal_overlap_percent);
+    textParts.push(`Your-overlap-with-reviewer: ${overlapPercent}%`);
+  }
+
   const combinedText = textParts.join('. ');
   if (!combinedText.trim()) {
     throw new Error('No meaningful text content found in recommendation data');
@@ -222,65 +253,6 @@ export async function generateRecommendationEmbedding(recommendationData: {
   return generateEmbedding(combinedText);
 }
 
-/**
- * Generate embedding from place data for semantic search
- */
-export async function generatePlaceEmbedding(placeData: {
-  name: string;
-  address?: string;
-  metadata?: Record<string, any>;
-}): Promise<number[]> {
-  const textParts: string[] = [];
-
-  // Add place name
-  textParts.push(`Place: ${placeData.name}`);
-
-  // Add address if present
-  if (placeData.address) {
-    textParts.push(`Address: ${placeData.address}`);
-  }
-
-  // Add metadata if present
-  if (placeData.metadata) {
-    const metadataText = Object.entries(placeData.metadata)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(', ');
-    if (metadataText) {
-      textParts.push(`Features: ${metadataText}`);
-    }
-  }
-
-  const combinedText = textParts.join('. ');
-  return generateEmbedding(combinedText);
-}
-
-/**
- * Batch generate embeddings for multiple texts
- */
-export async function generateBatchEmbeddings(texts: string[]): Promise<number[][]> {
-  try {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is not set');
-    }
-
-    // Filter out empty texts
-    const validTexts = texts.filter(text => text.trim().length > 0);
-    
-    if (validTexts.length === 0) {
-      return [];
-    }
-
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-ada-002',
-      input: validTexts,
-    });
-
-    return response.data.map((item: any) => item.embedding);
-  } catch (error) {
-    console.error('Error generating batch embeddings:', error);
-    throw new Error(`Failed to generate batch embeddings: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-}
 
 /**
  * Calculate cosine similarity between two embeddings

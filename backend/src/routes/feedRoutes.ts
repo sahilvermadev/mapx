@@ -9,11 +9,11 @@ const router = express.Router();
  * Get social feed posts from followed users
  */
 router.get('/', async (req, res) => {
+  const routeStartTime = Date.now();
   try {
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('=== FEED ENDPOINT ===');
-      console.log('feedRoutes - req.query:', req.query);
-    }
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('📥 [PERF] FEED ENDPOINT REQUEST RECEIVED');
+    console.log('═══════════════════════════════════════════════════════════');
     
     const userId = (req as any).user.id;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -27,32 +27,44 @@ router.get('/', async (req, res) => {
     const countryCode = (req.query.country_code as string) || undefined;
     const includeQna = (req.query.includeQna as string) === 'true';
     
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('feedRoutes - userId:', userId);
-      console.log('feedRoutes - limit:', limit);
-      console.log('feedRoutes - cursorCreatedAt:', cursorCreatedAt);
-      console.log('feedRoutes - cursorId:', cursorId);
-      console.log('feedRoutes - groupIds:', groupIds);
-      console.log('feedRoutes - category:', category);
-    }
+    console.log('📊 [PERF] Request params:', {
+      userId,
+      limit,
+      cursorCreatedAt: cursorCreatedAt ? 'yes' : 'no',
+      cursorId: cursorId || 'none',
+      groupIds: groupIds.length,
+      category: category || 'none',
+      citySlug: citySlug || 'none',
+      countryCode: countryCode || 'none',
+      includeQna
+    });
 
+    const dbQueryStartTime = Date.now();
     let feedPosts;
     if (includeQna) {
-      if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - Calling getUnifiedFeedPosts');
+      console.log('🔄 [PERF] Calling getUnifiedFeedPosts...');
       feedPosts = await getUnifiedFeedPosts(userId, limit, cursorCreatedAt, cursorId, true, citySlug, countryCode);
     } else if (groupIds.length > 0) {
-      if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - Calling getFeedPostsFromGroups');
+      console.log('🔄 [PERF] Calling getFeedPostsFromGroups...');
       feedPosts = await getFeedPostsFromGroups(userId, groupIds, limit, cursorCreatedAt, cursorId, category);
     } else {
-      if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - Calling getFeedPostsFromRecommendations');
+      console.log('🔄 [PERF] Calling getFeedPostsFromRecommendations...');
       feedPosts = await getFeedPostsFromRecommendations(userId, limit, cursorCreatedAt, cursorId, category, citySlug, countryCode);
     }
+    const dbQueryTime = Date.now() - dbQueryStartTime;
+    console.log(`✅ [PERF] Database query completed in ${dbQueryTime}ms, returned ${feedPosts.length} posts`);
     
-    if (process.env.NODE_ENV !== 'production') console.log('feedRoutes - feedPosts count (raw):', feedPosts.length);
+    const processingStartTime = Date.now();
     const hasNext = feedPosts.length > limit;
     const data = hasNext ? feedPosts.slice(0, limit) : feedPosts;
     const last = data[data.length - 1];
     const nextCursor = hasNext && last ? { createdAt: last.created_at, id: last.id || last.recommendation_id } : null;
+    const processingTime = Date.now() - processingStartTime;
+
+    const totalTime = Date.now() - routeStartTime;
+    console.log(`📤 [PERF] Response prepared in ${totalTime}ms (DB: ${dbQueryTime}ms, processing: ${processingTime}ms)`);
+    console.log(`📊 [PERF] Returning ${data.length} posts, hasNext: ${hasNext}`);
+    console.log('═══════════════════════════════════════════════════════════');
 
     res.json({
       success: true,

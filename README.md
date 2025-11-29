@@ -77,11 +77,15 @@ The enhanced embeddings enable powerful semantic searches:
 - Intelligent query handling and mode switching
 - Real-time search suggestions
 
-#### **Search Results (`frontend/recce_-frontend/src/components/SearchResults.tsx`)**
-- Displays AI-generated summaries with 🤖 badge
-- Shows place information with similarity scores
-- Lists individual recommendations with user attribution
-- Provides search tips for better results
+#### **Feed AI Response (`frontend/mapx-frontend/src/components/SearchResultsInline.tsx`)**
+- Renders LLM summaries inline with the feed search bubble
+- Interleaves AI prose with result cards using tool-style markers
+- Supports follow-up chips and theme-aware user bubbles
+
+#### **Map Search Overlay (`frontend/mapx-frontend/src/components/SearchResultsNew.tsx`)**
+- Dedicated modal for the map view
+- Highlights the top result archetype (winner/two contenders/etc.)
+- Provides quick access to maps, saves, and follow-up options
 
 ## 🔧 Technical Implementation
 

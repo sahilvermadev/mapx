@@ -3,12 +3,18 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import RecommendationComposer from '@/components/RecommendationComposer';
 import { useAuth } from '@/auth';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 
 const RecommendationComposerPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
   const { user: currentUser, isAuthenticated, isChecking } = useAuth();
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
 
   useEffect(() => {
     // Only redirect if auth check is complete and user is not authenticated
@@ -21,10 +27,23 @@ const RecommendationComposerPage: React.FC = () => {
   // Show loading while authentication is being checked
   if (isChecking) {
     return (
-      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center">
+      <div 
+        className="min-h-[calc(100vh-64px)] flex items-center justify-center"
+        style={{ 
+          backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)',
+          color: selectedTheme?.textPrimary || 'var(--app-text)',
+        }}
+      >
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p>Checking authentication...</p>
+          <div 
+            className="animate-spin rounded-full h-8 w-8 border-b-2"
+            style={{ 
+              borderColor: selectedTheme?.accentColor || '#2563EB',
+            }}
+          ></div>
+          <p style={{ color: selectedTheme?.textPrimary || 'inherit' }}>
+            Checking authentication...
+          </p>
         </div>
       </div>
     );

@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfflineIndicator } from './hooks/useOffline';
 import { Toaster } from "sonner";
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { FeedFiltersProvider } from '@/contexts/FeedFiltersContext';
 
 // Lazy load page components for better performance
 const MapPage = lazy(() => import('./pages/MapPage'));
@@ -135,7 +136,7 @@ const AppContent: React.FC = () => {
           showProfileButton={true}
           showLogoutButton={true}
           title="REKKY"
-          variant="dark"
+          variant="default"
           onLogout={logout}
           profilePictureUrl={currentUser?.profilePictureUrl}
           displayName={currentUser?.displayName}
@@ -148,8 +149,8 @@ const AppContent: React.FC = () => {
           isMapRoute ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         style={{ 
-          top: '64px',
-          height: 'calc(100vh - 64px)'
+          top: 'var(--header-height, 64px)',
+          height: 'calc(100vh - var(--header-height, 64px))'
         }}
       >
         {persistentMapInstance}
@@ -158,9 +159,9 @@ const AppContent: React.FC = () => {
       {/* Route content container */}
       {!isMapRoute && (
         <div 
-          className="absolute inset-0 z-20 overflow-auto"
+          className="absolute inset-0 z-20"
           style={{ 
-            top: isLandingRoute ? '0' : '64px',
+            top: isLandingRoute ? '0' : 'var(--header-height, 64px)',
             overscrollBehavior: 'none',
             WebkitOverflowScrolling: 'touch'
           }}

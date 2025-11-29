@@ -6,7 +6,7 @@ import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../
 import { useAuth } from '../auth';
 import ContentCard from '../components/ContentCard';
 import SearchBar from '../components/SearchBar';
-import SearchResults from '../components/SearchResults';
+import SearchResultsNew from '../components/SearchResultsNew';
 import type { PlaceDetails } from '../components/ContentCard';
 import { Button } from '@/components/ui/button';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
@@ -954,7 +954,7 @@ const MapPage: React.FC = () => {
       )}
 
       {searchResults && (
-        <SearchResults
+        <SearchResultsNew
           searchResponse={searchResults}
           isLoading={isSearching}
           onClose={handleSearchClose}

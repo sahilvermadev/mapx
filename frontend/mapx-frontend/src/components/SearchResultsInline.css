@@ -1,0 +1,498 @@
+/* Gemini-style Search Results Inline */
+
+.search-results-inline {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+}
+
+/* Fade effect for search results container - starts fading from search bar level */
+.search-results-container {
+  position: relative;
+  padding-bottom: 90px; /* Space for bottom search bar */
+}
+
+/* Chat bubbles layout */
+.chat-bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-results-inline .chat-bubbles + .chat-bubbles {
+  margin-top: 32px;
+}
+
+.chat-bubble {
+  border-radius: 24px;
+  padding: 16px 20px;
+  max-width: 70%;
+  margin-left: auto;
+  transition: background 0.3s ease, border 0.3s ease, box-shadow 0.3s ease;
+}
+
+.bubble-header {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+}
+
+.bubble-label {
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  font-weight: 600;
+  color: currentColor;
+  opacity: 0.8;
+}
+
+.bubble-text {
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0;
+  text-align: left;
+}
+
+.ai-response {
+  width: 100%;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.ai-response-head {
+  margin-bottom: 8px;
+}
+
+.ai-response-head .bubble-label {
+  /* Color is set via inline styles for theme support */
+  opacity: 1;
+}
+
+/* AI Headline - max 2 lines, bold, personal */
+.ai-headline {
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #111827;
+  margin-bottom: 16px;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Divider */
+.divider {
+  width: 100%;
+  height: 1px;
+  background: repeating-linear-gradient(
+    to right,
+    #e5e7eb 0px,
+    #e5e7eb 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  margin: 16px 0 24px 0;
+}
+
+/* AI response blocks */
+.ai-response-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ai-text-block {
+  font-size: 15px;
+  line-height: 1.6;
+  /* Color is set via inline styles for theme support */
+}
+
+.ai-text-block p {
+  margin: 0 0 8px 0;
+}
+
+.ai-text-block p:last-child {
+  margin-bottom: 0;
+}
+
+/* Searching Indicator */
+.searching-indicator {
+  opacity: 0.7;
+}
+
+.searching-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  /* Color is set via inline styles for theme support */
+}
+
+.searching-dot {
+  display: inline-block;
+  animation: searching-dot 1.4s infinite;
+  animation-fill-mode: both;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.searching-dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.searching-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.searching-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes searching-dot {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+/* Result Card */
+.result-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.result-card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+/* Card Header: Place Name and Rating */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  gap: 16px;
+}
+
+.place-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.rating-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.star-rating {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.star-rating .star {
+  width: 14px;
+  height: 14px;
+  color: #d1d5db;
+  flex-shrink: 0;
+}
+
+.star-rating .star.filled {
+  color: #fbbf24;
+}
+
+.star-rating .star.half {
+  color: #fbbf24;
+  opacity: 0.5;
+}
+
+.star-rating .star.empty {
+  color: #e5e7eb;
+}
+
+.rating-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin-left: 2px;
+}
+
+.review-count {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 400;
+}
+
+/* Card Meta: Days ago by Reviewer (taste match) */
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #6b7280;
+  flex-wrap: wrap;
+}
+
+.days-ago {
+  font-weight: 500;
+  color: #374151;
+}
+
+.meta-separator {
+  color: #9ca3af;
+}
+
+.reviewer-name {
+  font-weight: 600;
+  /* Color is set via inline styles for theme support */
+}
+
+.taste-match {
+  font-weight: 700;
+  color: #059669;
+}
+
+/* Card Details: Price, Distance, Location, Map Button */
+.card-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: #6b7280;
+  flex-wrap: wrap;
+}
+
+.price-range {
+  font-weight: 500;
+  color: #374151;
+}
+
+.detail-separator {
+  color: #9ca3af;
+}
+
+.distance {
+  color: #6b7280;
+}
+
+.location {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #6b7280;
+}
+
+.location-icon {
+  width: 12px;
+  height: 12px;
+  color: #9ca3af;
+}
+
+.map-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  /* Background, color, and border are now handled by inline styles for theme support */
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: auto;
+}
+
+.map-button:hover {
+  /* Hover styles are now handled by inline onMouseEnter/onMouseLeave for theme support */
+}
+
+.map-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* Hero Image */
+.hero-image-container {
+  width: 100%;
+  height: 280px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f3f4f6;
+}
+
+.hero-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Review Quote */
+.review-quote {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.quote-text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #374151;
+  margin: 0 0 8px 0;
+  font-style: italic;
+}
+
+.quote-author {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+  font-weight: 500;
+}
+
+/* Follow-up chips */
+.follow-up-chips {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.follow-up-chips button {
+  /* Colors are set via inline styles for theme support */
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  cursor: pointer;
+}
+
+.follow-up-chips button:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.25);
+  /* Hover background can be set via theme if needed */
+}
+
+/* Loading States */
+.ai-headline-skeleton {
+  height: 24px;
+  width: 80%;
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s ease-in-out infinite;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.card-skeleton {
+  height: 400px;
+  width: 100%;
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s ease-in-out infinite;
+  border-radius: 12px;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* No Results */
+.no-results {
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.no-results p {
+  font-size: 16px;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .chat-bubble {
+    max-width: 100%;
+  }
+
+  .ai-headline {
+    font-size: 15px;
+  }
+
+  .place-name {
+    font-size: 18px;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .rating-section {
+    width: 100%;
+  }
+
+  .card-details {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .map-button {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hero-image-container {
+    height: 200px;
+  }
+}
+
+@media (max-width: 480px) {
+  .result-card {
+    padding: 16px;
+  }
+
+  .place-name {
+    font-size: 16px;
+  }
+
+  .hero-image-container {
+    height: 180px;
+  }
+}
+

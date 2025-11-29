@@ -8,6 +8,8 @@ type Props = {
   triggerLabel: string;
   onSelect: (city: { id?: string; name?: string; country?: string }) => void;
   className?: string;
+  style?: React.CSSProperties;
+  hoverColor?: string;
   // List of cities with available recommendations; used to avoid unnecessary API searches
   availableCities?: Array<{ id: string; name: string; country?: string; recCount?: number }>;
 };
@@ -15,7 +17,7 @@ type Props = {
 const normalizeCityId = (name: string) =>
   name.toLowerCase().replace(/\s+/g, '-');
 
-const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className, availableCities = [] }) => {
+const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className, style, hoverColor, availableCities = [] }) => {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -107,13 +109,31 @@ const CitySearchPopover: React.FC<Props> = ({ triggerLabel, onSelect, className,
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className={`px-3 py-2 h-9 rounded-full border border-black/10 bg-transparent hover:border-black/40 hover:bg-black/[0.03] shadow-none text-xs md:text-sm font-medium transition-all ${className || ''}`}>
-          <MapPin className="mr-1 h-3.5 w-3.5 opacity-70" strokeWidth={1.5} />
-          <span className="font-medium">{triggerLabel}</span>
-          <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-70" strokeWidth={1.5} />
+        <Button 
+          variant="ghost" 
+          size="sm"
+          className={`h-8 w-8 sm:w-auto rounded-full bg-transparent border px-0 sm:px-2 text-xs md:text-sm flex items-center justify-center font-medium transition-all flex-shrink-0 ${className || ''}`}
+          style={style}
+          onMouseEnter={(e) => {
+            // Apply hover effect similar to filter buttons
+            if (hoverColor) {
+              e.currentTarget.style.backgroundColor = hoverColor;
+            } else if (style?.backgroundColor === 'transparent') {
+              e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.05)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (style) {
+              e.currentTarget.style.backgroundColor = style.backgroundColor as string || 'transparent';
+            }
+          }}
+        >
+          <MapPin className="h-3.5 w-3.5 md:h-4 md:w-4 sm:mr-2" strokeWidth={1.5} />
+          <span className="hidden sm:inline font-medium">{triggerLabel}</span>
+          <ChevronDown className="hidden sm:inline ml-1 h-3.5 w-3.5 md:h-4 md:w-4" strokeWidth={1.5} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent sideOffset={8} className="w-80 p-3 border border-black/10">
+      <DropdownMenuContent side="bottom" sideOffset={8} className="w-80 p-3 border border-black/10 z-50">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <button

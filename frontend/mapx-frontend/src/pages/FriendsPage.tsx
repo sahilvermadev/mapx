@@ -13,6 +13,9 @@ import GroupList from '@/components/GroupList';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
+import { useSuggestedUsersQuery } from '@/hooks/useSuggestedUsersQuery';
+import { useFollowMutation } from '@/hooks/useFollowMutation';
+import { SuggestedUsersCard } from '@/components/SocialFeed/SuggestedUsersCard';
 
 const FriendsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -29,11 +32,21 @@ const FriendsPage: React.FC = () => {
   const [groupsRefreshKey, setGroupsRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<'friends' | 'groups'>('friends');
   const [activeFriendsTab, setActiveFriendsTab] = useState<'following' | 'followers' | 'search'>('following');
-  const { theme } = useTheme();
+  const { theme: themeName } = useTheme();
+  
+  // Fetch suggested users
+  const {
+    data: suggestedUsers = [],
+    isLoading: suggestedUsersLoading,
+  } = useSuggestedUsersQuery(currentUser?.id || '');
+  
+  const followMutation = useFollowMutation(currentUser?.id || '');
 
   // Get accent color from current theme (reactive to theme changes)
-  const selectedTheme = THEMES[theme];
-  const accentColor = selectedTheme.accentColor;
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const accentColor = selectedTheme?.accentColor || '#000000';
   const textOnAccent = getReadableTextColor(accentColor);
 
   useEffect(() => {
@@ -74,7 +87,7 @@ const FriendsPage: React.FC = () => {
   // Show loading while authentication is being checked
   if (isChecking) {
     return (
-      <div className="min-h-[calc(100vh-64px)] bg-background">
+      <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)' }}>
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-4xl mx-auto space-y-8">
             {/* Header Skeleton */}
@@ -84,7 +97,12 @@ const FriendsPage: React.FC = () => {
             </div>
 
             {/* Navigation Pills Skeleton */}
-            <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+            <div 
+              className="flex space-x-1 p-1 rounded-lg w-fit"
+              style={selectedTheme ? {
+                backgroundColor: selectedTheme.hoverBackground || selectedTheme.borderColorMuted,
+              } : undefined}
+            >
               <Skeleton className="h-8 w-20" />
               <Skeleton className="h-8 w-16" />
             </div>
@@ -100,7 +118,12 @@ const FriendsPage: React.FC = () => {
               </div>
 
               {/* Sub-navigation Skeleton */}
-              <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-full">
+              <div 
+                className="flex space-x-1 p-1 rounded-lg w-full"
+                style={selectedTheme ? {
+                  backgroundColor: selectedTheme.hoverBackground || selectedTheme.borderColorMuted,
+                } : undefined}
+              >
                 <Skeleton className="h-8 flex-1" />
                 <Skeleton className="h-8 flex-1" />
                 <Skeleton className="h-8 flex-1" />
@@ -109,7 +132,14 @@ const FriendsPage: React.FC = () => {
               {/* User Cards Skeleton */}
               <div className="space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div 
+                    key={i} 
+                    className="rounded-lg p-6 border"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                      borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                    } : undefined}
+                  >
                     <div className="flex items-center gap-4">
                       <Skeleton className="h-12 w-12 rounded-full" />
                       <div className="flex-1 space-y-2">
@@ -191,9 +221,9 @@ const FriendsPage: React.FC = () => {
     }
   };
 
-  const follow = async (userId: string) => {
+  const handleFollow = async (userId: string) => {
     try {
-      await socialApi.followUser(userId, currentUser.id);
+      await followMutation.mutateAsync(userId);
       // Update the user's following status in all lists
       setUsers(prev => prev.map(user => 
         user.id === userId ? { ...user, is_following: true } : user
@@ -207,6 +237,10 @@ const FriendsPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to follow user:', error);
     }
+  };
+
+  const follow = async (userId: string) => {
+    await handleFollow(userId);
   };
 
   const unfollow = async (userId: string) => {
@@ -231,26 +265,62 @@ const FriendsPage: React.FC = () => {
 
 
   const renderUserCard = (user: User) => (
-    <Card key={user.id} className="bg-white rounded-md border-2 border-black shadow-[3px_3px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0_0_#000] transition-all" onClick={() => navigate(`/profile/${user.id}`)}>
+    <Card 
+      key={user.id} 
+      className="rounded-md border-2 shadow-[3px_3px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0_0_#000] transition-all cursor-pointer" 
+      style={selectedTheme ? {
+        backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+        borderColor: selectedTheme.borderColor || '#000000',
+        boxShadow: `3px 3px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+      } : undefined}
+      onClick={() => navigate(`/profile/${user.id}`)}
+    >
       <CardContent className="p-4 md:p-6">
         <div className="flex items-start gap-3 md:gap-4">
-          <Avatar className="h-10 w-10 md:h-12 md:w-12 bg-gray-200 flex-shrink-0">
+          <Avatar 
+            className="h-10 w-10 md:h-12 md:w-12 flex-shrink-0"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.borderColorMuted || selectedTheme.hoverBackground || '#E5E7EB',
+            } : undefined}
+          >
             <AvatarImage src={user.profile_picture_url} alt={user.display_name} />
-            <AvatarFallback className="bg-gray-200 text-gray-600 font-medium text-xs md:text-sm">
+            <AvatarFallback 
+              className="font-medium text-xs md:text-sm"
+              style={selectedTheme ? {
+                backgroundColor: selectedTheme.borderColorMuted || selectedTheme.hoverBackground || '#E5E7EB',
+                color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+              } : undefined}
+            >
               {getInitials(user.display_name)}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-1">
-              <h3 className="font-semibold text-sm md:text-base text-gray-900 truncate">{user.display_name}</h3>
+              <h3 
+                className="font-semibold text-sm md:text-base truncate"
+                style={{ color: selectedTheme?.textPrimary || '#111827' }}
+              >
+                {user.display_name}
+              </h3>
               {user.is_following && (
-                <span className="text-xs md:text-sm text-gray-600">Following</span>
+                <span 
+                  className="text-xs md:text-sm"
+                  style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                >
+                  Following
+                </span>
               )}
             </div>
-            <p className="text-xs md:text-sm text-gray-500 truncate mb-1 md:mb-2">
+            <p 
+              className="text-xs md:text-sm truncate mb-1 md:mb-2"
+              style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+            >
               {user.email}
             </p>
-            <div className="flex items-center gap-3 md:gap-4 text-[10px] md:text-xs text-gray-500">
+            <div 
+              className="flex items-center gap-3 md:gap-4 text-[10px] md:text-xs"
+              style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+            >
               <span>{user.followers_count || 0} followers</span>
               <span>{user.following_count || 0} following</span>
             </div>
@@ -258,8 +328,19 @@ const FriendsPage: React.FC = () => {
           <Button
             variant={user.is_following ? 'outline' : 'default'}
             size="sm"
-            className={`rounded-md border border-black shadow-[1px_1px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex-shrink-0 text-xs md:text-sm h-8 md:h-9 px-2 md:px-3`}
-            style={user.is_following ? {} : { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent }}
+            className={`rounded-md border shadow-[1px_1px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none flex-shrink-0 text-xs md:text-sm h-8 md:h-9 px-2 md:px-3`}
+            style={user.is_following 
+              ? selectedTheme ? {
+                  borderColor: selectedTheme.borderColor || '#000000',
+                  color: selectedTheme.textPrimary || '#000000',
+                  backgroundColor: 'transparent',
+                } : {}
+              : { 
+                  backgroundColor: accentColor, 
+                  borderColor: selectedTheme?.borderColor || '#000000', 
+                  color: textOnAccent 
+                }
+            }
             onClick={(e) => {
               e.stopPropagation(); // Prevent card click when clicking button
               user.is_following ? unfollow(user.id) : follow(user.id);
@@ -284,7 +365,7 @@ const FriendsPage: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
+      <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)', color: selectedTheme?.textPrimary || 'var(--app-text)' }}>
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-4xl mx-auto space-y-8">
             {/* Header Skeleton */}
@@ -294,7 +375,12 @@ const FriendsPage: React.FC = () => {
             </div>
 
             {/* Navigation Pills Skeleton */}
-            <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+            <div 
+              className="flex space-x-1 p-1 rounded-lg w-fit"
+              style={selectedTheme ? {
+                backgroundColor: selectedTheme.hoverBackground || selectedTheme.borderColorMuted,
+              } : undefined}
+            >
               <Skeleton className="h-8 w-20" />
               <Skeleton className="h-8 w-16" />
             </div>
@@ -310,7 +396,12 @@ const FriendsPage: React.FC = () => {
               </div>
 
               {/* Sub-navigation Skeleton */}
-              <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-full">
+              <div 
+                className="flex space-x-1 p-1 rounded-lg w-full"
+                style={selectedTheme ? {
+                  backgroundColor: selectedTheme.hoverBackground || selectedTheme.borderColorMuted,
+                } : undefined}
+              >
                 <Skeleton className="h-8 flex-1" />
                 <Skeleton className="h-8 flex-1" />
                 <Skeleton className="h-8 flex-1" />
@@ -319,7 +410,14 @@ const FriendsPage: React.FC = () => {
               {/* User Cards Skeleton */}
               <div className="space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div 
+                    key={i} 
+                    className="rounded-lg p-6 border"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                      borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                    } : undefined}
+                  >
                     <div className="flex items-center gap-4">
                       <Skeleton className="h-12 w-12 rounded-full" />
                       <div className="flex-1 space-y-2">
@@ -343,14 +441,24 @@ const FriendsPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: 'var(--app-bg)', color: 'var(--app-text)' }}>
+    <div className="min-h-[calc(100vh-64px)]" style={{ backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)', color: selectedTheme?.textPrimary || 'var(--app-text)' }}>
       {/* Content Section */}
       <div className="container mx-auto px-4 py-4 md:py-8">
         <div className="max-w-4xl mx-auto space-y-4 md:space-y-8">
           {/* Header Section */}
           <div className="space-y-1 md:space-y-2">
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Friends</h1>
-            <p className="text-sm md:text-base text-gray-600">Search for people to follow, view followers, or manage your Lenses.</p>
+            <h1 
+              className="text-2xl md:text-3xl font-bold"
+              style={{ color: selectedTheme?.textPrimary || '#111827' }}
+            >
+              Friends
+            </h1>
+            <p 
+              className="text-sm md:text-base"
+              style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+            >
+              Search for people to follow, view followers, or manage your Lenses.
+            </p>
           </div>
 
           {/* Main Navigation Pills */}
@@ -359,8 +467,21 @@ const FriendsPage: React.FC = () => {
               variant={activeTab === 'friends' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setActiveTab('friends')}
-              className={`flex items-center gap-1.5 md:gap-2 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap`}
-              style={activeTab === 'friends' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
+              className={`flex items-center gap-1.5 md:gap-2 rounded-md border shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap`}
+              style={activeTab === 'friends' 
+                ? { 
+                    backgroundColor: accentColor, 
+                    borderColor: selectedTheme?.borderColor || '#000000', 
+                    color: textOnAccent,
+                    boxShadow: `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                  } 
+                : selectedTheme ? {
+                    borderColor: selectedTheme.borderColor || '#000000',
+                    color: selectedTheme.textPrimary || '#000000',
+                    backgroundColor: 'transparent',
+                    boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                  } : {}
+              }
             >
               <Users className="h-3.5 w-3.5 md:h-4 md:w-4" />
               <span>Friends</span>
@@ -369,8 +490,21 @@ const FriendsPage: React.FC = () => {
               variant={activeTab === 'groups' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setActiveTab('groups')}
-              className={`flex items-center gap-1.5 md:gap-2 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap`}
-              style={activeTab === 'groups' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
+              className={`flex items-center gap-1.5 md:gap-2 rounded-md border shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap`}
+              style={activeTab === 'groups' 
+                ? { 
+                    backgroundColor: accentColor, 
+                    borderColor: selectedTheme?.borderColor || '#000000', 
+                    color: textOnAccent,
+                    boxShadow: `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                  } 
+                : selectedTheme ? {
+                    borderColor: selectedTheme.borderColor || '#000000',
+                    color: selectedTheme.textPrimary || '#000000',
+                    backgroundColor: 'transparent',
+                    boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                  } : {}
+              }
             >
               <UserPlus className="h-3.5 w-3.5 md:h-4 md:w-4" />
               <span>Lenses</span>
@@ -383,18 +517,29 @@ const FriendsPage: React.FC = () => {
               {/* Search bar with counts */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 md:gap-4">
                 <div className="relative flex-1 w-full">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Search 
+                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4" 
+                    style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF' }}
+                  />
                   <Input
                     type="text"
                     placeholder="Search by name or email"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 w-full rounded-md border border-black/30 shadow-sm focus:shadow-md transition-shadow h-9 md:h-10"
+                    className="pl-10 w-full rounded-md border shadow-sm focus:shadow-md transition-shadow h-9 md:h-10"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground,
+                      borderColor: selectedTheme.inputBorder || selectedTheme.borderColor,
+                      color: selectedTheme.inputText || selectedTheme.textPrimary,
+                    } : undefined}
                   />
                 </div>
                 
                 {/* Counts next to search bar */}
-                <div className="flex space-x-3 md:space-x-4 text-xs md:text-sm text-gray-600 whitespace-nowrap">
+                <div 
+                  className="flex space-x-3 md:space-x-4 text-xs md:text-sm whitespace-nowrap"
+                  style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                >
                   <span>Following {following.length}</span>
                   <span>Followers {followers.length}</span>
                 </div>
@@ -406,8 +551,21 @@ const FriendsPage: React.FC = () => {
                   variant={activeFriendsTab === 'following' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setActiveFriendsTab('following')}
-                  className={`flex-1 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
-                  style={activeFriendsTab === 'following' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
+              className={`flex-1 rounded-md border shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
+              style={activeFriendsTab === 'following' 
+                ? { 
+                    backgroundColor: accentColor, 
+                    borderColor: selectedTheme?.borderColor || '#000000', 
+                    color: textOnAccent,
+                    boxShadow: `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                  } 
+                : selectedTheme ? {
+                    borderColor: selectedTheme.borderColor || '#000000',
+                    color: selectedTheme.textPrimary || '#000000',
+                    backgroundColor: 'transparent',
+                    boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                  } : {}
+              }
                 >
                   Following
                 </Button>
@@ -415,8 +573,21 @@ const FriendsPage: React.FC = () => {
                   variant={activeFriendsTab === 'followers' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setActiveFriendsTab('followers')}
-                  className={`flex-1 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
-                  style={activeFriendsTab === 'followers' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
+              className={`flex-1 rounded-md border shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
+              style={activeFriendsTab === 'followers' 
+                ? { 
+                    backgroundColor: accentColor, 
+                    borderColor: selectedTheme?.borderColor || '#000000', 
+                    color: textOnAccent,
+                    boxShadow: `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                  } 
+                : selectedTheme ? {
+                    borderColor: selectedTheme.borderColor || '#000000',
+                    color: selectedTheme.textPrimary || '#000000',
+                    backgroundColor: 'transparent',
+                    boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                  } : {}
+              }
                 >
                   Followers
                 </Button>
@@ -424,8 +595,21 @@ const FriendsPage: React.FC = () => {
                   variant={activeFriendsTab === 'search' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setActiveFriendsTab('search')}
-                  className={`flex-1 rounded-md border border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
-                  style={activeFriendsTab === 'search' ? { backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent } : {}}
+              className={`flex-1 rounded-md border shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm`}
+              style={activeFriendsTab === 'search' 
+                ? { 
+                    backgroundColor: accentColor, 
+                    borderColor: selectedTheme?.borderColor || '#000000', 
+                    color: textOnAccent,
+                    boxShadow: `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                  } 
+                : selectedTheme ? {
+                    borderColor: selectedTheme.borderColor || '#000000',
+                    color: selectedTheme.textPrimary || '#000000',
+                    backgroundColor: 'transparent',
+                    boxShadow: `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                  } : {}
+              }
                 >
                   Search
                 </Button>
@@ -437,7 +621,14 @@ const FriendsPage: React.FC = () => {
                   {followingLoading ? (
                     <div className="space-y-3">
                       {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="bg-white border border-gray-200 rounded-lg p-6">
+                        <div 
+                          key={i} 
+                          className="rounded-lg p-6 border"
+                          style={selectedTheme ? {
+                            backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                            borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                          } : undefined}
+                        >
                           <div className="flex items-center gap-4">
                             <Skeleton className="h-12 w-12 rounded-full" />
                             <div className="flex-1 space-y-2">
@@ -455,9 +646,20 @@ const FriendsPage: React.FC = () => {
                     </div>
                   ) : following.length === 0 ? (
                     <div className="text-center py-12">
-                      <UserCheck className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold mb-2 text-gray-900">Not Following Anyone</h3>
-                      <p className="text-gray-600 max-w-sm mx-auto">
+                      <UserCheck 
+                        className="h-12 w-12 mx-auto mb-4" 
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF' }}
+                      />
+                      <h3 
+                        className="text-lg font-semibold mb-2"
+                        style={{ color: selectedTheme?.textPrimary || '#111827' }}
+                      >
+                        Not Following Anyone
+                      </h3>
+                      <p 
+                        className="max-w-sm mx-auto"
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                      >
                         Start following people to see their recommendations and discover new places.
                       </p>
                     </div>
@@ -474,7 +676,14 @@ const FriendsPage: React.FC = () => {
                   {followersLoading ? (
                     <div className="space-y-3">
                       {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="bg-white border border-gray-200 rounded-lg p-6">
+                        <div 
+                          key={i} 
+                          className="rounded-lg p-6 border"
+                          style={selectedTheme ? {
+                            backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                            borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                          } : undefined}
+                        >
                           <div className="flex items-center gap-4">
                             <Skeleton className="h-12 w-12 rounded-full" />
                             <div className="flex-1 space-y-2">
@@ -492,9 +701,20 @@ const FriendsPage: React.FC = () => {
                     </div>
                   ) : followers.length === 0 ? (
                     <div className="text-center py-12">
-                      <Users2 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold mb-2 text-gray-900">No Followers Yet</h3>
-                      <p className="text-gray-600 max-w-sm mx-auto">
+                      <Users2 
+                        className="h-12 w-12 mx-auto mb-4" 
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF' }}
+                      />
+                      <h3 
+                        className="text-lg font-semibold mb-2"
+                        style={{ color: selectedTheme?.textPrimary || '#111827' }}
+                      >
+                        No Followers Yet
+                      </h3>
+                      <p 
+                        className="max-w-sm mx-auto"
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                      >
                         When people follow you, they'll appear here. Share your recommendations to get followers!
                       </p>
                     </div>
@@ -509,17 +729,54 @@ const FriendsPage: React.FC = () => {
               {activeFriendsTab === 'search' && (
                 <div className="space-y-4">
                   {!searchQuery.trim() ? (
-                    <div className="text-center py-12">
-                      <Search className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold mb-2 text-gray-900">Search for People</h3>
-                      <p className="text-gray-600 max-w-sm mx-auto">
-                        Use the search box above to find people by name or email address.
-                      </p>
+                    <div className="space-y-6">
+                      {/* Suggested Users Section */}
+                      {suggestedUsers.length > 0 && (
+                        <div>
+                          <SuggestedUsersCard 
+                            users={suggestedUsers}
+                            onFollow={(id) => handleFollow(id)}
+                            onViewAll={() => {
+                              // Could navigate to a discover page or just show all users
+                              setSearchQuery('');
+                            }}
+                          />
+                        </div>
+                      )}
+                      
+                      {/* Empty State - only show if no suggested users */}
+                      {suggestedUsers.length === 0 && (
+                        <div className="text-center py-12">
+                          <Search 
+                            className="h-12 w-12 mx-auto mb-4" 
+                            style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF' }}
+                          />
+                          <h3 
+                            className="text-lg font-semibold mb-2"
+                            style={{ color: selectedTheme?.textPrimary || '#111827' }}
+                          >
+                            Search for People
+                          </h3>
+                          <p 
+                            className="max-w-sm mx-auto"
+                            style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                          >
+                            Use the search box above to find people by name or email address.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : loading ? (
                     <div className="space-y-3">
                       {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="bg-white border border-gray-200 rounded-lg p-6">
+                        <div 
+                          key={i} 
+                          className="rounded-lg p-6 border"
+                          style={selectedTheme ? {
+                            backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                            borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+                          } : undefined}
+                        >
                           <div className="flex items-center gap-4">
                             <Skeleton className="h-12 w-12 rounded-full" />
                             <div className="flex-1 space-y-2">
@@ -537,9 +794,17 @@ const FriendsPage: React.FC = () => {
                     </div>
                   ) : users.length === 0 ? (
                     <div className="text-center py-12">
-                      <Search className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold mb-2 text-gray-900">No Results Found</h3>
-                      <p className="text-gray-600">
+                      <Search 
+                        className="h-12 w-12 mx-auto mb-4" 
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF' }}
+                      />
+                      <h3 
+                        className="text-lg font-semibold mb-2"
+                        style={{ color: selectedTheme?.textPrimary || '#111827' }}
+                      >
+                        No Results Found
+                      </h3>
+                      <p style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}>
                         No users found matching "{searchQuery}". Try a different search term.
                       </p>
                     </div>
@@ -558,18 +823,29 @@ const FriendsPage: React.FC = () => {
             <div className="space-y-4 md:space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 md:gap-4">
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-xl md:text-2xl font-semibold flex items-center gap-1.5 md:gap-2">
-                    <Filter className="h-5 w-5 md:h-6 md:w-6" />
+                  <h2 
+                    className="text-xl md:text-2xl font-semibold flex items-center gap-1.5 md:gap-2"
+                    style={{ color: selectedTheme?.textPrimary || '#111827' }}
+                  >
+                    <Filter className="h-5 w-5 md:h-6 md:w-6" style={{ color: 'inherit' }} />
                     Your Lenses
                   </h2>
-                  <p className="text-sm md:text-base text-gray-600 mt-1">
+                  <p 
+                    className="text-sm md:text-base mt-1"
+                    style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                  >
                     Create and manage personal Lenses (lists of people) to filter your feed
                   </p>
                 </div>
                 <Button
                   onClick={() => setShowGroupCreator(true)}
-                  className="rounded-md border-2 border-black shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap flex-shrink-0 w-full sm:w-auto"
-                  style={{ backgroundColor: 'var(--app-accent)', borderColor: '#000', color: textOnAccent }}
+                  className="rounded-md border-2 shadow-[2px_2px_0_0_#000] transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none text-xs md:text-sm whitespace-nowrap flex-shrink-0 w-full sm:w-auto"
+                  style={{ 
+                    backgroundColor: accentColor, 
+                    borderColor: selectedTheme?.borderColor || '#000000', 
+                    color: textOnAccent,
+                    boxShadow: `2px 2px 0 0 ${selectedTheme?.borderColor || '#000000'}`,
+                  }}
                 >
                   <Plus className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5 md:mr-2" />
                   Create Lens

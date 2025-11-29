@@ -78,6 +78,8 @@ export interface SearchRecommendation {
   recommendation_id: number;
   content_type: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
   user_name: string;
+  user_id?: string;
+  personal_overlap_percent?: number; // Trust % (0-100)
   title?: string;
   description?: string; // backend uses description
   notes?: string; // legacy compatibility
@@ -87,7 +89,7 @@ export interface SearchRecommendation {
   went_with?: string[];
   content_data?: Record<string, any>;
   metadata?: Record<string, any>;
-  similarity: number;
+  similarity?: number;
   created_at: string;
 }
 
@@ -105,6 +107,7 @@ export type SearchResult =
       place_lat?: number;
       place_lng?: number;
       google_place_id?: string;
+      distance_label?: string | null;
       recommendations: SearchRecommendation[];
       average_similarity: number;
       total_recommendations: number;
@@ -116,6 +119,7 @@ export type SearchResult =
       service_type?: string | null;
       service_business_name?: string | null;
       service_address?: string | null;
+      distance_label?: string | null;
       recommendations: SearchRecommendation[];
       average_similarity: number;
       total_recommendations: number;
@@ -126,12 +130,18 @@ export interface SearchResponse {
   summary: string;
   results: SearchResult[];
   qna?: SearchQnA;
-  total_places: number;
-  total_recommendations: number;
+  total_places?: number;
+  total_recommendations?: number;
+  follow_up_prompts?: string[];
+  cards_allowed?: boolean;
   search_metadata: {
-    threshold: number;
-    limit: number;
-    query_processed: boolean;
+    threshold?: number;
+    limit?: number;
+    query_processed?: boolean;
+    skip_llm?: boolean;
+    top_confidence?: number;
+    used_current_location?: boolean;
+    filters_applied?: string[];
   };
 }
 
@@ -307,8 +317,27 @@ export const recommendationsApi = {
 
   /**
    * Perform semantic search for places and recommendations
+   * 
+   * @param query - Search query text
+   * @param limit - Maximum results to return
+   * @param threshold - Similarity threshold
+   * @param groupIds - Optional group IDs to filter by
+   * @param content_type - Optional content type filter
+   * @param noSummary - Skip AI summary generation
+   * @param summaryMode - Summary generation mode
+   * @param userLocation - Optional user GPS coordinates for "near me" searches
    */
-  async semanticSearch(query: string, limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, groupIds?: number[], content_type?: string, noSummary?: boolean, summaryMode: 'fast' | 'detailed' = 'fast'): Promise<SearchResponse> {
+  async semanticSearch(
+    query: string, 
+    limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, 
+    threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, 
+    groupIds?: number[], 
+    content_type?: string, 
+    noSummary?: boolean, 
+    summaryMode: 'fast' | 'detailed' = 'fast',
+    userLocation?: { lat: number; lng: number } | null,
+    signal?: AbortSignal
+  ): Promise<SearchResponse> {
     const requestBody: any = {
       query: query.trim(),
       limit,
@@ -330,12 +359,162 @@ export const recommendationsApi = {
     if (!noSummary) {
       requestBody.summaryMode = summaryMode;
     }
-    const response = await apiClient.post<SearchResponse>('/recommendations/search', requestBody);
+    
+    // Include GPS coordinates if provided (for "near me" searches)
+    // Frontend should get these from browser geolocation API when user searches "near me"
+    if (userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number') {
+      requestBody.user_lat = userLocation.lat;
+      requestBody.user_lng = userLocation.lng;
+    }
+    
+    const response = await apiClient.post<SearchResponse>('/recommendations/search', requestBody, signal);
+    
+    // Check if request was cancelled
+    if (signal?.aborted) {
+      throw new Error('Request cancelled');
+    }
     
     if (!response.success || !response.data) {
       throw new Error(response.error || 'Search failed');
     }
     
     return response.data;
+  },
+
+  /**
+   * Perform streaming semantic search for places and recommendations
+   * Streams AI summary text as it's generated, similar to ChatGPT
+   * 
+   * @param query - Search query text
+   * @param callbacks - Callbacks for handling streaming events
+   * @param limit - Maximum results to return
+   * @param threshold - Similarity threshold
+   * @param groupIds - Optional group IDs to filter by
+   * @param content_type - Optional content type filter
+   * @param noSummary - Skip AI summary generation
+   * @param summaryMode - Summary generation mode
+   * @param userLocation - Optional user GPS coordinates for "near me" searches
+   * @param signal - Optional AbortSignal for cancellation
+   */
+  async semanticSearchStream(
+    query: string,
+    callbacks: {
+      onChunk: (chunk: string) => void;
+      onComplete: (response: SearchResponse) => void;
+      onError: (error: Error) => void;
+    },
+    limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT,
+    threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD,
+    groupIds?: number[],
+    content_type?: string,
+    noSummary?: boolean,
+    summaryMode: 'fast' | 'detailed' = 'fast',
+    userLocation?: { lat: number; lng: number } | null,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const requestBody: any = {
+      query: query.trim(),
+      limit,
+      threshold,
+    };
+    
+    if (groupIds && groupIds.length > 0) {
+      requestBody.groupIds = groupIds;
+    }
+    
+    if (content_type) {
+      requestBody.content_type = content_type;
+    }
+    
+    if (noSummary) {
+      requestBody.noSummary = true;
+    }
+    
+    if (!noSummary) {
+      requestBody.summaryMode = summaryMode;
+    }
+    
+    if (userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number') {
+      requestBody.user_lat = userLocation.lat;
+      requestBody.user_lng = userLocation.lng;
+    }
+
+    let initialResponse: SearchResponse | null = null;
+    let accumulatedText = '';
+    let hasReceivedInit = false;
+
+    await apiClient.streamPost<SearchResponse>(
+      '/recommendations/search',
+      requestBody,
+      {
+        onMessage: (message) => {
+          if (message.type === 'init') {
+            // Initial response with results but empty summary
+            // Update searchResponse immediately so cards appear right away
+            initialResponse = message.data as SearchResponse;
+            hasReceivedInit = true;
+            console.log(`🚀 [STREAM] Init message received: query="${initialResponse.query}", results count=${initialResponse.results?.length || 0}`);
+            // Call onComplete with initial data so UI can show results immediately
+            // The summary will continue streaming via chunks
+            callbacks.onComplete({
+              ...initialResponse,
+              summary: '', // Summary will be empty initially, will stream in
+            });
+          } else if (message.type === 'chunk') {
+            // Accumulate text chunks and stream them character-by-character
+            accumulatedText += message.data;
+            console.log(`🔄 [STREAM] Service processing chunk: "${message.data}" (accumulated length: ${accumulatedText.length})`);
+            callbacks.onChunk(message.data);
+          } else if (message.type === 'done') {
+            // Final message with complete summary and metadata
+            console.log(`✅ [STREAM] Done message received: summary length=${(message.data.summary || accumulatedText).length}, accumulated length=${accumulatedText.length}`);
+            if (initialResponse) {
+              const finalResponse: SearchResponse = {
+                ...initialResponse,
+                summary: message.data.summary || accumulatedText,
+                follow_up_prompts: message.data.follow_up_prompts || [],
+                cards_allowed: message.data.cards_allowed !== false,
+              };
+              callbacks.onComplete(finalResponse);
+            } else {
+              // Fallback if init was missed
+              callbacks.onComplete({
+                query: query.trim(),
+                summary: message.data.summary || accumulatedText,
+                results: [],
+                follow_up_prompts: message.data.follow_up_prompts || [],
+                cards_allowed: message.data.cards_allowed !== false,
+                search_metadata: {
+                  structured_search_used: false,
+                  top_confidence: null,
+                  used_current_location: false,
+                  filters_applied: [],
+                },
+              });
+            }
+          } else if (message.type === 'error') {
+            // Error occurred during streaming
+            if (initialResponse) {
+              const errorResponse: SearchResponse = {
+                ...initialResponse,
+                summary: message.data.summary || accumulatedText,
+                follow_up_prompts: message.data.follow_up_prompts || [],
+                cards_allowed: message.data.cards_allowed !== false,
+              };
+              callbacks.onComplete(errorResponse);
+            } else {
+              callbacks.onError(new Error('Streaming error occurred'));
+            }
+          }
+        },
+        onError: (error) => {
+          callbacks.onError(error);
+        },
+        onComplete: () => {
+          // Stream completed
+        },
+      },
+      signal
+    );
   },
 }; 

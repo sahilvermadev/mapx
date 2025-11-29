@@ -2,8 +2,6 @@ import {
   generateEmbedding, 
   generateAnnotationEmbedding, 
   generateSearchEmbedding,
-  generatePlaceEmbedding,
-  generateBatchEmbeddings,
   calculateCosineSimilarity,
   validateEmbedding
 } from './embeddings';
@@ -59,32 +57,7 @@ async function exampleUsage() {
     const searchEmbedding = await generateSearchEmbedding(searchQuery);
     console.log('Search embedding generated:', searchEmbedding.length, 'dimensions');
 
-    // Example 4: Generate place embedding
-    const placeData = {
-      name: 'Starbucks Reserve',
-      address: '123 Main St, Downtown',
-      metadata: {
-        type: 'coffee_shop',
-        features: ['wifi', 'outdoor_seating', 'reserve_coffee'],
-        price_range: '$$'
-      }
-    };
-
-    const placeEmbedding = await generatePlaceEmbedding(placeData);
-    console.log('Place embedding generated:', placeEmbedding.length, 'dimensions');
-
-    // Example 5: Batch embeddings
-    const texts = [
-      "Great coffee and atmosphere",
-      "Perfect for working remotely",
-      "Friendly staff and fast service",
-      "Comfortable seating and good WiFi"
-    ];
-
-    const batchEmbeddings = await generateBatchEmbeddings(texts);
-    console.log('Batch embeddings generated:', batchEmbeddings.length, 'embeddings');
-
-    // Example 6: Calculate similarity
+    // Example 4: Calculate similarity
     const similarity = calculateCosineSimilarity(simpleEmbedding, searchEmbedding);
     console.log('Similarity between simple text and search query:', similarity.toFixed(4));
 

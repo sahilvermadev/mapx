@@ -4,6 +4,9 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import TypingText from '@/components/ui/shadcn-io/typing-text';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
+import { getReadableTextColor } from '@/utils/color';
 
 interface WritingStepProps {
   error: string | null;
@@ -26,6 +29,13 @@ export const WritingStep: React.FC<WritingStepProps> = ({
   onTextSelection,
   mentionMenu
 }) => {
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const accentColor = selectedTheme?.accentColor || '#FCD34D';
+  const textOnAccent = getReadableTextColor(accentColor);
+  
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -34,7 +44,10 @@ export const WritingStep: React.FC<WritingStepProps> = ({
       className="text-left space-y-4 md:space-y-8 py-4 md:py-8"
     >
       <div className="max-w-3xl mx-auto space-y-4 md:space-y-8">
-        <h1 className="text-2xl md:text-4xl lg:text-5xl font-light tracking-tight text-foreground leading-tight">
+        <h1 
+          className="text-2xl md:text-4xl lg:text-5xl font-light tracking-tight leading-tight"
+          style={{ color: selectedTheme?.textPrimary || 'inherit' }}
+        >
           What are you recommending?
         </h1>
 
@@ -54,7 +67,14 @@ export const WritingStep: React.FC<WritingStepProps> = ({
           </div>
         )}
 
-        <div className="relative rounded-md border-2 border-black bg-white p-3 md:p-4 shadow-[3px_3px_0_0_#000] md:shadow-[4px_4px_0_0_#000]">
+        <div 
+          className="relative rounded-md border-2 p-3 md:p-4"
+          style={selectedTheme ? {
+            backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || '#FFFFFF',
+            borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
+            boxShadow: `3px 3px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+          } : undefined}
+        >
           <Textarea
             ref={textareaRef}
             value={text}
@@ -64,8 +84,11 @@ export const WritingStep: React.FC<WritingStepProps> = ({
               onTextSelection(newPos);
             }}
             placeholder=""
-            className="min-h-[150px] md:min-h-[200px] text-lg md:text-xl lg:text-2xl resize-none border-0 rounded-none bg-transparent px-0 text-foreground placeholder:text-muted-foreground text-left shadow-none focus:shadow-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 appearance-none relative z-10"
-            style={{ caretColor: text ? 'auto' : 'transparent' }}
+            className="min-h-[150px] md:min-h-[200px] text-lg md:text-xl lg:text-2xl resize-none border-0 rounded-none bg-transparent px-0 text-left shadow-none focus:shadow-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 appearance-none relative z-10"
+            style={{ 
+              caretColor: text ? 'auto' : 'transparent',
+              color: selectedTheme?.inputText || selectedTheme?.textPrimary || 'inherit',
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 if (e.metaKey || e.ctrlKey) {
@@ -96,7 +119,8 @@ export const WritingStep: React.FC<WritingStepProps> = ({
                 cursorCharacter="|"
                 cursorBlinkDuration={0.5}
                 variableSpeed={{ min: 50, max: 120 }}
-                className="text-lg md:text-xl lg:text-2xl text-muted-foreground leading-relaxed"
+                className="text-lg md:text-xl lg:text-2xl leading-relaxed"
+                style={{ color: selectedTheme?.inputPlaceholder || selectedTheme?.textMuted || '#6B7280' }}
                 cursorClassName=""
               />
             </div>
@@ -109,7 +133,19 @@ export const WritingStep: React.FC<WritingStepProps> = ({
             onClick={onContinue}
             disabled={!text.trim()}
             aria-label="Continue"
-            className="h-10 w-10 md:h-11 md:w-11 p-0 rounded-md border-2 border-black bg-yellow-300 text-black shadow-[2px_2px_0_0_#000] md:shadow-[3px_3px_0_0_#000] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
+            className="h-10 w-10 md:h-11 md:w-11 p-0 rounded-md border-2 transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:shadow-none"
+            style={selectedTheme ? {
+              backgroundColor: !text.trim() 
+                ? (selectedTheme.borderColorMuted || selectedTheme.hoverBackground || '#E5E7EB')
+                : accentColor,
+              borderColor: selectedTheme.borderColor || '#000000',
+              color: !text.trim() 
+                ? (selectedTheme.textMuted || '#6B7280')
+                : textOnAccent,
+              boxShadow: !text.trim() 
+                ? 'none'
+                : `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+            } : undefined}
           >
             <ArrowRight className="h-4 w-4 md:h-5 md:w-5" />
           </Button>

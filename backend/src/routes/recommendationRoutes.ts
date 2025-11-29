@@ -9,35 +9,388 @@ import {
   getRecommendationWithSocialData,
   updateRecommendation, 
   deleteRecommendation, 
-  searchRecommendationsBySimilarity,
   regenerateAllRecommendationEmbeddings
 } from '../db/recommendations';
-import { generatePlaceEmbedding, generateSearchEmbedding } from '../utils/embeddings';
-import { generateAISummary, type SearchContext, type SummaryMode } from '../utils/aiSummaries';
+import { generateAISummary, generateAISummaryStream, type SearchContext } from '../utils/aiSummaries';
 import { embeddingQueue } from '../services/embeddingQueue';
 import { SEARCH_CONFIG } from '../config/searchConfig';
 import pool from '../db'; // Import pool directly from db.ts
-import type { RecommendationSearchResult } from '../db/recommendations';
 import { recommendationService } from '../services/recommendationService';
 import { getPlaceDetails, deriveAdmin, slugifyCity } from '../services/placesClient';
 import { handleError } from '../utils/errorHandling';
 import { extractMentionUserIds, savePostMentions } from '../db/mentions';
 import { getUserIdFromRequest } from '../middleware/auth';
+import Groq from 'groq-sdk';
+import type { ChatCompletionTool } from 'groq-sdk/resources/chat/completions';
+import { SEARCH_MY_NETWORK_TOOL, ASK_MY_NETWORK_TOOL, type AskMyNetworkArgs } from '../config/searchTools';
+import { executeStructuredSearch, type StructuredSearchArgs, type StructuredSearchResult } from '../services/structuredSearch';
 
 import { upsertService } from '../services/serviceDeduplication';
 import { extractServiceType } from '../utils/nameSimilarity';
+import { calculatePersonalOverlap } from '../utils/personalOverlap';
+import { getPersonalTasteDNA } from '../services/personalDNA';
+import { aiRateLimiter } from '../middleware/rateLimiter';
+import { LRUCache } from 'lru-cache';
+import { executeSearchOrchestration } from '../services/searchOrchestrator';
 
 const router = express.Router();
 
-// Lightweight in-memory caches (process-local)
-// Embedding cache: 60s TTL, keyed by trimmed query
-// Summary cache: 10m TTL, keyed by query + ordered result ids
+// LRU cache for AI summaries with TTL and size limits
+// Prevents memory leaks by automatically evicting old entries
 // @ts-ignore
 const _g: any = global as any;
-if (!_g._mxEmbeddingCache) _g._mxEmbeddingCache = new Map<string, { vec: number[]; ts: number }>();
-if (!_g._mxSummaryCache) _g._mxSummaryCache = new Map<string, { text: string; ts: number }>();
-const EMBED_TTL_MS = 60_000;
+if (!_g._mxSummaryCache) {
+  _g._mxSummaryCache = new LRUCache<string, { text: string; followUps: string[]; cardsAllowed: boolean; ts: number }>({
+    max: 500, // Maximum 500 cached summaries
+    ttl: 10 * 60 * 1000, // 10 minutes TTL
+    updateAgeOnGet: false, // Don't reset TTL on access
+    updateAgeOnHas: false, // Don't reset TTL on has() check
+  });
+}
+const summaryCache = _g._mxSummaryCache;
 const SUMMARY_TTL_MS = 10 * 60_000;
+
+export type FormattedStructuredResult = {
+  type: 'place' | 'service';
+  place_id?: number;
+  place_name?: string | null;
+  place_address?: string | null;
+  place_lat?: number | null;
+  place_lng?: number | null;
+  google_place_id?: string | null;
+  service_id?: number;
+  service_name?: string | null;
+  service_address?: string | null;
+  distance_label?: string | null;
+  recommendations: Array<{
+    recommendation_id: number;
+    content_type: 'place' | 'service' | 'unclear';
+    title?: string;
+    description: string;
+    content_data: Record<string, any>;
+    user_name: string;
+    user_id: string;
+    personal_overlap_percent: number;
+    rating?: number;
+    labels?: string[];
+    created_at: Date;
+    similarity?: number;
+  }>;
+  total_recommendations: number;
+  average_similarity: number | null;
+};
+
+export function formatStructuredResultsForResponse(
+  structured: StructuredSearchResult
+): FormattedStructuredResult[] {
+  const groups = new Map<string, FormattedStructuredResult>();
+
+  for (const rec of structured.recommendations) {
+    const isPlace = Boolean(rec.place_id);
+    const key = isPlace
+      ? `place:${rec.place_id}`
+      : rec.service_id
+        ? `service:${rec.service_id}`
+        : `service:unknown:${rec.recommendation_id}`;
+
+    const existing = groups.get(key);
+
+    const baseRecommendation = {
+        recommendation_id: rec.recommendation_id,
+        content_type: rec.content_type,
+        title: rec.title,
+        description: rec.description,
+        content_data: rec.content_data,
+        user_name: rec.user_name,
+        user_id: rec.user_id,
+        personal_overlap_percent: rec.personal_overlap_percent,
+        rating: rec.rating,
+        labels: rec.labels,
+        created_at: rec.created_at,
+        similarity: rec.similarity
+    };
+
+    if (existing) {
+      existing.recommendations.push(baseRecommendation);
+      existing.total_recommendations += 1;
+      const sim = rec.similarity ?? structured.top_confidence ?? existing.average_similarity ?? 0;
+      if (sim != null) {
+        existing.average_similarity =
+          ((existing.average_similarity || 0) * (existing.total_recommendations - 1) + sim) /
+          existing.total_recommendations;
+      }
+    } else {
+      const group: FormattedStructuredResult = {
+        type: isPlace ? 'place' : 'service',
+        ...(isPlace
+          ? {
+              place_id: rec.place_id,
+              place_name: rec.place_name,
+              place_address: rec.place_address,
+              place_lat: rec.place_lat,
+              place_lng: rec.place_lng,
+              google_place_id: rec.place_google_place_id || null
+            }
+          : {
+              service_id: rec.service_id,
+              service_name: rec.service_name,
+              service_address: rec.service_address
+            }),
+        recommendations: [baseRecommendation],
+    total_recommendations: 1,
+    average_similarity: rec.similarity ?? structured.top_confidence
+      };
+      groups.set(key, group);
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
+function computeDistanceLabelForResult(
+  userLat?: number | null,
+  userLng?: number | null,
+  targetLat?: number | null,
+  targetLng?: number | null
+): string | null {
+  if (
+    typeof userLat !== 'number' ||
+    typeof userLng !== 'number' ||
+    typeof targetLat !== 'number' ||
+    typeof targetLng !== 'number'
+  ) {
+    return null;
+  }
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const R = 6371; // km
+  const dLat = toRad(targetLat - userLat);
+  const dLng = toRad(targetLng - userLng);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(userLat)) *
+      Math.cos(toRad(targetLat)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const km = R * c;
+  if (!Number.isFinite(km)) return null;
+  if (km < 0.5) return 'within walking distance (~5–10 min)';
+  if (km < 2) return `${km.toFixed(1)} km away (short ride)`;
+  if (km < 8) return `${km.toFixed(1)} km away`;
+  if (km < 20) return `${km.toFixed(0)} km away (a bit farther)`;
+  return `${km.toFixed(0)} km away (other part of the city or nearby city)`;
+}
+
+export function addDistanceLabelsToResults(
+  results: FormattedStructuredResult[],
+  user_lat?: number | null,
+  user_lng?: number | null
+): FormattedStructuredResult[] {
+  return results.map(result => {
+    if (result.type === 'place') {
+      const label = computeDistanceLabelForResult(user_lat, user_lng, result.place_lat ?? null, result.place_lng ?? null);
+      return {
+        ...result,
+        distance_label: label ?? result.distance_label ?? null
+      };
+    }
+    return result;
+  });
+}
+
+export function convertStructuredResultsToSearchContext(
+  formatted: FormattedStructuredResult[],
+  query: string,
+  user_lat?: number | null,
+  user_lng?: number | null
+): SearchContext {
+  console.log('📍 [CONTEXT] Building search context for AI summary...', {
+    totalFormattedResults: formatted.length,
+    hasUserLocation: typeof user_lat === 'number' && typeof user_lng === 'number',
+    user_lat,
+    user_lng
+  });
+
+  const results: SearchContext['results'] = formatted.map((result) => {
+    const recommendations = result.recommendations.map((rec) => {
+      // Extract notes from description or content_data
+      const notes = rec.description || rec.content_data?.notes || rec.content_data?.quote || undefined;
+      
+      return {
+        user_name: rec.user_name,
+        notes,
+        rating: rec.rating,
+        labels: rec.labels || [],
+        went_with: rec.content_data?.went_with || [],
+        visit_date: rec.content_data?.visit_date || rec.created_at?.toISOString().split('T')[0]
+      };
+    });
+
+    if (result.type === 'place') {
+      console.log('📍 [CONTEXT] Converted place result:', {
+        place_id: result.place_id,
+        place_name: result.place_name,
+        hasCoords: typeof result.place_lat === 'number' && typeof result.place_lng === 'number',
+        place_lat: result.place_lat,
+        place_lng: result.place_lng
+      });
+      return {
+        type: 'place',
+        place_id: result.place_id ?? null,
+        place_name: result.place_name || '',
+        place_address: result.place_address || undefined,
+        place_lat: result.place_lat ?? undefined,
+        place_lng: result.place_lng ?? undefined,
+        place_primary_type: result.recommendations[0]?.content_data?.place_primary_type,
+        place_types: result.recommendations[0]?.content_data?.place_types || [],
+        total_recommendations: result.total_recommendations,
+        average_similarity: result.average_similarity ?? 0,
+        recommendations
+      };
+    } else {
+      console.log('📍 [CONTEXT] Converted service result:', {
+        service_id: result.service_id,
+        service_name: result.service_name,
+        // Services rarely have coordinates, but log if we ever capture them
+        hasCoords: Boolean((result as any).service_lat && (result as any).service_lng)
+      });
+      return {
+        type: 'service',
+        service_id: result.service_id ?? null,
+        service_name: result.service_name || '',
+        service_type: result.recommendations[0]?.content_data?.service_type || null,
+        service_business_name: result.recommendations[0]?.content_data?.business_name || null,
+        service_address: result.service_address || undefined,
+        total_recommendations: result.total_recommendations,
+        average_similarity: result.average_similarity ?? 0,
+        recommendations
+      };
+    }
+  });
+
+  const total_places = results.filter(r => r.type === 'place').length;
+  const total_recommendations = results.reduce((sum, r) => sum + r.total_recommendations, 0);
+
+  console.log('📍 [CONTEXT] Search context summary:', {
+    total_places,
+    total_results: results.length,
+    total_recommendations
+  });
+
+  return {
+    query,
+    results,
+    total_places,
+    total_recommendations,
+    user_lat: user_lat ?? null,
+    user_lng: user_lng ?? null
+  };
+}
+
+/**
+ * Helper to safely parse tool call arguments (handles both string and object formats)
+ */
+export function parseToolArguments(args: any): any {
+  if (typeof args === 'string') {
+    return JSON.parse(args);
+  }
+  if (typeof args === 'object' && args !== null) {
+    return args;
+  }
+  return JSON.parse(JSON.stringify(args));
+}
+
+export function normalizeStructuredSearchArgs(
+  rawArgs: any,
+  fallbackLat?: number,
+  fallbackLng?: number
+): StructuredSearchArgs {
+  if (!rawArgs || typeof rawArgs.intent !== 'string' || rawArgs.intent.trim().length === 0) {
+    throw new Error('intent is required');
+  }
+
+  // Normalize location: treat string "null"/"none"/"" as null
+  let normalizedLocation: string | null | undefined = rawArgs.location;
+  if (typeof normalizedLocation === 'string') {
+    const trimmed = normalizedLocation.trim().toLowerCase();
+    if (!trimmed || trimmed === 'null' || trimmed === 'none') {
+      normalizedLocation = null;
+    }
+  }
+
+  // Normalize user_lat/user_lng: handle string "null" that Groq sometimes sends
+  const normalizeCoord = (val: any): number | null => {
+    if (typeof val === 'number') return val;
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'string' && (val.trim().toLowerCase() === 'null' || val.trim() === '')) return null;
+    return null;
+  };
+
+  // Normalize content_type: only accept 'place', 'service', or null/undefined
+  let normalizedContentType: 'place' | 'service' | null | undefined = undefined;
+  if (rawArgs.content_type === 'place' || rawArgs.content_type === 'service') {
+    normalizedContentType = rawArgs.content_type;
+  } else if (rawArgs.content_type === null || rawArgs.content_type === undefined) {
+    normalizedContentType = null;
+  }
+
+  const normalized: StructuredSearchArgs = {
+    intent: rawArgs.intent.trim(),
+    location: normalizedLocation ?? undefined,
+    user_lat: normalizeCoord(rawArgs.user_lat),
+    user_lng: normalizeCoord(rawArgs.user_lng),
+    max_price_inr: typeof rawArgs.max_price_inr === 'number' ? rawArgs.max_price_inr : null,
+    min_rating: typeof rawArgs.min_rating === 'number' ? rawArgs.min_rating : null,
+    require_fresh: Boolean(rawArgs.require_fresh),
+    require_high_trust: Boolean(rawArgs.require_high_trust),
+    content_type: normalizedContentType,
+    limit: [1, 2, 3].includes(rawArgs.limit) ? rawArgs.limit : 2
+  };
+
+  if (
+    (normalized.location === null || normalized.location === undefined) &&
+    typeof fallbackLat === 'number' &&
+    typeof fallbackLng === 'number'
+  ) {
+    normalized.user_lat = fallbackLat;
+    normalized.user_lng = fallbackLng;
+  }
+
+  return normalized;
+}
+
+export function parseAskMyNetworkArgs(rawArgs: any): AskMyNetworkArgs {
+  if (!rawArgs || typeof rawArgs.intent !== 'string' || rawArgs.intent.trim().length === 0) {
+    throw new Error('intent is required for ask_my_network');
+  }
+  if (!rawArgs.reason || typeof rawArgs.reason !== 'string') {
+    throw new Error('reason is required for ask_my_network');
+  }
+
+  return {
+    intent: rawArgs.intent.trim(),
+    reason: rawArgs.reason.trim(),
+    urgency:
+      rawArgs.urgency && ['low', 'normal', 'high'].includes(rawArgs.urgency)
+        ? rawArgs.urgency
+        : 'normal',
+    preferred_circle:
+      typeof rawArgs.preferred_circle === 'string' ? rawArgs.preferred_circle : null
+  };
+}
+
+export async function enqueueAskNetworkRequest(userId: string, args: AskMyNetworkArgs) {
+  console.log('🆘 ask_my_network invoked', { userId, args });
+  return {
+    status: 'queued',
+    intent: args.intent,
+    reason: args.reason,
+    urgency: args.urgency,
+    preferred_circle: args.preferred_circle,
+    ticket_id: `ask_${Date.now()}`
+  };
+}
+
 
 // Helpers
 function normalizeContactInfo(raw: any, description?: string): { phone?: string; email?: string } {
@@ -947,11 +1300,18 @@ router.post('/regenerate-embeddings', async (req, res) => {
   }
 });
 
+// Initialize Groq client for function calling
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
+
 /**
  * POST /api/recommendations/search
- * Semantic search for places and recommendations using embeddings
+ * LLM-driven tool-calling search for places and recommendations
+ * Uses structured search with perfect filters via Groq function calling
+ * Rate limited to 10 requests per minute per user
  */
-router.post('/search', async (req, res) => {
+router.post('/search', aiRateLimiter, async (req, res) => {
   try {
     // Get current user ID for follow filtering
     const currentUserId = getUserIdFromRequest(req);
@@ -962,352 +1322,524 @@ router.post('/search', async (req, res) => {
       });
     }
 
-    const { query, limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, groupIds, content_type, noSummary } = req.body;
+    const { query, limit = SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, threshold = SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, groupIds, content_type, noSummary, user_lat, user_lng, stream } = req.body;
 
+    // Input validation: query
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Search query is required'
       });
     }
-
-    console.log('🔍 Semantic search query:', query);
-    console.log('🔍 Search parameters:', { limit, threshold, groupIds, content_type });
-
-    // Timings
-    const t0 = Date.now();
-
-    // Generate embedding for the search query
-    let searchEmbedding: number[];
-    try {
-      const qKey = query.trim();
-      const cached = (global as any)._mxEmbeddingCache.get(qKey) as { vec: number[]; ts: number } | undefined;
-      const now = Date.now();
-      if (cached && now - cached.ts < EMBED_TTL_MS) {
-        console.log('⚡ Using cached search embedding');
-        searchEmbedding = cached.vec;
-      } else {
-        console.log('🔍 Generating search embedding...');
-        searchEmbedding = await generateSearchEmbedding(qKey);
-        console.log('✅ Generated search embedding, length:', searchEmbedding.length);
-        (global as any)._mxEmbeddingCache.set(qKey, { vec: searchEmbedding, ts: now });
-        if ((global as any)._mxEmbeddingCache.size > 100) {
-          const firstKey = (global as any)._mxEmbeddingCache.keys().next().value;
-          (global as any)._mxEmbeddingCache.delete(firstKey);
-        }
+    
+    // Sanitize and validate query length (max 500 characters)
+    const MAX_QUERY_LENGTH = 500;
+    const sanitizedQuery = query.trim().slice(0, MAX_QUERY_LENGTH);
+    if (sanitizedQuery.length !== query.trim().length) {
+      console.warn(`⚠️ Query truncated from ${query.trim().length} to ${sanitizedQuery.length} characters`);
+    }
+    
+    // Validate GPS coordinates if provided
+    if (user_lat !== undefined && user_lat !== null) {
+      if (typeof user_lat !== 'number' || isNaN(user_lat) || user_lat < -90 || user_lat > 90) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid latitude. Must be a number between -90 and 90.'
+        });
       }
-    } catch (error) {
-      console.error('❌ Failed to generate search embedding:', error);
+    }
+    
+    if (user_lng !== undefined && user_lng !== null) {
+      if (typeof user_lng !== 'number' || isNaN(user_lng) || user_lng < -180 || user_lng > 180) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid longitude. Must be a number between -180 and 180.'
+        });
+      }
+    }
+    
+    // Both coordinates must be provided together if one is provided
+    if ((user_lat !== undefined && user_lat !== null) !== (user_lng !== undefined && user_lng !== null)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Both latitude and longitude must be provided together, or neither.'
+      });
+    }
+
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('🔍 SEARCH REQUEST RECEIVED');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('📝 Query:', sanitizedQuery);
+    console.log('📊 Parameters:', { 
+      limit, 
+      threshold, 
+      groupIds: groupIds?.length || 0, 
+      content_type, 
+      noSummary,
+      user_lat,
+      user_lng,
+      hasGPS: typeof user_lat === 'number' && typeof user_lng === 'number',
+      stream: stream === true
+    });
+    console.log('👤 User ID:', currentUserId);
+
+    // Set up Server-Sent Events if streaming is requested
+    const shouldStream = stream === true;
+    if (shouldStream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    }
+
+    try {
+      if (process.env.GROQ_API_KEY) {
+        console.log('───────────────────────────────────────────────────────────');
+        console.log('🤖 STEP 1: LLM-DRIVEN TOOL CALLING');
+        console.log('───────────────────────────────────────────────────────────');
+
+        // TODO: Personal DNA integration - currently using fallbacks
+        // Future implementation:
+        // 1. Store user preferences (price range, favorite cuisines, etc.) in database
+        // 2. Calculate trust scores between users based on recommendation overlap
+        // 3. Track user's "loves" and "hates" from their recommendation history
+        // 4. Use this data to:
+        //    - Pre-filter search results by price range
+        //    - Prioritize recommendations from high-trust reviewers
+        //    - Boost results matching user's preferences
+        //    - Filter out things the user dislikes
+        console.log('📊 [STEP 1.1] Loading personal DNA...');
+        const dnaStartTime = Date.now();
+        let personalDNA;
+        try {
+          personalDNA = await getPersonalTasteDNA(currentUserId);
+          const dnaLoadTime = Date.now() - dnaStartTime;
+          console.log('✅ [STEP 1.1] Personal DNA loaded:', {
+            loadTimeMs: dnaLoadTime,
+            priceRange: personalDNA.priceRange,
+            freshnessDays: personalDNA.freshnessDays,
+            topReviewersCount: personalDNA.topReviewers.length,
+            lovesCount: personalDNA.loves.length,
+            hatesCount: personalDNA.hates.length
+          });
+        } catch (dnaError) {
+          const dnaLoadTime = Date.now() - dnaStartTime;
+          console.warn('⚠️ [STEP 1.1] Personal DNA unavailable, using defaults:', {
+            loadTimeMs: dnaLoadTime,
+            error: dnaError instanceof Error ? dnaError.message : 'Unknown error'
+          });
+          personalDNA = {
+            priceRange: 'flexible',
+            freshnessDays: 90,
+            topReviewers: [],
+            loves: [],
+            hates: []
+          };
+        }
+
+        const locationHint =
+          typeof user_lat === 'number' && typeof user_lng === 'number'
+            ? `Current GPS: ${user_lat}, ${user_lng}`
+            : 'No GPS available';
+
+        console.log('📝 [STEP 1.2] Building system prompt...', {
+          hasLocation: typeof user_lat === 'number' && typeof user_lng === 'number',
+          hasTrustCircle: personalDNA.topReviewers.length > 0,
+          hasPreferences: personalDNA.loves.length > 0 || personalDNA.hates.length > 0
+        });
+
+        // Simplified system prompt - works without personal DNA data
+        const systemPrompt = `You are a recommendation assistant that helps users find places and services from their trusted network.
+
+Current context:
+- User location: ${locationHint}
+${personalDNA.topReviewers.length > 0 ? `- Trusted reviewers: ${personalDNA.topReviewers.map((r: any) => `${r.name} (${r.trust}%)`).join(', ')}` : ''}
+${personalDNA.loves.length > 0 ? `- User preferences: ${personalDNA.loves.join(', ')}` : ''}
+
+TOOL USAGE:
+- Use search_my_network to find relevant places/services
+- Use ask_my_network only when search_my_network returns zero results or very low confidence
+- CRITICAL: Use JSON null (not string "null") for optional fields like user_lat, user_lng, location, max_price_inr, min_rating, content_type
+
+CONTENT TYPE DETERMINATION:
+- Determine if the query is for a physical location (place) or a service provider (service)
+- Use content_type="place" for: restaurants, cafes, shops, venues, gyms, hotels, parks, beaches, tourist attractions, any physical location
+- Use content_type="service" for: professionals (plumbers, tutors, instructors, contractors, doctors, lawyers), service providers, people offering services
+- Use content_type=null when the query could be either type or is ambiguous (e.g., "massage" could be a spa place or a massage therapist service)
+
+EVALUATING SEARCH RESULTS:
+1. ALWAYS check the "results_summary" array - it shows what was actually found
+2. If results_summary contains places matching the query (e.g., query "jalebi" and summary shows "Kadimi Market" with "jalebi" in relevance_hint), those ARE valid results
+3. Confidence levels:
+   - HIGH (>= 0.8): Results are strong matches - ALWAYS show them
+   - MODERATE (0.6-0.8): Results are relevant - show them
+   - LOW (< 0.6): Results may be less relevant - use judgment
+
+FINAL RESPONSE (JSON only, no extra text):
+{
+  "decision": "show_results" | "no_results" | "ask_network_only",
+  "headline": "short summary",
+  "show_cards": boolean
+}
+
+DECISION RULES:
+- "show_results": Use when search_my_network found relevant results (even if you also ask the network)
+- "ask_network_only": Use ONLY when search_my_network returned zero results or confidence < 0.5
+- "no_results": Use when there are genuinely no matching results
+- "show_cards": true if results are relevant (confidence >= 0.6), false only if completely irrelevant
+
+CRITICAL: If top_confidence >= 0.8 and results_count > 0, you MUST set decision="show_results" and show_cards=true.`;
+
+        console.log('🤖 [STEP 1.3] Executing search orchestration...');
+        const orchestrationStartTime = Date.now();
+        
+        // Execute tool-calling loop via orchestrator
+        const orchestrationResult = await executeSearchOrchestration({
+          userId: currentUserId,
+          query: sanitizedQuery,
+          user_lat: user_lat ?? null,
+          user_lng: user_lng ?? null,
+          personalDNA,
+          groq,
+          systemPrompt,
+          maxTurns: 4
+        });
+        
+        const orchestrationTime = Date.now() - orchestrationStartTime;
+        console.log(`✅ [STEP 1.3] Search orchestration completed in ${orchestrationTime}ms`);
+        
+        const { finalMessage, structuredContext, askNetworkContext } = orchestrationResult;
+
+        // Process LLM's final decision
+        if (finalMessage) {
+          console.log('📋 [STEP 3] Processing LLM final decision...');
+          const finalContent = finalMessage.content?.trim() || '';
+          let finalDecision: any;
+
+          try {
+            finalDecision = finalContent ? JSON.parse(finalContent) : {};
+            console.log('   ✅ [STEP 3] Successfully parsed LLM JSON response');
+          } catch (parseError) {
+            console.warn('   ⚠️ [STEP 3] LLM returned freeform text instead of JSON:', {
+              contentPreview: finalContent.substring(0, 200),
+              parseError: parseError instanceof Error ? parseError.message : 'Unknown'
+            });
+            finalDecision = { decision: 'freeform', headline: finalContent };
+          }
+
+          // Single source of truth for results visibility
+          // Precedence order (highest to lowest):
+          // 1. No results found -> hide
+          // 2. LLM explicitly says "no_results" -> hide
+          // 3. LLM says "ask_network_only" with no results -> hide
+          // 4. AI summary says cards not allowed -> hide
+          // 5. LLM explicitly sets show_cards=false -> hide
+          // 6. Otherwise -> show
+          
+          const hasResults = (structuredContext?.formatted?.length ?? 0) > 0;
+          const topConfidence = structuredContext?.raw.top_confidence ?? 0;
+          const llmDecision = finalDecision.decision;
+          const llmShowCards = typeof finalDecision.show_cards === 'boolean' 
+            ? finalDecision.show_cards 
+            : llmDecision === 'show_results';
+          
+          console.log('   📊 [STEP 3] LLM raw decision:', {
+            decision: llmDecision,
+            show_cards: finalDecision.show_cards,
+            headline: finalDecision.headline?.substring(0, 100) || 'N/A',
+            hasResults,
+            topConfidence
+          });
+
+          // Generate AI summary if we have results
+          let summaryText = '';
+          let followUpPrompts: string[] = [];
+          let aiCardsAllowed = true; // Default to true, AI summary can override
+          
+          if (hasResults) {
+            const summaryStartTime = Date.now();
+            try {
+              console.log('   🔄 [STEP 4] Generating AI summary for structured search results...');
+              
+              const searchContext = convertStructuredResultsToSearchContext(
+                structuredContext!.formatted,
+                sanitizedQuery,
+                user_lat ?? null,
+                user_lng ?? null
+              );
+              
+              console.log('   📊 [STEP 4] Search context prepared:', {
+                resultsCount: searchContext.results.length,
+                totalPlaces: searchContext.total_places,
+                totalRecommendations: searchContext.total_recommendations,
+                hasUserLocation: Boolean(searchContext.user_lat && searchContext.user_lng)
+              });
+              
+              // Non-streaming mode: use existing logic
+              const summaryResult = await generateAISummary(searchContext, 'detailed');
+              const summaryTime = Date.now() - summaryStartTime;
+              
+              summaryText = summaryResult.text;
+              followUpPrompts = summaryResult.followUps;
+              aiCardsAllowed = summaryResult.cardsAllowed;
+              
+              console.log('   ✅ [STEP 4] AI summary generated:', {
+                generationTimeMs: summaryTime,
+                summaryLength: summaryText.length,
+                summaryPreview: summaryText.substring(0, 150) + '...',
+                followUpsCount: followUpPrompts.length,
+                followUps: followUpPrompts,
+                cardsAllowed: aiCardsAllowed
+              });
+            } catch (summaryError) {
+              const summaryTime = Date.now() - summaryStartTime;
+              console.error('   ❌ [STEP 4] Failed to generate AI summary:', {
+                errorTimeMs: summaryTime,
+                error: summaryError instanceof Error ? summaryError.message : 'Unknown error',
+                stack: summaryError instanceof Error ? summaryError.stack : undefined
+              });
+              summaryText = typeof finalDecision.headline === 'string' && finalDecision.headline.trim().length > 0
+                ? finalDecision.headline.trim()
+                : finalContent || 'Your friends are thinking...';
+              console.log('   ⚠️ [STEP 4] Using LLM headline as fallback:', {
+                headlineLength: summaryText.length,
+                headlinePreview: summaryText.substring(0, 100)
+              });
+            }
+    } else {
+            // Use LLM's headline when no results
+            summaryText = typeof finalDecision.headline === 'string' && finalDecision.headline.trim().length > 0
+              ? finalDecision.headline.trim()
+              : finalContent || 'Your friends are thinking...';
+            console.log('   ⏭️ [STEP 4] No results, using LLM headline:', {
+              headlineLength: summaryText.length,
+              headlinePreview: summaryText.substring(0, 100)
+            });
+          }
+
+          // Log card marker usage so we know if summary placed cards inline
+          const markerMatches = summaryText.match(/\[CARD:[^\]]+\]/g) || [];
+          console.log('🧩 [STEP 4] Summary card marker audit:', {
+            hasMarkers: markerMatches.length > 0,
+            markerCount: markerMatches.length,
+            markersSample: markerMatches.slice(0, 5),
+            aiCardsAllowed,
+            resultsCount: structuredContext?.formatted?.length || 0
+          });
+
+          // Single source of truth: Determine if results should be shown
+          // Apply precedence rules in order
+          let shouldShowResults = false;
+          let visibilityReason = '';
+          
+          if (!hasResults) {
+            shouldShowResults = false;
+            visibilityReason = 'No results found';
+          } else if (llmDecision === 'no_results') {
+            shouldShowResults = false;
+            visibilityReason = 'LLM explicitly said no_results';
+          } else if (llmDecision === 'ask_network_only' && topConfidence < 0.5) {
+            // Only hide if confidence is very low when asking network
+            shouldShowResults = false;
+            visibilityReason = 'LLM said ask_network_only with low confidence';
+          } else if (!aiCardsAllowed) {
+            shouldShowResults = false;
+            visibilityReason = 'AI summary determined results are not relevant';
+          } else if (llmShowCards === false) {
+            shouldShowResults = false;
+            visibilityReason = 'LLM explicitly set show_cards=false';
+          } else {
+            shouldShowResults = true;
+            visibilityReason = 'All checks passed, showing results';
+          }
+          
+          console.log('🎯 [STEP 5] Results visibility decision:', {
+            shouldShowResults,
+            visibilityReason,
+            hasResults,
+            llmDecision,
+            llmShowCards,
+            aiCardsAllowed,
+            topConfidence,
+            resultsCount: structuredContext?.formatted?.length || 0
+          });
+
+          // Handle streaming if requested
+          if (shouldStream) {
+            if (hasResults) {
+              // Send initial data with results but empty summary
+              const initialData = {
+                type: 'init',
+                data: {
+                  query: sanitizedQuery,
+                  summary: '',
+                  follow_up_prompts: [],
+                  cards_allowed: true,
+                  results: shouldShowResults ? (structuredContext?.formatted || []) : [],
+                  search_metadata: {
+                    structured_search_used: Boolean(structuredContext),
+                    top_confidence: structuredContext?.raw.top_confidence ?? null,
+                    used_current_location: structuredContext?.raw.used_current_location ?? false,
+                    filters_applied: structuredContext?.raw.metadata.filters_applied ?? [],
+                    final_decision: finalDecision.decision || null,
+                    ask_network: askNetworkContext,
+                    skip_llm: false
+                  },
+                  llm_decision: finalDecision
+                }
+              };
+              res.write(`data: ${JSON.stringify(initialData)}\n\n`);
+              
+              // Stream the AI summary
+              const searchContext = convertStructuredResultsToSearchContext(
+                structuredContext!.formatted,
+                sanitizedQuery,
+                user_lat ?? null,
+                user_lng ?? null
+              );
+              
+              await generateAISummaryStream(searchContext, {
+                onChunk: (chunk: string) => {
+                  const sseMessage = JSON.stringify({ type: 'chunk', data: chunk });
+                  console.log(`📡 [SSE] Backend writing chunk to SSE: "${chunk}" (SSE message length: ${sseMessage.length})`);
+                  res.write(`data: ${sseMessage}\n\n`);
+                },
+                onComplete: (result: any) => {
+                  const finalData = {
+                    type: 'done',
+                    data: {
+                      summary: result.text,
+                      follow_up_prompts: result.followUps,
+                      cards_allowed: result.cardsAllowed
+                    }
+                  };
+                  res.write(`data: ${JSON.stringify(finalData)}\n\n`);
+                  res.end();
+                },
+                onError: (error: Error) => {
+                  console.error('   ❌ [STEP 4] Streaming AI summary failed:', error.message);
+                  const errorData = {
+                    type: 'error',
+                    data: {
+                      summary: summaryText || typeof finalDecision.headline === 'string' ? finalDecision.headline : 'Your friends are thinking...',
+                      follow_up_prompts: [],
+                      cards_allowed: true
+                    }
+                  };
+                  res.write(`data: ${JSON.stringify(errorData)}\n\n`);
+                  res.end();
+                }
+              }, 'detailed');
+            } else {
+              // No results case - send complete response immediately via SSE
+              const noResultsData = {
+                type: 'init',
+                data: {
+                  query: sanitizedQuery,
+                  summary: summaryText,
+                  follow_up_prompts: followUpPrompts,
+                  cards_allowed: aiCardsAllowed,
+                  results: [],
+                  search_metadata: {
+                    structured_search_used: Boolean(structuredContext),
+                    top_confidence: structuredContext?.raw.top_confidence ?? null,
+                    used_current_location: structuredContext?.raw.used_current_location ?? false,
+                    filters_applied: structuredContext?.raw.metadata.filters_applied ?? [],
+                    final_decision: finalDecision.decision || null,
+                    ask_network: askNetworkContext,
+                    skip_llm: false
+                  },
+                  llm_decision: finalDecision
+                }
+              };
+              res.write(`data: ${JSON.stringify(noResultsData)}\n\n`);
+              
+              // Send done message immediately since there's no summary to stream
+              const doneData = {
+                type: 'done',
+                data: {
+                  summary: summaryText,
+                  follow_up_prompts: followUpPrompts,
+                  cards_allowed: aiCardsAllowed
+                }
+              };
+              res.write(`data: ${JSON.stringify(doneData)}\n\n`);
+              res.end();
+            }
+            
+            // Return early for streaming - response is handled above
+            return;
+          }
+
+          const responseData = {
+            success: true,
+            data: {
+              query: sanitizedQuery,
+              summary: summaryText,
+              follow_up_prompts: followUpPrompts,
+              cards_allowed: aiCardsAllowed,
+              results: shouldShowResults ? (structuredContext?.formatted || []) : [],
+              search_metadata: {
+                structured_search_used: Boolean(structuredContext),
+                top_confidence: structuredContext?.raw.top_confidence ?? null,
+                used_current_location: structuredContext?.raw.used_current_location ?? false,
+                filters_applied: structuredContext?.raw.metadata.filters_applied ?? [],
+                final_decision: finalDecision.decision || null,
+                ask_network: askNetworkContext,
+                skip_llm: false
+              },
+              llm_decision: finalDecision
+            },
+            message: 'Search completed via structured tool calling'
+          };
+
+          console.log('✅ [STEP 6] Final response prepared:', {
+            summaryLength: summaryText.length,
+            followUpsCount: followUpPrompts.length,
+            resultsCount: responseData.data.results.length,
+            cardsAllowed: aiCardsAllowed,
+            topConfidence: responseData.data.search_metadata.top_confidence,
+            askedNetwork: Boolean(askNetworkContext),
+            shouldShowResults
+          });
+          console.log('═══════════════════════════════════════════════════════════');
+
+          return res.json(responseData);
+        }
+
+        // LLM didn't return a final response after 4 turns
+        console.error('⚠️ LLM did not return a final response after maximum turns');
+        return res.status(500).json({
+          success: false,
+          message: 'Search service temporarily unavailable. Please try again.',
+          error: 'LLM did not complete search'
+      });
+    } else {
+        // GROQ API key not configured
+        console.error('⚠️ GROQ_API_KEY not configured - tool calling unavailable');
+        return res.status(503).json({
+          success: false,
+          message: 'Search service not configured. Please contact support.',
+          error: 'GROQ_API_KEY missing'
+        });
+      }
+    } catch (functionCallError) {
+    console.log('───────────────────────────────────────────────────────────');
+      console.error('❌ TOOL-CALLING PIPELINE ERROR');
+    console.log('───────────────────────────────────────────────────────────');
+      console.error('   Error:', functionCallError);
+      console.error('   Stack:', functionCallError instanceof Error ? functionCallError.stack : 'N/A');
+      
+      // Return error instead of falling back
       return res.status(500).json({
         success: false,
-        message: 'Failed to process search query',
-        error: 'Embedding generation failed'
+        message: 'Search failed. Please try again.',
+        error: functionCallError instanceof Error ? functionCallError.message : 'Unknown error'
       });
     }
-
-    // Search for similar recommendations
-    const similarRecommendations = await searchRecommendationsBySimilarity(
-      searchEmbedding,
-      limit,
-      threshold,
-      groupIds,
-      currentUserId,
-      content_type
-    );
-    
-
-    // Use the similar recommendations for AI summary generation
-    const relevantRecommendations = similarRecommendations;
-
-    // Also fetch top matching questions and answers (pgvector ANN)
-    const qnaLimit = Math.max(5, Math.min(20, Math.floor((limit as number) / 2)));
-    const qna = await (async () => {
-      const client = await pool.connect();
-      try {
-        const vec = `[${searchEmbedding.join(',')}]`;
-        const followSql = `user_id IN (SELECT following_id FROM user_follows WHERE follower_id = $1)`;
-
-        const questionsSql = `
-          SELECT id, 'question' AS type, 1 - (embedding <=> $2::vector) AS score, text, user_id, created_at
-          FROM questions
-          WHERE embedding IS NOT NULL
-            AND ${followSql}
-          ORDER BY embedding <-> $2::vector
-          LIMIT $3`;
-        const qRes = await client.query(questionsSql, [currentUserId, vec, qnaLimit]);
-
-        const answersSql = `
-          SELECT id, 'answer' AS type, 1 - (embedding <=> $2::vector) AS score, description AS text, user_id, question_id, id AS recommendation_id, created_at
-          FROM recommendations
-          WHERE embedding IS NOT NULL
-            AND question_id IS NOT NULL
-            AND ${followSql}
-          ORDER BY embedding <-> $2::vector
-          LIMIT $3`;
-        const aRes = await client.query(answersSql, [currentUserId, vec, qnaLimit]);
-
-        return { questions: qRes.rows, answers: aRes.rows };
-      } finally {
-        client.release();
-      }
-    })();
-
-    // Batch fetch all related data to avoid N+1 query problem
-    // Collect all unique IDs first
-    const placeIds = [...new Set(relevantRecommendations.map(r => r.place_id).filter((id): id is number => id != null))];
-    const serviceIds = [...new Set(relevantRecommendations.map(r => (r as any).service_id).filter((id): id is number => id != null))];
-    const userIds = [...new Set(relevantRecommendations.map(r => r.user_id))];
-
-    // Batch fetch all places (1 query instead of N)
-    const placesMap = new Map<number, any>();
-    if (placeIds.length > 0) {
-      const placesQuery = await pool.query(
-        'SELECT id, name, address, lat, lng, google_place_id, primary_type, types FROM places WHERE id = ANY($1::int[])',
-        [placeIds]
-      );
-      placesQuery.rows.forEach((place: any) => {
-        placesMap.set(place.id, place);
-      });
-    }
-
-    // Batch fetch all services (1 query instead of N)
-    const servicesMap = new Map<number, any>();
-    if (serviceIds.length > 0) {
-      const servicesQuery = await pool.query(
-        'SELECT id, name, service_type, business_name, address FROM services WHERE id = ANY($1::int[])',
-        [serviceIds]
-      );
-      servicesQuery.rows.forEach((service: any) => {
-        servicesMap.set(service.id, service);
-      });
-    }
-
-    // Batch fetch all users (1 query instead of N)
-    const usersMap = new Map<string, any>();
-    if (userIds.length > 0) {
-      const usersQuery = await pool.query(
-        'SELECT id, display_name FROM users WHERE id = ANY($1::uuid[])',
-        [userIds]
-      );
-      usersQuery.rows.forEach((user: any) => {
-        usersMap.set(user.id, user);
-      });
-    }
-
-    // Build search results using the pre-fetched data (no additional queries)
-    const searchResults = relevantRecommendations.map((recommendation) => {
-      // Get place information (if applicable)
-      let placeInfo = {};
-      if (recommendation.place_id) {
-        const place = placesMap.get(recommendation.place_id) || {};
-        placeInfo = {
-          place_id: recommendation.place_id,
-          place_name: place.name || 'Unknown Place',
-          place_address: place.address,
-          place_lat: place.lat,
-          place_lng: place.lng,
-          google_place_id: place.google_place_id,
-          place_primary_type: place.primary_type,
-          place_types: place.types || []
-        };
-      }
-
-      // Get service information (if applicable)
-      let serviceInfo = {} as any;
-      if ((recommendation as any).service_id) {
-        const service = servicesMap.get((recommendation as any).service_id) || {};
-        serviceInfo = {
-          service_id: service.id,
-          service_name: service.name || 'Unknown Service',
-          service_type: service.service_type || null,
-          service_business_name: service.business_name || null,
-          service_address: service.address || null
-        };
-      }
-
-      // Get user information
-      const user = usersMap.get(recommendation.user_id) || {};
-
-      return {
-        recommendation_id: recommendation.id,
-        content_type: recommendation.content_type,
-        title: recommendation.title,
-        description: recommendation.description,
-        content_data: recommendation.content_data,
-        user_name: user.display_name || 'Anonymous',
-        rating: recommendation.rating,
-        labels: recommendation.labels,
-        metadata: recommendation.metadata,
-        similarity: recommendation.similarity,
-        created_at: recommendation.created_at,
-        ...placeInfo,
-        ...serviceInfo
-      } as any;
-    });
-
-    // Group results by place (for place-type recommendations) or by content type
-    const groupedResults = new Map();
-    
-    searchResults.forEach((result, index) => {
-      
-      let groupKey: string;
-      let groupInfo: any;
-      
-      const r: any = result as any;
-      if (result.content_type === 'place' && r.place_id) {
-        // Group place recommendations by place
-        groupKey = `place_${r.place_id}`;
-        groupInfo = {
-          type: 'place',
-          place_id: r.place_id,
-          place_name: r.place_name,
-          place_address: r.place_address,
-          place_lat: r.place_lat,
-          place_lng: r.place_lng,
-          google_place_id: r.google_place_id,
-          place_primary_type: r.place_primary_type,
-          place_types: r.place_types || [],
-          recommendations: [],
-          average_similarity: 0,
-          total_recommendations: 0
-        };
-      } else if (result.content_type === 'service' && r.service_id) {
-        // Group service recommendations by service
-        groupKey = `service_${r.service_id}`;
-        groupInfo = {
-          type: 'service',
-          service_id: r.service_id,
-          service_name: r.service_name,
-          service_type: r.service_type,
-          service_business_name: r.service_business_name,
-          service_address: r.service_address,
-          recommendations: [],
-          average_similarity: 0,
-          total_recommendations: 0
-        };
-      } else {
-        // Fallback grouping by content type
-        groupKey = `type_${result.content_type}`;
-        groupInfo = {
-          type: 'content_type',
-          content_type: result.content_type,
-          recommendations: [],
-          average_similarity: 0,
-          total_recommendations: 0
-        };
-      }
-      
-      console.log(`🔍 Created group key: "${groupKey}" for result ${index + 1}`);
-      
-      if (!groupedResults.has(groupKey)) {
-        groupedResults.set(groupKey, groupInfo);
-        console.log(`🔍 Created new group: ${groupKey}`);
-      } else {
-        console.log(`🔍 Adding to existing group: ${groupKey}`);
-      }
-      
-      const group = groupedResults.get(groupKey);
-      group.recommendations.push({
-        recommendation_id: result.recommendation_id,
-        content_type: result.content_type,
-        title: result.title,
-        description: result.description,
-        content_data: result.content_data,
-        user_name: result.user_name,
-        rating: result.rating,
-        labels: result.labels,
-        metadata: result.metadata,
-        similarity: result.similarity,
-        created_at: result.created_at
-      });
-      
-      group.total_recommendations += 1;
-      const oldAvg = group.average_similarity;
-      group.average_similarity = (
-        (group.average_similarity * (group.total_recommendations - 1) + result.similarity) / 
-        group.total_recommendations
-      );
-      
-      // 🔍 DEBUG: Log grouping calculation
-      console.log(`🔍 [GROUPING DEBUG] Updated group ${groupKey}:`, {
-        old_average: oldAvg,
-        new_average: group.average_similarity,
-        match_percentage: Math.round(group.average_similarity * 100),
-        total_recommendations: group.total_recommendations,
-        added_similarity: result.similarity,
-        added_match_percentage: Math.round(result.similarity * 100)
-      });
-    });
-
-    // Convert to array and sort by average similarity
-    const finalResults = Array.from(groupedResults.values())
-      .sort((a, b) => b.average_similarity - a.average_similarity)
-      .slice(0, limit);
-
-    const t4 = Date.now();
-    
-
-    // Generate AI-powered summary based on the search results (optional)
-    let summary = '';
-    if (!noSummary) {
-      try {
-        // Build cache key from query + ordered recommendation ids per group
-        const resultKey = finalResults
-          .map(r => (r.recommendations || []).map((rec: any) => rec.recommendation_id).join(','))
-          .join('|');
-        const sKey = `${query.trim()}::${resultKey}`;
-        const cachedSummary = (global as any)._mxSummaryCache.get(sKey) as { text: string; ts: number } | undefined;
-        const nowS = Date.now();
-        if (cachedSummary && nowS - cachedSummary.ts < SUMMARY_TTL_MS) {
-          console.log('⚡ Using cached AI summary');
-          summary = cachedSummary.text;
-        } else {
-          const searchContext: SearchContext = {
-            query: query.trim(),
-            results: finalResults,
-            total_places: finalResults.filter(r => r.type === 'place').length,
-            total_recommendations: searchResults.length
-          };
-          const s0 = Date.now();
-          summary = await generateAISummary(searchContext, 'detailed');
-          const s1 = Date.now();
-          console.log(`✅ AI Summary generated successfully in ${s1 - s0}ms, length:`, summary.length);
-          console.log('✅ AI Summary preview:', summary.substring(0, 200) + '...');
-          (global as any)._mxSummaryCache.set(sKey, { text: summary, ts: nowS });
-          if ((global as any)._mxSummaryCache.size > 100) {
-            const firstKey = (global as any)._mxSummaryCache.keys().next().value;
-            (global as any)._mxSummaryCache.delete(firstKey);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Failed to generate AI summary, using fallback:', error);
-        // Fallback simple summary
-        if (finalResults.length === 0) {
-          summary = `I couldn't find any relevant recommendations for "${query.trim()}" in your network.`;
-        }
-      }
-    }
-
-    res.json({
-      success: true,
-      data: {
-        query: query.trim(),
-        summary,
-        results: finalResults,
-        qna,
-        total_groups: finalResults.length,
-        total_recommendations: searchResults.length,
-        search_metadata: {
-          threshold,
-          limit,
-          query_processed: true
-        }
-      },
-      message: 'Search completed successfully'
-    });
 
   } catch (error) {
-    console.error('Error performing semantic search:', error);
+    console.error('Error in search endpoint:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to perform search',
@@ -1376,7 +1908,7 @@ router.get('/places/reviewed', async (req, res) => {
   }
 });
 
-// Get embedding queue status
+// Get embedding queue status (public endpoint for monitoring)
 router.get('/embedding-queue/status', async (req, res) => {
   try {
     const status = embeddingQueue.getStatus();

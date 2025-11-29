@@ -79,20 +79,16 @@ The SearchBar now supports two modes:
 - Real-time search suggestions
 - Loading states and error handling
 
-#### 2. SearchResults Component (`frontend/src/components/SearchResults.tsx`)
+#### 2. Feed Search Response (`frontend/src/components/SearchResultsInline.tsx`)
 
-A modal component that displays semantic search results with:
-- Search summary and statistics
-- Place cards with similarity scores
-- Recommendation previews
-- Interactive place selection
+- Chat-style bubble that consumes LLM summaries (with `[CARD:...]` markers)
+- Interleaves AI copy and interactive cards inline with the feed
+- Allows quick follow-up queries without leaving the feed
 
-#### 3. Updated MapPage (`frontend/src/pages/MapPage.tsx`)
+#### 3. Updated MapPage (`frontend/src/pages/MapPage.tsx`) & SearchResultsNew
 
-Integrates semantic search with the main map interface:
-- Handles search results display
-- Converts search results to place details
-- Manages search state and loading
+- Uses `SearchResultsNew` for the map overlay, focusing on hero cards
+- Handles search state, place selection, and "clear search" actions
 
 ## How It Works
 

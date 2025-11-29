@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label';
 import { normalizePhoneDigits, validateOptionalPhoneOrEmail } from '@/utils/validation';
 import InlineLocationPicker from '@/components/InlineLocationPicker';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
+import { getReadableTextColor } from '@/utils/color';
 
 interface MissingField {
   field: string;
@@ -40,6 +43,13 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
   isSubmitting,
   onSubmit
 }) => {
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const accentColor = selectedTheme?.accentColor || '#000000';
+  const textOnAccent = getReadableTextColor(accentColor);
+  
   const currentField = missingFields[currentFieldIndex]?.field;
   const isContactField = currentField === 'contact_info';
   const isPhoneField = isContactField || /phone/i.test(currentField || '');
@@ -128,22 +138,37 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
         {missingFields.length > 0 && (
           <div className="space-y-2 text-left">
             <div className="flex justify-between items-center">
-              <span className="text-[10px] md:text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+              <span 
+                className="text-[10px] md:text-[11px] font-medium uppercase tracking-wide"
+                style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+              >
                 Question {Math.min(currentFieldIndex + 1, missingFields.length)} of {missingFields.length}
               </span>
-              <span className="text-[10px] md:text-[11px] font-medium text-muted-foreground">
+              <span 
+                className="text-[10px] md:text-[11px] font-medium"
+                style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+              >
                 {Math.round(((Math.min(currentFieldIndex + 1, missingFields.length)) / missingFields.length) * 100)}%
               </span>
             </div>
-            <div className="w-full h-1 bg-border rounded-full overflow-hidden">
+            <div 
+              className="w-full h-1 rounded-full overflow-hidden"
+              style={{ backgroundColor: selectedTheme?.borderColorMuted || selectedTheme?.hoverBackground || '#E5E7EB' }}
+            >
               <div
-                className="h-full bg-foreground transition-all duration-500 ease-out"
-                style={{ width: `${Math.min(((currentFieldIndex + 1) / missingFields.length) * 100, 100)}%` }}
+                className="h-full transition-all duration-500 ease-out"
+                style={{ 
+                  width: `${Math.min(((currentFieldIndex + 1) / missingFields.length) * 100, 100)}%`,
+                  backgroundColor: accentColor,
+                }}
               />
             </div>
           </div>
         )}
-        <h1 className="text-2xl md:text-4xl lg:text-5xl font-light tracking-tight text-foreground leading-tight">
+        <h1 
+          className="text-2xl md:text-4xl lg:text-5xl font-light tracking-tight leading-tight"
+          style={{ color: selectedTheme?.textPrimary || 'inherit' }}
+        >
           {missingFields[currentFieldIndex]?.question || 'Additional Information'}
         </h1>
 
@@ -161,7 +186,13 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                 {isContactField ? (
                   <div className="space-y-4 md:space-y-6 text-left">
                     <div className="space-y-2">
-                      <Label htmlFor="contact-phone" className="text-sm md:text-base">Phone number</Label>
+                      <Label 
+                        htmlFor="contact-phone" 
+                        className="text-sm md:text-base"
+                        style={{ color: selectedTheme?.textPrimary || 'inherit' }}
+                      >
+                        Phone number
+                      </Label>
                       <Input
                         id="contact-phone"
                         type="tel"
@@ -181,14 +212,30 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                         }}
                         disabled={isProcessingField}
                         className="text-base md:text-lg h-9 md:h-10"
+                        style={selectedTheme ? {
+                          backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground,
+                          borderColor: selectedTheme.inputBorder || selectedTheme.borderColor,
+                          color: selectedTheme.inputText || selectedTheme.textPrimary,
+                        } : undefined}
                       />
                       {phoneError && (
                         <div className="text-xs md:text-sm text-red-600">{phoneError}</div>
                       )}
-                      <div className="text-xs md:text-sm text-gray-500">Only digits will be saved. 10–15 digits required.</div>
+                      <div 
+                        className="text-xs md:text-sm"
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                      >
+                        Only digits will be saved. 10–15 digits required.
+                      </div>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="contact-email" className="text-sm md:text-base">Email (optional)</Label>
+                      <Label 
+                        htmlFor="contact-email" 
+                        className="text-sm md:text-base"
+                        style={{ color: selectedTheme?.textPrimary || 'inherit' }}
+                      >
+                        Email (optional)
+                      </Label>
                       <Input
                         id="contact-email"
                         type="email"
@@ -208,16 +255,32 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                         }}
                         disabled={isProcessingField}
                         className="text-base md:text-lg h-9 md:h-10"
+                        style={selectedTheme ? {
+                          backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground,
+                          borderColor: selectedTheme.inputBorder || selectedTheme.borderColor,
+                          color: selectedTheme.inputText || selectedTheme.textPrimary,
+                        } : undefined}
                       />
                       {emailError && (
                         <div className="text-xs md:text-sm text-red-600">{emailError}</div>
                       )}
-                      <div className="text-xs md:text-sm text-gray-500">Provide either a valid phone or email.</div>
+                      <div 
+                        className="text-xs md:text-sm"
+                        style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+                      >
+                        Provide either a valid phone or email.
+                      </div>
                     </div>
                   </div>
                 ) : isPhoneField ? (
                   <div className="space-y-2 text-left">
-                    <Label htmlFor="contact-phone" className="text-sm md:text-base">Phone number</Label>
+                    <Label 
+                      htmlFor="contact-phone" 
+                      className="text-sm md:text-base"
+                      style={{ color: selectedTheme?.textPrimary || 'inherit' }}
+                    >
+                      Phone number
+                    </Label>
                     <Input
                       id="contact-phone"
                       type="tel"
@@ -237,6 +300,11 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                       }}
                       disabled={isProcessingField}
                       className="text-base md:text-lg h-9 md:h-10"
+                      style={selectedTheme ? {
+                        backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground,
+                        borderColor: selectedTheme.inputBorder || selectedTheme.borderColor,
+                        color: selectedTheme.inputText || selectedTheme.textPrimary,
+                      } : undefined}
                     />
                     {phoneError && (
                       <div className="text-xs md:text-sm text-red-600">{phoneError}</div>
@@ -248,7 +316,10 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                     <Textarea
                       ref={textareaRef}
                       placeholder="Your answer..."
-                      className="min-h-[150px] md:min-h-[200px] text-lg md:text-xl lg:text-2xl resize-none border-0 rounded-none bg-transparent px-0 text-foreground placeholder:text-muted-foreground text-left shadow-none focus:shadow-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 appearance-none"
+                      className="min-h-[150px] md:min-h-[200px] text-lg md:text-xl lg:text-2xl resize-none border-0 rounded-none bg-transparent px-0 text-left shadow-none focus:shadow-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 appearance-none"
+                      style={selectedTheme ? {
+                        color: selectedTheme.inputText || selectedTheme.textPrimary,
+                      } : undefined}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           if (e.metaKey || e.ctrlKey) {
@@ -270,13 +341,27 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-4 md:pt-8 border-t border-border">
+                <div 
+                  className="flex items-center justify-between pt-4 md:pt-8 border-t"
+                  style={{ borderColor: selectedTheme?.borderColorMuted || selectedTheme?.borderColor || '#E5E7EB' }}
+                >
                   <Button
                     variant="ghost"
                     onClick={onBack}
                     disabled={isProcessingField}
                     aria-label="Back"
-                    className="h-9 w-9 md:h-10 md:w-10 p-0 rounded-full text-foreground hover:bg-muted"
+                    className="h-9 w-9 md:h-10 md:w-10 p-0 rounded-full"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textPrimary || '#000000',
+                    } : undefined}
+                    onMouseEnter={(e) => {
+                      if (selectedTheme) {
+                        e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
                   >
                     <ArrowLeft className="h-4 w-4 md:h-5 md:w-5" />
                   </Button>
@@ -285,7 +370,22 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                       onClick={onSkipField}
                       variant="ghost"
                       disabled={isProcessingField}
-                      className="h-9 md:h-10 px-2 md:px-3 rounded-full text-xs md:text-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+                      className="h-9 md:h-10 px-2 md:px-3 rounded-full text-xs md:text-sm"
+                      style={selectedTheme ? {
+                        color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                      } : undefined}
+                      onMouseEnter={(e) => {
+                        if (selectedTheme) {
+                          e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost.hover;
+                          e.currentTarget.style.color = selectedTheme.textPrimary || '#000000';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedTheme) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.color = selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280';
+                        }
+                      }}
                     >
                       Skip
                     </Button>
@@ -293,7 +393,11 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
                       onClick={handleContinue}
                       disabled={isProcessingField}
                       aria-label="Continue"
-                      className="p-2.5 md:p-3 rounded-full bg-foreground text-background hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      className="p-2.5 md:p-3 rounded-full hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      style={selectedTheme ? {
+                        backgroundColor: accentColor,
+                        color: textOnAccent,
+                      } : undefined}
                     >
                       <ArrowRight className="h-4 w-4 md:h-5 md:w-5" />
                     </Button>
@@ -310,7 +414,10 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
             animate={{ opacity: 1, y: 0 }}
             className="text-center space-y-8 md:space-y-16"
           >
-            <h1 className="text-2xl md:text-4xl font-light text-black leading-tight">
+            <h1 
+              className="text-2xl md:text-4xl font-light leading-tight"
+              style={{ color: selectedTheme?.textPrimary || '#000000' }}
+            >
               Ready to share!
             </h1>
             
@@ -318,7 +425,25 @@ export const CompletingStep: React.FC<CompletingStepProps> = ({
               <Button
                 onClick={onSubmit}
                 disabled={isSubmitting}
-                className="px-6 md:px-8 py-2.5 md:py-3 text-base md:text-lg font-medium bg-black hover:bg-gray-800 text-white rounded-lg border-0 shadow-sm disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
+                className="px-6 md:px-8 py-2.5 md:py-3 text-base md:text-lg font-medium rounded-lg border-0 shadow-sm disabled:cursor-not-allowed transition-colors duration-200"
+                style={selectedTheme ? {
+                  backgroundColor: isSubmitting 
+                    ? (selectedTheme.borderColorMuted || selectedTheme.hoverBackground || '#E5E7EB')
+                    : accentColor,
+                  color: isSubmitting 
+                    ? (selectedTheme.textMuted || '#6B7280')
+                    : textOnAccent,
+                } : undefined}
+                onMouseEnter={(e) => {
+                  if (selectedTheme && !isSubmitting) {
+                    e.currentTarget.style.opacity = '0.9';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (selectedTheme && !isSubmitting) {
+                    e.currentTarget.style.opacity = '1';
+                  }
+                }}
               >
                 {isSubmitting ? (
                   <>

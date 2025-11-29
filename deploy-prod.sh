@@ -294,6 +294,16 @@ run_migrations() {
     log_deployment "Migrations run"
 }
 
+# Refresh embeddings
+refresh_embeddings() {
+    echo "🔄 Refreshing recommendation embeddings..."
+    echo ""
+    docker exec -it recce_backend_prod npx tsx scripts/refresh-embeddings.ts
+    echo ""
+    echo -e "${GREEN}✅ Embeddings refresh completed!${NC}"
+    log_deployment "Embeddings refreshed"
+}
+
 # Show deployment history
 show_history() {
     if [ -f "$LOG_FILE" ]; then
@@ -336,6 +346,9 @@ case "${1:-deploy}" in
     migrate)
         run_migrations
         ;;
+    refresh-embeddings|embeddings)
+        refresh_embeddings
+        ;;
     history)
         show_history
         ;;
@@ -352,13 +365,15 @@ case "${1:-deploy}" in
         echo "  logs [service]     - View logs (optionally for specific service)"
         echo "  status             - Check service status"
         echo "  migrate            - Run database migrations"
+        echo "  refresh-embeddings - Refresh all recommendation embeddings"
         echo "  history            - Show deployment history"
         echo ""
         echo "Examples:"
-        echo "  ./deploy-prod.sh deploy          # Full deployment"
-        echo "  ./deploy-prod.sh update          # Update all services"
-        echo "  ./deploy-prod.sh update-frontend # Update only frontend"
-        echo "  ./deploy-prod.sh logs backend    # View backend logs"
+        echo "  ./deploy-prod.sh deploy              # Full deployment"
+        echo "  ./deploy-prod.sh update              # Update all services"
+        echo "  ./deploy-prod.sh update-frontend     # Update only frontend"
+        echo "  ./deploy-prod.sh logs backend        # View backend logs"
+        echo "  ./deploy-prod.sh refresh-embeddings  # Refresh embeddings"
         exit 0
         ;;
     *)

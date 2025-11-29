@@ -143,6 +143,8 @@ class EmbeddingQueue {
       // Generate embedding based on type
       let embedding: number[];
       if (task.type === 'recommendation') {
+        // Note: personal_overlap_percent is calculated at search time, not during embedding generation
+        // Embeddings are user-agnostic, but we include created_at for freshness
         embedding = await generateRecommendationEmbedding({
           content_type: enhancedData.content_type,
           title: enhancedData.title,
@@ -158,6 +160,8 @@ class EmbeddingQueue {
           user_name: enhancedData.user_name,
           content_data: enhancedData.content_data,
           metadata: enhancedData.metadata,
+          created_at: enhancedData.created_at,
+          // personal_overlap_percent will be calculated at search time and added to embedding text dynamically
         });
       } else if (task.type === 'question') {
         const text = (task.data && task.data.text) || enhancedData.text || '';

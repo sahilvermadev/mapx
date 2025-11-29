@@ -107,11 +107,18 @@ class ApiClient {
     }
   }
 
-  async post<T>(url: string, data?: any): Promise<ApiResponse<T>> {
+  async post<T>(url: string, data?: any, signal?: AbortSignal): Promise<ApiResponse<T>> {
     try {
-      const response = await this.client.post(url, data);
+      const response = await this.client.post(url, data, { signal });
       return response.data as ApiResponse<T>;
     } catch (error) {
+      // Don't treat abort as an error
+      if (axios.isAxiosError(error) && error.code === 'ERR_CANCELED') {
+        return {
+          success: false,
+          error: 'Request cancelled',
+        };
+      }
       return this.handleError<T>(error);
     }
   }
@@ -131,6 +138,85 @@ class ApiClient {
       return response.data as ApiResponse<T>;
     } catch (error) {
       return this.handleError<T>(error);
+    }
+  }
+
+  // Streaming support for Server-Sent Events
+  async streamPost<T = any>(
+    url: string,
+    data?: any,
+    callbacks?: {
+      onMessage: (message: { type: string; data: any }) => void;
+      onError: (error: Error) => void;
+      onComplete?: () => void;
+    },
+    signal?: AbortSignal
+  ): Promise<void> {
+    try {
+      const token = await authService.getTokenForRequest();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${this.baseURL}${url}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...data, stream: true }),
+        signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          callbacks?.onComplete?.();
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const jsonStr = line.slice(6);
+              if (jsonStr.trim()) {
+                const message = JSON.parse(jsonStr);
+                if (message.type === 'chunk') {
+                  console.log(`📥 [SSE] Frontend received chunk: "${message.data}" (length: ${message.data?.length || 0})`);
+                } else {
+                  console.log(`📥 [SSE] Frontend received message type: ${message.type}`, message);
+                }
+                callbacks?.onMessage?.(message);
+              }
+            } catch (parseError) {
+              console.warn('Failed to parse SSE message:', parseError);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return; // Aborted, don't call onError
+      }
+      callbacks?.onError?.(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
