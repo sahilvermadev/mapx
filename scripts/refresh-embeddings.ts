@@ -17,6 +17,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import { pathToFileURL } from 'url';
 
 // Try multiple common locations for the .env file
 const candidatePaths = [
@@ -89,18 +90,50 @@ if (!process.env.DATABASE_URL) {
   }
 }
 
-// Now import config/env to validate (this will also load env but we've already done it)
-import '../backend/src/config/env';
+// Determine the correct path to backend code
+// When run from root: ../backend/src (TypeScript source)
+// When run from container (/app/scripts): ../dist (compiled JavaScript)
+const backendSrcPath = (() => {
+  const possiblePaths = [
+    path.resolve(__dirname, '../dist'),           // Container: /app/scripts -> /app/dist (compiled)
+    path.resolve(__dirname, '../backend/src'),   // Local: scripts -> backend/src (TypeScript)
+  ];
+  
+  for (const p of possiblePaths) {
+    // Check for either TypeScript source or compiled JavaScript
+    if (fs.existsSync(path.join(p, 'config', 'env.ts')) || 
+        fs.existsSync(path.join(p, 'config', 'env.js')) ||
+        fs.existsSync(path.join(p, 'db', 'recommendations.js'))) {
+      return p;
+    }
+  }
+  // Default to container path (compiled)
+  return path.resolve(__dirname, '../dist');
+})();
 
 // Use dynamic imports to ensure env is fully loaded before importing db modules
 async function main() {
   console.log('🔄 Starting embedding regeneration...');
+  console.log(`📁 Using backend source path: ${backendSrcPath}`);
   console.log('');
   
   try {
+    // Import config/env to validate (if it exists)
+    try {
+      const envPath = path.join(backendSrcPath, 'config', 'env');
+      await import(pathToFileURL(envPath).href);
+    } catch (e) {
+      // env config might not be needed if we already loaded .env
+      console.log('ℹ️  Note: Could not import env config, using .env file directly');
+    }
+    
     // Dynamically import after env is confirmed loaded
-    const { regenerateAllRecommendationEmbeddings } = await import('../backend/src/db/recommendations');
-    const { embeddingQueue } = await import('../backend/src/services/embeddingQueue');
+    // Convert absolute paths to file:// URLs for ES module imports
+    const recommendationsPath = pathToFileURL(path.join(backendSrcPath, 'db', 'recommendations')).href;
+    const embeddingQueuePath = pathToFileURL(path.join(backendSrcPath, 'services', 'embeddingQueue')).href;
+    
+    const { regenerateAllRecommendationEmbeddings } = await import(recommendationsPath);
+    const { embeddingQueue } = await import(embeddingQueuePath);
     
     const result = await regenerateAllRecommendationEmbeddings();
     
