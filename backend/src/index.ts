@@ -156,6 +156,7 @@ const allowNoOriginPaths = [
   '/health',        // health checks
   '/share',         // public OG routes
   '/api/public',   // public API
+  '/api/admin',    // Admin endpoints (localhost only)
   '/api/recommendations/regenerate-embeddings', // Admin endpoint for refreshing embeddings
 ];
 
