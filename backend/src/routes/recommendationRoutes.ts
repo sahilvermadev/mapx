@@ -1277,9 +1277,25 @@ router.delete('/:recommendationId', async (req, res) => {
 /**
  * POST /api/recommendations/regenerate-embeddings
  * Regenerate embeddings for all existing recommendations with enhanced data
+ * Allows localhost/internal requests without authentication for admin operations
  */
 router.post('/regenerate-embeddings', async (req, res) => {
   try {
+    // Allow localhost/internal requests without auth (for admin scripts)
+    const isLocalhost = req.ip === '127.0.0.1' || 
+                        req.ip === '::1' || 
+                        req.ip === '::ffff:127.0.0.1' ||
+                        req.headers.host?.includes('localhost') ||
+                        !req.headers['x-forwarded-for']; // Direct connection (not through proxy)
+    
+    // If not localhost and no user (from JWT), require authentication
+    if (!isLocalhost && !req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+    
     console.log('Starting embedding regeneration...');
     
     const result = await regenerateAllRecommendationEmbeddings();

@@ -305,15 +305,18 @@ refresh_embeddings() {
     echo "🔄 Refreshing recommendation embeddings..."
     echo ""
     
-    # Call the API endpoint from inside the container using Node.js
+    # Call the admin API endpoint from inside the container using Node.js
+    # This endpoint is accessible from localhost without authentication
     docker exec recce_backend_prod node -e "
         const http = require('http');
         const options = {
             hostname: 'localhost',
             port: 5000,
-            path: '/api/recommendations/regenerate-embeddings',
+            path: '/api/admin/refresh-embeddings',
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 
+                'Content-Type': 'application/json'
+            }
         };
         const req = http.request(options, (res) => {
             let data = '';

@@ -156,6 +156,7 @@ const allowNoOriginPaths = [
   '/health',        // health checks
   '/share',         // public OG routes
   '/api/public',   // public API
+  '/api/recommendations/regenerate-embeddings', // Admin endpoint for refreshing embeddings
 ];
 
 // Helper function to detect same-origin requests (no Origin header but from same domain)
@@ -375,6 +376,42 @@ app.use('/auth', authRoutes);
 // Public, unauthenticated routes
 app.use('/api/public', publicPreviewRoutes);
 app.use('/share', ogRoutes);
+
+// Admin endpoint for refreshing embeddings (localhost only, no auth required)
+app.post('/api/admin/refresh-embeddings', async (req, res) => {
+  // Only allow from localhost/internal
+  const isLocalhost = req.ip === '127.0.0.1' || 
+                      req.ip === '::1' || 
+                      req.ip === '::ffff:127.0.0.1' ||
+                      !req.headers['x-forwarded-for'];
+  
+  if (!isLocalhost) {
+    return res.status(403).json({
+      success: false,
+      error: 'This endpoint is only accessible from localhost'
+    });
+  }
+  
+  try {
+    const { regenerateAllRecommendationEmbeddings } = await import('./db/recommendations');
+    console.log('Starting embedding regeneration via admin endpoint...');
+    
+    const result = await regenerateAllRecommendationEmbeddings();
+    
+    res.json({
+      success: true,
+      data: result,
+      message: `Embedding regeneration complete. Success: ${result.success}, Failed: ${result.failed}`
+    });
+  } catch (error) {
+    console.error('Error regenerating embeddings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to regenerate embeddings',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 
 // Profile routes - banner images are public, others require auth
 // We'll handle auth in the route itself for flexibility
