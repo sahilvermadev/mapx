@@ -944,7 +944,7 @@ const MapPage: React.FC = () => {
   }, [showContentCard]);
 
   return (
-    <div className="map-page-container">
+    <div className={`map-page-container ${showContentCard ? 'map-page-container--card-open' : ''}`}>
 
       {showContentCard && selectedPlace && (
         <ContentCard

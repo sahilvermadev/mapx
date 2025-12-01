@@ -1,4 +1,12 @@
 /* Content Card - OpenAI-inspired Design */
+
+/* Root container for the map content card (mobile & desktop)
+   Ensure scroll gestures are captured by the card instead of bubbling
+   to the underlying map/body, and keep vertical panning smooth. */
+.content-card-root {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
 .side-panel {
   position: fixed;
   top: 0;

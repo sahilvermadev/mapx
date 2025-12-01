@@ -211,6 +211,10 @@ const Header: React.FC<HeaderProps> = ({
 
   const proxiedAvatarSrc = getProxiedProfilePicture(profilePictureUrl);
 
+  const handleAskClick = () => {
+    navigate('/ask', { state: { from: location.pathname } });
+  };
+
   const getNavClasses = (path: string) => {
     const isActive = path === '/map' ? location.pathname === '/map' : location.pathname.startsWith(path);
     // Use theme accent color for active state, or fallback to a visible color
@@ -270,20 +274,27 @@ const Header: React.FC<HeaderProps> = ({
   const handleFeedClick = () => {
     const clickTime = performance.now();
     const timestamp = Date.now();
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('🖱️ [PERF] FEED BUTTON CLICKED');
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log(`⏱️ [PERF] Click timestamp: ${timestamp} (${new Date(timestamp).toISOString()})`);
+    if (import.meta.env.DEV) {
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('🖱️ [PERF] FEED BUTTON CLICKED');
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log(`⏱️ [PERF] Click timestamp: ${timestamp} (${new Date(timestamp).toISOString()})`);
+    }
     
     // Store click time in sessionStorage for SocialFeedPage to read
     sessionStorage.setItem('feedClickTime', clickTime.toString());
     sessionStorage.setItem('feedClickTimestamp', timestamp.toString());
     
     if (location.pathname === '/feed') {
-      console.log('🔄 [PERF] Already on feed page, reloading...');
-      window.location.reload();
+      if (import.meta.env.DEV) {
+        console.log('🔄 [PERF] Already on feed page, skipping full reload.');
+      }
+      // In the future we can dispatch a lightweight refresh event instead of reloading:
+      // window.dispatchEvent(new CustomEvent('feed:refresh'));
     } else {
-      console.log('🚀 [PERF] Navigating to /feed...');
+      if (import.meta.env.DEV) {
+        console.log('🚀 [PERF] Navigating to /feed...');
+      }
       navigate('/feed');
     }
     setMobileMenuOpen(false);
@@ -306,16 +317,18 @@ const Header: React.FC<HeaderProps> = ({
 
   // Debug logging for feed filters visibility
   useEffect(() => {
-    console.log('[Header] Feed filters check:', {
-      pathname: location.pathname,
-      isFeedPage,
-      hasFeedFilters: !!feedFilters,
-      hasActiveSearch: feedFilters?.hasActiveSearch ?? false,
-      showFeedFilters,
-      citiesCount: feedFilters?.cities?.length ?? 0,
-      currentUserId: feedFilters?.currentUserId ?? 'none',
-      timestamp: performance.now(),
-    });
+    if (import.meta.env.DEV) {
+      console.log('[Header] Feed filters check:', {
+        pathname: location.pathname,
+        isFeedPage,
+        hasFeedFilters: !!feedFilters,
+        hasActiveSearch: feedFilters?.hasActiveSearch ?? false,
+        showFeedFilters,
+        citiesCount: feedFilters?.cities?.length ?? 0,
+        currentUserId: feedFilters?.currentUserId ?? 'none',
+        timestamp: performance.now(),
+      });
+    }
   }, [location.pathname, feedFilters, isFeedPage, showFeedFilters]);
 
   // Theme is already computed above from profile theme or user theme
@@ -492,7 +505,7 @@ const Header: React.FC<HeaderProps> = ({
               <Button 
                 variant="ghost" 
                 size="sm" 
-                onClick={() => navigate('/ask')}
+                onClick={handleAskClick}
                 className={getNavClasses('/ask')}
                 style={{
                   color: getActiveNavColor('/ask') || getNavTextColor('/ask') || (theme?.buttonGhost.text || theme?.headerText || '#000000'),
@@ -761,7 +774,7 @@ const Header: React.FC<HeaderProps> = ({
             <Button
               variant="ghost"
               className={`w-full justify-start ${getNavClasses('/ask')}`}
-              onClick={() => handleNavClick('/ask')}
+              onClick={handleAskClick}
               style={{
                 color: getActiveNavColor('/ask') || getNavTextColor('/ask') || (theme?.buttonGhost.text || theme?.headerText || '#000000'),
               }}

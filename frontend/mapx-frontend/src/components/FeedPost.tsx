@@ -759,8 +759,25 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                     variant="outline"
                     size="sm"
                     onClick={() => setShowLabelPicker(!showLabelPicker)}
-                    className="h-7 px-2 text-xs border-[1.5px] border-dashed border-black/30 hover:border-black rounded-none"
-                    style={{ boxShadow: '2px 2px 0 0 rgba(0,0,0,0.1)' }}
+                    className="h-7 px-2 text-xs border-[1.5px] border-dashed rounded-none"
+                    style={{
+                      backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                      color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                      borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.3)',
+                      boxShadow: '2px 2px 0 0 rgba(0,0,0,0.1)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (selectedTheme) {
+                        e.currentTarget.style.borderColor = selectedTheme.borderColor || '#000000';
+                        e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || selectedTheme.cardBackground || '#FFFFFF';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedTheme) {
+                        e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || 'rgba(0, 0, 0, 0.3)';
+                        e.currentTarget.style.backgroundColor = selectedTheme.cardBackground || '#FFFFFF';
+                      }
+                    }}
                   >
                     {showLabelPicker ? 'Hide Labels' : '+ Add Labels'}
                   </Button>
@@ -1006,8 +1023,23 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
                 variant="outline"
                 disabled={isSaving}
                 size="sm"
-                className="h-7 md:h-8 px-3 md:px-4 text-xs font-medium border-[1.5px] border-black rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                style={{ boxShadow: '2px 2px 0 0 #000' }}
+                className="h-7 md:h-8 px-3 md:px-4 text-xs font-medium border-[1.5px] rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+                style={{
+                  backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                  color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
+                  borderColor: selectedTheme?.borderColor || '#000000',
+                  boxShadow: '2px 2px 0 0 #000'
+                }}
+                onMouseEnter={(e) => {
+                  if (selectedTheme && !isSaving) {
+                    e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || selectedTheme.buttonGhost?.hover || selectedTheme.cardBackground || '#FFFFFF';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (selectedTheme && !isSaving) {
+                    e.currentTarget.style.backgroundColor = selectedTheme.cardBackground || '#FFFFFF';
+                  }
+                }}
               >
                 Cancel
                 <X className="h-3.5 w-3.5 ml-1.5" strokeWidth={1.5} />
@@ -1360,8 +1392,18 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
       
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-1.5 mb-0.5">
-          <span className="text-xs font-bold tracking-tight">{comment.user_name || 'Anonymous User'}</span>
-          <span className="text-xs text-foreground font-medium">{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
+          <span
+            className="text-xs font-bold tracking-tight"
+            style={{ color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#FFFFFF' }}
+          >
+            {comment.user_name || 'Anonymous User'}
+          </span>
+          <span
+            className="text-xs font-medium"
+            style={{ color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#E5E5E5' }}
+          >
+            {renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}
+          </span>
         </div>
         
         <div className="flex items-center gap-3 mt-1">
@@ -1468,7 +1510,11 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             }}
             placeholder="Add a comment..."
             disabled={isSubmitting}
-            className="flex-1 text-xs border-0 bg-transparent px-0 py-1.5 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground font-medium"
+            className="flex-1 text-[11px] md:text-xs border-0 bg-transparent px-0 py-1 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground font-medium"
+            style={{
+              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || 'transparent',
+              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#FFFFFF',
+            }}
           />
           {showMentionMenu && mentionSuggestions.length > 0 && (
             <div className="fixed z-50 w-64 border-[1.5px] border-black bg-popover text-popover-foreground" style={{ top: mentionPosition?.top || 0, left: mentionPosition?.left || 0, boxShadow: '3px 3px 0 0 #000' }}>
@@ -1510,9 +1556,13 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
             disabled={!newComment.trim() || isSubmitting}
             className="h-7 md:h-8 px-3 md:px-4 border-[1.5px] rounded-none transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              borderColor: selectedTheme?.borderColor || '#000000',
-              backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
-              color: (!newComment.trim() || isSubmitting) ? '#000' : (selectedTheme?.textPrimary || '#000000'),
+              borderColor: selectedTheme?.borderColor || '#FFFFFF',
+              backgroundColor: (!newComment.trim() || isSubmitting)
+                ? (selectedTheme?.cardBackground || 'transparent')
+                : (selectedTheme?.buttonPrimary?.background || selectedTheme?.accentColor || selectedTheme?.cardBackground || '#FFFFFF'),
+              color: (!newComment.trim() || isSubmitting)
+                ? (selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF')
+                : (selectedTheme?.buttonPrimary?.text || selectedTheme?.textOnAccent || '#000000'),
               boxShadow: (!newComment.trim() || isSubmitting) ? 'none' : '2px 2px 0 0 #000',
             }}
           >

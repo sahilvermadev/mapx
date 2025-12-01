@@ -289,9 +289,24 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     toast.success(SUCCESS_MESSAGES.POSTED);
     
     setTimeout(() => {
+      // Notify parent/page
       onPostCreated();
+
+      // Fire a lightweight cross-page event so any mounted feed instance
+      // can react immediately (e.g. show a toast or invalidate queries).
+      try {
+        window.dispatchEvent(
+          new CustomEvent('answer:posted', {
+            detail: {
+              questionId,
+            },
+          })
+        );
+      } catch {
+        // Ignore – this is best-effort UX sugar
+      }
     }, CELEBRATION_DELAY_MS);
-  }, [onPostCreated]);
+  }, [onPostCreated, questionId]);
 
   // Handle approve preview
   const handleApprovePreview = useCallback(async () => {

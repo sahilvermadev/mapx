@@ -7,6 +7,8 @@ import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
 import QuestionFeedPost from '@/components/QuestionFeedPost';
 import { apiClient } from '@/services/apiClient';
 import { useAuth } from '@/auth';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 
 const QuestionPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +18,12 @@ const QuestionPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [bgReady, setBgReady] = useState(false);
   const [followSuggestion, setFollowSuggestion] = useState<{ friendId: string; friendName: string } | null>(null);
+
+  // Theme support
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES]
+    ? THEMES[themeName as keyof typeof THEMES]
+    : null;
 
   useEffect(() => {
     if (!id) {
@@ -74,7 +82,27 @@ const QuestionPage: React.FC = () => {
   }
 
   return (
-    <div className="h-full grid place-items-center overflow-hidden relative">
+    <div
+      className="min-h-[calc(100vh-64px)] grid place-items-center overflow-hidden relative"
+      style={{
+        backgroundColor: selectedTheme?.backgroundColor || 'var(--app-bg)',
+        color: selectedTheme?.textPrimary || 'var(--app-text)',
+        ...(selectedTheme
+          ? {
+              // Align shadcn / Tailwind CSS variables with the active profile theme
+              '--background': selectedTheme.backgroundColor,
+              '--foreground': selectedTheme.textPrimary,
+              '--muted-foreground':
+                selectedTheme.textMuted ||
+                selectedTheme.textSecondary ||
+                '#9CA3AF',
+              '--card':
+                selectedTheme.cardBackground || selectedTheme.backgroundColor,
+              '--card-foreground': selectedTheme.textPrimary,
+            }
+          : {}),
+      } as React.CSSProperties}
+    >
       {/* Background image with opacity control */}
       <div 
         className="absolute inset-0 transition-opacity duration-300"
@@ -104,7 +132,18 @@ const QuestionPage: React.FC = () => {
 
         {/* Loading State */}
         {loading && (
-          <Card className={`p-6 shadow-sm border border-white/40 bg-white/90 ${bgReady ? 'backdrop-blur-sm' : ''}`}>
+          <Card
+            className="p-6 shadow-sm border"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.cardBackground || 'rgba(15,23,42,0.9)',
+              borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+              boxShadow: '0 18px 40px rgba(0,0,0,0.55)',
+            } : {
+              backgroundColor: bgReady ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.9)',
+              borderColor: 'rgba(255,255,255,0.4)',
+              boxShadow: '0 18px 40px rgba(15,23,42,0.55)',
+            }}
+          >
             <FeedPostSkeleton noOuterSpacing />
           </Card>
         )}
@@ -112,7 +151,7 @@ const QuestionPage: React.FC = () => {
         {/* Error State */}
         {error && (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <p className="text-red-500">{error}</p>
+            <p className="text-red-400 font-medium">{error}</p>
             <Button onClick={() => window.location.reload()} variant="outline" size="sm">
               Try Again
             </Button>
@@ -133,7 +172,18 @@ const QuestionPage: React.FC = () => {
 
         {/* Question Content */}
         {question && !loading && !error && (
-          <Card className={`p-6 shadow-sm border border-white/40 bg-white/90 ${bgReady ? 'backdrop-blur-sm' : ''}`}>
+          <Card
+            className="p-6 shadow-sm border"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.cardBackground || 'rgba(15,23,42,0.9)',
+              borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+              boxShadow: '0 22px 60px rgba(0,0,0,0.6)',
+            } : {
+              backgroundColor: bgReady ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.9)',
+              borderColor: 'rgba(255,255,255,0.4)',
+              boxShadow: '0 22px 60px rgba(15,23,42,0.6)',
+            }}
+          >
             <div className="w-full flex justify-center">
               <div className="w-full max-w-xl">
                 <QuestionFeedPost

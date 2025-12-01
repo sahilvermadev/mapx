@@ -45,6 +45,27 @@ export interface RecommendationSearchResult extends Recommendation {
   similarity: number;
 }
 
+export interface FeedFilterCity {
+  city_slug: string;
+  country_code: string | null;
+  rec_count: number;
+}
+
+export interface FeedFilterCategory {
+  key: string;
+  rec_count: number;
+}
+
+export interface FeedFilterMetadata {
+  cities: FeedFilterCity[];
+  categories: FeedFilterCategory[];
+  // Per-city category breakdown for the full social feed
+  cityCategories: Array<{
+    city_slug: string;
+    categories: FeedFilterCategory[];
+  }>;
+}
+
 /**
  * Insert a new recommendation with optional vector embedding
  */
@@ -567,6 +588,210 @@ export async function searchRecommendationsBySimilarity(
   }
   
   return result.rows;
+}
+
+/**
+ * Get aggregate metadata for the user's entire social feed to power filters.
+ * This returns all distinct cities and categories across the user's network feed,
+ * independent of pagination in the main feed endpoint.
+ */
+export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterMetadata> {
+  // We intentionally don't reuse COMMON_FEED_COLUMNS here to avoid unnecessary
+  // joins and aggregation – this query only needs city/category level data.
+  //
+  // The visibility and block rules mirror the main feed:
+  // - Only recommendations from followed users (plus self)
+  // - Only visibility IN ('public','friends')
+  // - Exclude users blocked by or blocking the current user
+  //
+  // We aggregate:
+  // - Cities from both places and services
+  // - Categories from place primary_type and recommendation content_type
+
+  const client = await pool.connect();
+  try {
+    const params: any[] = [userId];
+
+    const sql = `
+      WITH followed_users AS (
+        SELECT following_id AS user_id
+        FROM user_follows
+        WHERE follower_id = $1
+        UNION
+        SELECT $1::uuid AS user_id
+      ),
+      blocked_pairs AS (
+        SELECT DISTINCT
+          CASE WHEN blocker_id = $1 THEN blocked_id ELSE blocker_id END AS blocked_user_id
+        FROM user_blocks
+        WHERE blocker_id = $1 OR blocked_id = $1
+      ),
+      visible_recommendations AS (
+        SELECT r.id, r.place_id, r.service_id, r.content_type
+        FROM recommendations r
+        WHERE r.user_id IN (SELECT user_id FROM followed_users)
+          AND r.visibility IN ('public','friends')
+          AND r.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+      )
+      SELECT
+        (
+          SELECT json_agg(city_row ORDER BY city_row.rec_count DESC, city_row.city_slug ASC)
+          FROM (
+            SELECT
+              COALESCE(p.city_slug, s.city_slug)       AS city_slug,
+              COALESCE(p.country_code, s.country_code) AS country_code,
+              COUNT(*)::int                            AS rec_count
+            FROM visible_recommendations vr
+            LEFT JOIN places p   ON vr.place_id = p.id
+            LEFT JOIN services s ON vr.service_id = s.id
+            WHERE (p.city_slug IS NOT NULL OR s.city_slug IS NOT NULL)
+            GROUP BY COALESCE(p.city_slug, s.city_slug), COALESCE(p.country_code, s.country_code)
+          ) AS city_row
+        ) AS cities,
+        (
+          SELECT json_agg(cat_row ORDER BY cat_row.rec_count DESC, cat_row.key ASC)
+          FROM (
+            SELECT
+              LOWER(
+                COALESCE(
+                  NULLIF(p.primary_type, ''),
+                  NULLIF(vr.content_type, '')
+                )
+              )              AS key,
+              COUNT(*)::int  AS rec_count
+            FROM visible_recommendations vr
+            LEFT JOIN places p ON vr.place_id = p.id
+            WHERE
+              (p.primary_type IS NOT NULL AND p.primary_type <> '')
+              OR (vr.content_type IS NOT NULL AND vr.content_type <> '')
+            GROUP BY LOWER(
+              COALESCE(
+                NULLIF(p.primary_type, ''),
+                NULLIF(vr.content_type, '')
+              )
+            )
+          ) AS cat_row
+        ) AS categories,
+        (
+          SELECT json_agg(city_cat_row ORDER BY city_cat_row.city_slug ASC, city_cat_row.rec_count DESC)
+          FROM (
+            SELECT
+              COALESCE(p.city_slug, s.city_slug) AS city_slug,
+              LOWER(
+                COALESCE(
+                  NULLIF(p.primary_type, ''),
+                  NULLIF(vr.content_type, '')
+                )
+              )                                  AS key,
+              COUNT(*)::int                      AS rec_count
+            FROM visible_recommendations vr
+            LEFT JOIN places p   ON vr.place_id = p.id
+            LEFT JOIN services s ON vr.service_id = s.id
+            WHERE (p.city_slug IS NOT NULL OR s.city_slug IS NOT NULL)
+              AND (
+                (p.primary_type IS NOT NULL AND p.primary_type <> '')
+                OR (vr.content_type IS NOT NULL AND vr.content_type <> '')
+              )
+            GROUP BY
+              COALESCE(p.city_slug, s.city_slug),
+              LOWER(
+                COALESCE(
+                  NULLIF(p.primary_type, ''),
+                  NULLIF(vr.content_type, '')
+                )
+              )
+          ) AS city_cat_row
+        ) AS city_categories;
+    `;
+
+    const result = await client.query(sql, params);
+    const row = result.rows[0] || {};
+
+    const rawCities: any[] = Array.isArray(row.cities) ? row.cities : [];
+    const rawCategories: any[] = Array.isArray(row.categories) ? row.categories : [];
+    const rawCityCategories: any[] = Array.isArray(row.city_categories) ? row.city_categories : [];
+
+    // Normalize and defensively de-duplicate cities and categories in case the SQL
+    // ever returns duplicates.
+    const cityMap = new Map<string, FeedFilterCity>();
+    for (const c of rawCities) {
+      if (!c || !c.city_slug) continue;
+      const slug = String(c.city_slug);
+      const key = slug;
+      const existing = cityMap.get(key);
+      const recCount = Number((c as any).rec_count ?? 0);
+      if (!existing || recCount > existing.rec_count) {
+        cityMap.set(key, {
+          city_slug: slug,
+          country_code: c.country_code ?? null,
+          rec_count: recCount,
+        });
+      }
+    }
+    const cities = Array.from(cityMap.values());
+
+    const categoryMap = new Map<string, FeedFilterCategory>();
+    for (const c of rawCategories) {
+      if (!c || !c.key) continue;
+      const key = String(c.key);
+      const existing = categoryMap.get(key);
+      const recCount = Number((c as any).rec_count ?? 0);
+      if (!existing || recCount > existing.rec_count) {
+        categoryMap.set(key, { key, rec_count: recCount });
+      }
+    }
+    const categories = Array.from(categoryMap.values());
+
+    // Build per-city categories (full-feed scope)
+    const cityCategoryMap = new Map<string, Map<string, FeedFilterCategory>>();
+    for (const c of rawCityCategories) {
+      if (!c || !c.city_slug || !c.key) continue;
+      const citySlug = String(c.city_slug);
+      const key = String(c.key);
+      const recCount = Number((c as any).rec_count ?? 0);
+
+      let perCity = cityCategoryMap.get(citySlug);
+      if (!perCity) {
+        perCity = new Map<string, FeedFilterCategory>();
+        cityCategoryMap.set(citySlug, perCity);
+      }
+      const existing = perCity.get(key);
+      if (!existing || recCount > existing.rec_count) {
+        perCity.set(key, { key, rec_count: recCount });
+      }
+    }
+
+    const cityCategories = Array.from(cityCategoryMap.entries()).map(
+      ([city_slug, cats]) => ({
+        city_slug,
+        categories: Array.from(cats.values()),
+      })
+    );
+
+    console.log('[feedFilters] getFeedFilterMetadata result summary:', {
+      userId,
+      rawCityRows: rawCities.length,
+      distinctCities: cities.length,
+      rawCategoryRows: rawCategories.length,
+      distinctCategories: categories.length,
+      rawCityCategoryRows: rawCityCategories.length,
+      distinctCityCategoryCities: cityCategories.length,
+      sampleCities: cities.slice(0, 5),
+      sampleCategories: categories.slice(0, 5),
+      sampleCityCategories: cityCategories.slice(0, 3),
+    });
+
+    return { cities, categories, cityCategories };
+  } catch (error) {
+    const appError = handleError(error, {
+      context: 'getFeedFilterMetadata',
+      logError: true,
+      includeStack: true,
+    });
+    throw appError;
+  } finally {
+    client.release();
+  }
 }
 
 /**

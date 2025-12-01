@@ -1,6 +1,26 @@
 import { apiClient, type ApiResponse } from './apiClient';
 import type { FeedPost } from './socialService';
 
+export interface FeedFilterCity {
+  city_slug: string;
+  country_code: string | null;
+  rec_count: number;
+}
+
+export interface FeedFilterCategory {
+  key: string;
+  rec_count: number;
+}
+
+export interface FeedFilterMetadata {
+  cities: FeedFilterCity[];
+  categories: FeedFilterCategory[];
+  cityCategories: Array<{
+    city_slug: string;
+    categories: FeedFilterCategory[];
+  }>;
+}
+
 // Feed API service
 export const feedApi = {
   // Main social feed
@@ -38,6 +58,21 @@ export const feedApi = {
       };
     }
     return response as ApiResponse<FeedPost[]>;
+  },
+
+  // Feed filter metadata (cities + categories for entire social feed)
+  async getFeedFilters(
+    currentUserId: string
+  ): Promise<ApiResponse<FeedFilterMetadata>> {
+    const response = await apiClient.get('/feed/filters', { currentUserId });
+    if (response.success && response.data) {
+      // The backend already returns the correct shape; just narrow the type
+      return {
+        ...response,
+        data: response.data as FeedFilterMetadata,
+      };
+    }
+    return response as ApiResponse<FeedFilterMetadata>;
   },
 
   // Friends-only feed

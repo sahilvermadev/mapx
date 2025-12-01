@@ -18,5 +18,9 @@ frontend/dist/
 frontend/mapx-frontend/dist/
 *.tsbuildinfo
 
+# Local backups and database dumps
+backups/
+backups/*.sql
+
 # Temporary copies for Docker build
 backend/scripts/

@@ -4,6 +4,9 @@ import { Search, MapPin, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
+import { getReadableTextColor } from '@/utils/color';
 
 interface InlineLocationPickerProps {
   onLocationSelected: (location: {
@@ -47,6 +50,14 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const autocomplete = useRef<google.maps.places.Autocomplete | null>(null);
 
+  // Theme support
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES]
+    ? THEMES[themeName as keyof typeof THEMES]
+    : null;
+  const accentColor = selectedTheme?.accentColor || '#000000';
+  const textOnAccent = getReadableTextColor(accentColor);
+
   // Initialize Google Places Autocomplete (with loader fallback)
   useEffect(() => {
     let cancelled = false;
@@ -76,13 +87,17 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
       autocomplete.current = null;
 
       // Initialize autocomplete
-      autocomplete.current = new (window as any).google.maps.places.Autocomplete(searchInputRef.current, {
-        types: ['establishment', 'geocode'],
-        fields: ['place_id', 'geometry', 'name', 'formatted_address', 'types', 'photos', 'address_components']
-      });
+      const auto = new (window as any).google.maps.places.Autocomplete(
+        searchInputRef.current,
+        {
+          types: ['establishment', 'geocode'],
+          fields: ['place_id', 'geometry', 'name', 'formatted_address', 'types', 'photos', 'address_components'],
+        }
+      );
+      autocomplete.current = auto;
 
-      autocomplete.current.addListener('place_changed', () => {
-      const place = autocomplete.current?.getPlace();
+      auto.addListener('place_changed', () => {
+      const place = auto.getPlace();
       if (place && place.geometry && place.place_id) {
         // Validate coordinates
         const lat = place.geometry?.location?.lat();
@@ -174,34 +189,65 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
     <div className="w-full max-w-2xl mx-auto space-y-6">
       {/* Search Section */}
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search
+          className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4"
+          style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280' }}
+        />
         <Input
           ref={searchInputRef}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search for a place or address..."
-          className="pl-10 pr-4 py-3 text-base bg-transparent border border-border rounded-lg focus:border-foreground focus:ring-0"
+          className="pl-10 pr-4 py-3 text-base bg-transparent border rounded-lg focus:ring-0"
+          style={selectedTheme ? {
+            backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground,
+            borderColor: selectedTheme.inputBorder || selectedTheme.borderColor,
+            color: selectedTheme.inputText || selectedTheme.textPrimary,
+          } : undefined}
         />
       </div>
       
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <div
+          className="p-3 rounded-lg text-sm"
+          style={{
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FECACA',
+            color: '#B91C1C',
+          }}
+        >
           {error}
         </div>
       )}
 
       {/* Selected Location Display */}
       {selectedLocation && (
-        <div className="p-4 md:p-5 rounded-xl border border-border bg-card/50 shadow-sm">
+        <div
+          className="p-4 md:p-5 rounded-xl border shadow-sm"
+          style={selectedTheme ? {
+            backgroundColor: selectedTheme.cardBackground,
+            borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor,
+            color: selectedTheme.textPrimary,
+          } : undefined}
+        >
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1.5">
-                <MapPin className="h-4 w-4 text-foreground/70" />
-                <h4 className="font-medium text-foreground tracking-tight">
+                <MapPin
+                  className="h-4 w-4"
+                  style={{ color: selectedTheme?.textSecondary || selectedTheme?.textMuted || '#9CA3AF' }}
+                />
+                <h4
+                  className="font-medium tracking-tight"
+                  style={{ color: selectedTheme?.textPrimary || '#111827' }}
+                >
                   {selectedLocation.name}
                 </h4>
               </div>
-              <p className="text-sm text-muted-foreground mb-2">
+              <p
+                className="text-sm mb-2"
+                style={{ color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#9CA3AF' }}
+              >
                 {selectedLocation.formatted_address}
               </p>
               {selectedLocation.types.length > 0 && (
@@ -209,7 +255,11 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
                   {selectedLocation.types.slice(0, 2).map((type, index) => (
                     <span
                       key={index}
-                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground"
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px]"
+                      style={{
+                        backgroundColor: selectedTheme?.selectedBackground || selectedTheme?.hoverBackground || '#111827',
+                        color: selectedTheme?.textPrimary || '#F9FAFB',
+                      }}
                     >
                       {getPrimaryGoogleType([type]).replace(/_/g, ' ')}
                     </span>
@@ -217,7 +267,10 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
                 </div>
               )}
             </div>
-            <Check className="h-5 w-5 text-foreground/70 flex-shrink-0 ml-3" />
+            <Check
+              className="h-5 w-5 flex-shrink-0 ml-3"
+              style={{ color: selectedTheme?.textSecondary || selectedTheme?.textMuted || '#9CA3AF' }}
+            />
           </div>
         </div>
       )}
@@ -227,14 +280,33 @@ const InlineLocationPicker: React.FC<InlineLocationPickerProps> = ({
         <Button
           onClick={onSkip}
           variant="ghost"
-          className="h-10 px-3 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-muted"
+          className="h-10 px-3 rounded-full text-sm"
+          style={selectedTheme ? {
+            color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+          } : undefined}
+          onMouseEnter={(e) => {
+            if (selectedTheme) {
+              e.currentTarget.style.backgroundColor = selectedTheme.buttonGhost?.hover || selectedTheme.hoverBackground || '#1F2937';
+              e.currentTarget.style.color = selectedTheme.textPrimary || '#FFFFFF';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (selectedTheme) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280';
+            }
+          }}
         >
           Skip
         </Button>
         {selectedLocation && (
           <Button
             onClick={handleConfirmSelection}
-            className="p-3 rounded-full bg-foreground text-background hover:opacity-90"
+            className="p-3 rounded-full"
+            style={selectedTheme ? {
+              backgroundColor: accentColor,
+              color: textOnAccent,
+            } : undefined}
           >
             Select Location
           </Button>

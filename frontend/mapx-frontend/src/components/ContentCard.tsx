@@ -215,23 +215,39 @@ const ContentCard: React.FC<ContentCardProps> = ({
   }, [place.google_place_id]);
 
   // Helper function to initialize comments state for a review
-  const getCommentsState = useCallback((reviewId: number): ReviewCommentsState => {
-    return reviewCommentsState[reviewId] || {
-      comments: [],
-      isLoading: false,
-      isSubmitting: false,
-      newComment: '',
-      showComments: false,
-    };
-  }, [reviewCommentsState]);
+  const getCommentsState = useCallback(
+    (reviewId: number): ReviewCommentsState => {
+      return reviewCommentsState[reviewId] || {
+        comments: [],
+        isLoading: false,
+        isSubmitting: false,
+        newComment: '',
+        showComments: false,
+      };
+    },
+    [reviewCommentsState]
+  );
 
   // Helper function to update comments state for a review
-  const updateCommentsState = useCallback((reviewId: number, updates: Partial<ReviewCommentsState>) => {
-    setReviewCommentsState(prev => ({
-      ...prev,
-      [reviewId]: { ...getCommentsState(reviewId), ...updates }
-    }));
-  }, [getCommentsState]);
+  const updateCommentsState = useCallback(
+    (reviewId: number, updates: Partial<ReviewCommentsState>) => {
+      setReviewCommentsState(prev => ({
+        ...prev,
+        [reviewId]: { ...(prev[reviewId] || getCommentsState(reviewId)), ...updates },
+      }));
+    },
+    [getCommentsState]
+  );
+
+  // Small helper to ensure the user is authenticated before performing
+  // comment-related actions. Returns true if authenticated.
+  const ensureAuthenticatedForComments = useCallback(() => {
+    if (!isAuthenticated || !currentUser) {
+      setShowLoginModal(true);
+      return false;
+    }
+    return true;
+  }, [isAuthenticated, currentUser]);
 
   const handleSubmitReview = useCallback((payload: ReviewPayload) => {
     console.log('Review submitted:', payload);
@@ -326,35 +342,22 @@ const ContentCard: React.FC<ContentCardProps> = ({
     }
   }, [isAuthenticated, currentUser, currentUserId, reviewLikes]);
 
-  // Handle toggle comments for a review
-  const handleToggleComments = useCallback(async (reviewId: number) => {
-    if (!isAuthenticated || !currentUser) {
-      setShowLoginModal(true);
-      return;
-    }
-
-    const currentState = getCommentsState(reviewId);
-    const isShowing = currentState.showComments;
-    const newShowState = !isShowing;
-
-    // Update show state
-    updateCommentsState(reviewId, { showComments: newShowState });
-
-    // Load comments if showing for the first time and not already loaded
-    if (newShowState && currentState.comments.length === 0 && !currentState.isLoading) {
+  // Load comments for a review
+  const loadCommentsForReview = useCallback(
+    async (reviewId: number) => {
       updateCommentsState(reviewId, { isLoading: true });
-      
+
       try {
         const response = await socialApi.getComments(reviewId, currentUserId);
         if (response.success && response.data) {
           updateCommentsState(reviewId, {
             comments: response.data,
-            isLoading: false
+            isLoading: false,
           });
         } else {
           updateCommentsState(reviewId, {
             comments: [],
-            isLoading: false
+            isLoading: false,
           });
           console.error('Failed to load comments:', response.error);
         }
@@ -362,15 +365,43 @@ const ContentCard: React.FC<ContentCardProps> = ({
         console.error('Failed to load comments:', error);
         updateCommentsState(reviewId, {
           comments: [],
-          isLoading: false
+          isLoading: false,
         });
       }
-    }
-  }, [isAuthenticated, currentUser, currentUserId, getCommentsState, updateCommentsState]);
+    },
+    [currentUserId, updateCommentsState]
+  );
+
+  // Handle toggle comments for a review
+  const handleToggleComments = useCallback(
+    (reviewId: number) => {
+      // Require authentication to interact with comments
+      if (!ensureAuthenticatedForComments()) return;
+
+      const currentState = getCommentsState(reviewId);
+      const isShowing = currentState.showComments;
+      const newShowState = !isShowing;
+
+      // Update show state immediately so the UI responds to the tap
+      updateCommentsState(reviewId, { showComments: newShowState });
+
+      // If we're opening and haven't loaded comments yet, fetch them
+      if (
+        newShowState &&
+        currentState.comments.length === 0 &&
+        !currentState.isLoading
+      ) {
+        void loadCommentsForReview(reviewId);
+      }
+    },
+    [ensureAuthenticatedForComments, getCommentsState, updateCommentsState, loadCommentsForReview]
+  );
 
   // Handle add comment
   const handleAddComment = useCallback(async (reviewId: number, e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!ensureAuthenticatedForComments()) return;
+
     const currentState = getCommentsState(reviewId);
     const commentText = currentState.newComment.trim();
     
@@ -533,21 +564,23 @@ const ContentCard: React.FC<ContentCardProps> = ({
         <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">
           {place.name}
         </CardTitle>
-        {networkAverageRating !== null && networkRatingCount > 0 && (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {Array.from({ length: Math.round(networkAverageRating) }).map((_, i) => (
-                <Star key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-              ))}
-            </div>
-            <span className="text-sm text-gray-600">{networkAverageRating.toFixed(1)} ({networkRatingCount})</span>
-          </div>
-        )}
       </div>
       <div className="flex items-start gap-2 text-sm text-gray-600">
         <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
         <span className="leading-relaxed">{place.address}</span>
       </div>
+      {networkAverageRating !== null && networkRatingCount > 0 && (
+        <div className="flex items-center gap-2 text-sm text-gray-700">
+          <div className="flex items-center gap-1">
+            {Array.from({ length: Math.round(networkAverageRating) }).map((_, i) => (
+              <Star key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+            ))}
+          </div>
+          <span className="text-sm text-gray-700">
+            {networkAverageRating.toFixed(1)}
+          </span>
+        </div>
+      )}
       {place.category && place.category !== 'point_of_interest' && (
         <Badge variant="secondary" className="w-fit rounded-md border border-black/20 bg-white text-gray-700 font-medium shadow-[1px_1px_0_0_#000]">
           {formatGoogleTypeForDisplay(place.category)}
@@ -760,7 +793,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
                     value={commentsState.newComment}
                     onChange={(e) => updateCommentsState(review.id, { newComment: e.target.value })}
                     placeholder="Add a comment..."
-                    className="flex-1 h-7 text-xs rounded-md border border-black/20"
+                    className="flex-1 h-7 text-sm md:text-xs rounded-md border border-black/20 bg-white text-gray-900 placeholder:text-gray-400"
                     disabled={commentsState.isSubmitting}
                   />
                   <Button
@@ -870,9 +903,9 @@ const ContentCard: React.FC<ContentCardProps> = ({
       {/* Content Card */}
       <motion.div
         className="
-          fixed bg-white z-50 overflow-y-auto flex flex-col
-          inset-x-0 bottom-0 rounded-t-2xl border-t-2 border-black shadow-[0_-8px_0_0_#000] max-h-[90vh]
-          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:shadow-[8px_0_0_0_#000] md:max-h-none md:pt-16 md:h-screen
+          content-card-root fixed bg-white z-50 overflow-hidden flex flex-col
+          inset-x-0 bottom-0 rounded-t-2xl border-t-2 border-black shadow-[0_-8px_0_0_#000] h-[90dvh]
+          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:shadow-[8px_0_0_0_#000] md:pt-16 md:h-screen
         "
         initial={isMobile ? { y: '100%' } : { x: '-100%' }}
         animate={isMobile ? { y: 0 } : { x: 0 }}
@@ -892,16 +925,19 @@ const ContentCard: React.FC<ContentCardProps> = ({
           <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
         </div>
 
-        {renderImageGallery()}
-        
-        <div className="p-4 md:p-6 space-y-8 flex-1">
-          {renderPlaceHeader()}
+        {/* Scrollable content: images + details + reviews */}
+        <div className="flex-1 overflow-y-auto">
+          {renderImageGallery()}
           
-          <Separator className="bg-black/20" />
-          
-          {renderReviewsSection()}
-          
-          {renderSocialActions()}
+          <div className="p-4 md:p-6 space-y-8">
+            {renderPlaceHeader()}
+            
+            <Separator className="bg-black/20" />
+            
+            {renderReviewsSection()}
+            
+            {renderSocialActions()}
+          </div>
         </div>
 
         {/* Review Modal */}

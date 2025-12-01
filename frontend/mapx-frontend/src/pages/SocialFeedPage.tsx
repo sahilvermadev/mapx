@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Users } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,6 +23,7 @@ import { useFeedSearchResults } from '@/hooks/useFeedSearchResults';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useFeedQuery } from '@/hooks/useFeedQuery';
+import { useFeedFiltersMetadata } from '@/hooks/useFeedFiltersMetadata';
 import { useSuggestedUsersQuery } from '@/hooks/useSuggestedUsersQuery';
 import { useFollowMutation } from '@/hooks/useFollowMutation';
 
@@ -62,15 +64,86 @@ const SocialFeedPage: React.FC = () => {
   
   // Log component mount (moved logging here to avoid render-time logs)
   useEffect(() => {
-    if (feedClickInfo.current.hadStoredTime) {
-      const timestamp = feedClickInfo.current.timestamp;
-      console.log(`[PERF] SocialFeedPage: Found feed click time${timestamp ? ` (clicked at ${new Date(parseInt(timestamp)).toISOString()})` : ''}`);
-    } else {
-      console.log(`[PERF] SocialFeedPage: No click time found, using mount time`);
+    if (import.meta.env.DEV) {
+      if (feedClickInfo.current.hadStoredTime) {
+        const timestamp = feedClickInfo.current.timestamp;
+        console.log(`[PERF] SocialFeedPage: Found feed click time${timestamp ? ` (clicked at ${new Date(parseInt(timestamp)).toISOString()})` : ''}`);
+      } else {
+        console.log(`[PERF] SocialFeedPage: No click time found, using mount time`);
+      }
+      const mountTime = performance.now() - pageLoadStartTime.current;
+      console.log(`[PERF] SocialFeedPage mounted in ${mountTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'click' : 'mount'})`);
     }
-    const mountTime = performance.now() - pageLoadStartTime.current;
-    console.log(`[PERF] SocialFeedPage mounted in ${mountTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'click' : 'mount'})`);
   }, []);
+
+  // Check for question posted flag and show toast.
+  // Also listen for cross-page events so we handle both fast and slow mutations.
+  useEffect(() => {
+    const showSuccess = () => {
+      if (import.meta.env.DEV) {
+        console.log('[FEED] Showing "Question posted" toast', { time: performance.now() });
+      }
+      toast.success('Question posted!');
+    };
+
+    // Handle flag set before this page mounts
+    const stored = sessionStorage.getItem('questionPosted');
+    if (stored === 'true') {
+      sessionStorage.removeItem('questionPosted');
+      if (import.meta.env.DEV) {
+        console.log('[FEED] Found questionPosted flag in sessionStorage on mount', { time: performance.now() });
+      }
+      showSuccess();
+    }
+
+    const handlePosted = () => {
+      if (import.meta.env.DEV) {
+        console.log('[FEED] Received question:posted event', { time: performance.now() });
+      }
+      sessionStorage.removeItem('questionPosted');
+      showSuccess();
+    };
+
+    const handlePostFailed = (event: Event) => {
+      const custom = event as CustomEvent<{ message?: string }>;
+      const message = custom.detail?.message || 'Failed to post question';
+      if (import.meta.env.DEV) {
+        console.log('[FEED] Received question:post-failed event', { time: performance.now(), message });
+      }
+      toast.error(message);
+    };
+
+    window.addEventListener('question:posted', handlePosted as EventListener);
+    window.addEventListener('question:post-failed', handlePostFailed as EventListener);
+
+    return () => {
+      window.removeEventListener('question:posted', handlePosted as EventListener);
+      window.removeEventListener('question:post-failed', handlePostFailed as EventListener);
+    };
+  }, []);
+
+  // Listen for answers posted from other pages (e.g. composer) while the
+  // feed is mounted. This is a best-effort UX improvement on top of the
+  // React Query invalidation & refetch behavior.
+  useEffect(() => {
+    const handleAnswerPosted = (event: Event) => {
+      const custom = event as CustomEvent<{ questionId?: number }>;
+      if (import.meta.env.DEV) {
+        console.log('[FEED] Received answer:posted event', {
+          time: performance.now(),
+          questionId: custom.detail?.questionId,
+        });
+      }
+      // Invalidate all feed queries so they refetch if mounted
+      queryClient.invalidateQueries({ queryKey: ['feed'], exact: false }).catch(() => {});
+      toast.success('Answer posted!');
+    };
+
+    window.addEventListener('answer:posted', handleAnswerPosted as EventListener);
+    return () => {
+      window.removeEventListener('answer:posted', handleAnswerPosted as EventListener);
+    };
+  }, [queryClient]);
   
   // Local state
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
@@ -79,6 +152,7 @@ const SocialFeedPage: React.FC = () => {
   const [showNewPostsBanner, setShowNewPostsBanner] = useState(false);
   const [isSuggestedUsersClosed, setIsSuggestedUsersClosed] = useState(false);
   const [newPostsCount, setNewPostsCount] = useState(0);
+  const [enableCitySummaries, setEnableCitySummaries] = useState(false);
   
   // Refs
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -107,6 +181,11 @@ const SocialFeedPage: React.FC = () => {
     hasNextPage,
     isFetchingNextPage,
   } = useFeedQuery(currentUser?.id || '', selectedGroupIds, { includeQna: true, citySlug, countryCode: undefined, category: undefined });
+
+  // Load stable feed filter metadata (cities + categories) for the user's entire network feed
+  const {
+    data: feedFiltersMetadata,
+  } = useFeedFiltersMetadata(currentUser?.id);
   
   const {
     data: suggestedUsers = [],
@@ -133,7 +212,7 @@ const SocialFeedPage: React.FC = () => {
     });
     const posts = Array.from(postsMap.values());
     const flattenTime = performance.now() - flattenStartTime;
-    if (flattenTime > 5) {
+    if (import.meta.env.DEV && flattenTime > 5) {
       console.log(`[PERF] Post flattening/deduplication took ${flattenTime.toFixed(2)}ms for ${allPosts.length} posts`);
     }
     return posts as any[];
@@ -147,6 +226,14 @@ const SocialFeedPage: React.FC = () => {
     if (!s) return undefined;
     return s.split('-').map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(' ');
   }, []);
+  
+  // Defer heavy city summary computations until after initial paint
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      setEnableCitySummaries(true);
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, []);
 
   // Use deferred value for posts to prevent blocking UI updates during city computation
   const deferredPosts = useDeferredValue(typedPosts);
@@ -159,12 +246,44 @@ const SocialFeedPage: React.FC = () => {
   }, [isChecking, isAuthenticated, navigate]);
   
 
+  // Log high-level load milestones to understand perceived slowness
+  const hasLoggedInitialFeedData = useRef(false);
+  const hasLoggedFirstRender = useRef(false);
+
   useEffect(() => {
-    if (!loading && !suggestedUsersLoading && typedPosts.length > 0) {
-      const totalLoadTime = performance.now() - pageLoadStartTime.current;
-      console.log('🎉 [PERF] SocialFeedPage fully loaded!');
-      console.log(`📊 [PERF] Stats: ${typedPosts.length} posts, ${typedSuggestedUsers.length} suggested users`);
-      console.log(`⏱️ [PERF] Total page load time: ${totalLoadTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'button click' : 'component mount'})`);
+    if (!feedData || hasLoggedInitialFeedData.current === true) return;
+    hasLoggedInitialFeedData.current = true;
+    if (import.meta.env.DEV) {
+      console.log('[PERF] SocialFeedPage: initial feedData available', {
+        time: performance.now(),
+        pages: Array.isArray((feedData as any).pages) ? (feedData as any).pages.length : 'unknown',
+        isLoading: loading,
+        isFetchingNextPage,
+      });
+    }
+  }, [feedData, loading, isFetchingNextPage]);
+
+  useEffect(() => {
+    if (typedPosts.length === 0 || hasLoggedFirstRender.current) return;
+    hasLoggedFirstRender.current = true;
+    if (import.meta.env.DEV) {
+      const sinceStart = performance.now() - pageLoadStartTime.current;
+      console.log('[PERF] SocialFeedPage: first posts rendered', {
+        time: performance.now(),
+        sinceStart,
+        postCount: typedPosts.length,
+      });
+    }
+  }, [typedPosts.length]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      if (!loading && !suggestedUsersLoading && typedPosts.length > 0) {
+        const totalLoadTime = performance.now() - pageLoadStartTime.current;
+        console.log('🎉 [PERF] SocialFeedPage fully loaded!');
+        console.log(`📊 [PERF] Stats: ${typedPosts.length} posts, ${typedSuggestedUsers.length} suggested users`);
+        console.log(`⏱️ [PERF] Total page load time: ${totalLoadTime.toFixed(2)}ms (from ${feedClickTime.current === pageLoadStartTime.current ? 'button click' : 'component mount'})`);
+      }
     }
   }, [loading, suggestedUsersLoading, typedPosts.length, typedSuggestedUsers.length]);
 
@@ -291,7 +410,9 @@ const SocialFeedPage: React.FC = () => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
-          console.log('🔄 [INFINITE-SCROLL] Loading more posts...');
+          if (import.meta.env.DEV) {
+            console.log('🔄 [INFINITE-SCROLL] Loading more posts...');
+          }
           fetchNextPage();
         }
       },
@@ -394,7 +515,7 @@ const SocialFeedPage: React.FC = () => {
       }
     }
     const time = performance.now() - startTime;
-    if (time > 5) {
+    if (import.meta.env.DEV && time > 5) {
       console.log(`[PERF] matchedRecIds computation took ${time.toFixed(2)}ms`);
     }
     return { matchedRecIds: recIds, matchedAnswerRecIds: answerRecIds, matchedQuestionIds: questionIds };
@@ -421,7 +542,7 @@ const SocialFeedPage: React.FC = () => {
       result = typedPosts;
     }
     const time = performance.now() - startTime;
-    if (time > 5) {
+    if (import.meta.env.DEV && time > 5) {
       console.log(`[PERF] orderedPosts computation took ${time.toFixed(2)}ms for ${result.length} posts`);
     }
     return result;
@@ -478,6 +599,9 @@ const SocialFeedPage: React.FC = () => {
   // Compute city summaries from feed posts
   const citySummariesRef = useRef<CitySummary[]>([]);
   const citySummaries: CitySummary[] = useMemo(() => {
+    if (!enableCitySummaries) {
+      return citySummariesRef.current;
+    }
     // Early return if no posts to avoid unnecessary computation
     if (!deferredPosts || deferredPosts.length === 0) {
       return citySummariesRef.current;
@@ -579,6 +703,9 @@ const SocialFeedPage: React.FC = () => {
   // Global summary (all recommendations)
   const globalSummaryRef = useRef<CitySummary | undefined>(undefined);
   const globalSummary: CitySummary | undefined = useMemo(() => {
+    if (!enableCitySummaries) {
+      return globalSummaryRef.current;
+    }
     // Early return if no posts
     if (!deferredPosts || deferredPosts.length === 0) {
       return globalSummaryRef.current;
@@ -658,7 +785,7 @@ const SocialFeedPage: React.FC = () => {
 
     if ((!selectedCity?.id && !selectedCity?.name && selectedCategoryKeys.length === 0)) {
       const time = performance.now() - startTime;
-      if (time > 5) {
+      if (import.meta.env.DEV && time > 5) {
         console.log(`[PERF] filteredPosts (no filters) took ${time.toFixed(2)}ms`);
       }
       return base;
@@ -674,7 +801,7 @@ const SocialFeedPage: React.FC = () => {
       return true;
     });
     const time = performance.now() - startTime;
-    if (time > 5) {
+    if (import.meta.env.DEV && time > 5) {
       console.log(`[PERF] filteredPosts took ${time.toFixed(2)}ms, filtered ${base.length} -> ${result.length} posts`);
     }
     return result;
@@ -708,11 +835,101 @@ const SocialFeedPage: React.FC = () => {
       .sort((a, b) => b[1] - a[1])
       .map(([key, count]) => ({ key, label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), count }));
     const time = performance.now() - startTime;
-    if (time > 5) {
+    if (import.meta.env.DEV && time > 5) {
       console.log(`[PERF] availableCategories computation took ${time.toFixed(2)}ms for ${limitedPosts.length} posts (of ${sourcePosts.length} total), found ${result.length} categories`);
     }
     return result;
   }, [orderedPosts, selectedCity]);
+
+  // Build stable filter cities and categories from backend metadata so dropdowns
+  // always reflect the user's complete social feed, not just loaded pages.
+  const filterCities: CitySummary[] = useMemo(() => {
+    if (!feedFiltersMetadata || !feedFiltersMetadata.cities) {
+      // Fallback to computed city summaries from loaded posts
+      return citySummaries;
+    }
+    const perCityCatMap = new Map<string, { key: string; label: string; count?: number }[]>();
+    if (feedFiltersMetadata.cityCategories) {
+      for (const entry of feedFiltersMetadata.cityCategories) {
+        const cats =
+          entry.categories?.map((c) => ({
+            key: c.key,
+            label: c.key.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()),
+            count: c.rec_count,
+          })) ?? [];
+        perCityCatMap.set(entry.city_slug, cats);
+      }
+    }
+
+    const mapped = feedFiltersMetadata.cities.map((c) => ({
+      id: c.city_slug,
+      name: toTitle(c.city_slug) || c.city_slug,
+      country: c.country_code || undefined,
+      recCount: c.rec_count,
+      friendCount: 0,
+      friendFaces: [],
+      categories: perCityCatMap.get(c.city_slug) ?? [],
+    }));
+    if (import.meta.env.DEV) {
+      console.log('[feedFilters] mapped filterCities from metadata:', {
+        rawCount: feedFiltersMetadata.cities.length,
+        mappedCount: mapped.length,
+        sample: mapped.slice(0, 5),
+      });
+    }
+    return mapped;
+  }, [feedFiltersMetadata, citySummaries, toTitle]);
+
+  const filterCategories = useMemo(() => {
+    if (feedFiltersMetadata) {
+      // If a city is selected, use that city's categories only
+      const selectedSlug =
+        selectedCity?.id ||
+        (selectedCity?.name ? selectedCity.name.trim().toLowerCase().replace(/\s+/g, '-') : undefined);
+
+      if (selectedSlug && feedFiltersMetadata.cityCategories) {
+        const perCity = feedFiltersMetadata.cityCategories.find(
+          (c) => c.city_slug === selectedSlug
+        );
+        if (perCity) {
+          const mapped = perCity.categories.map((c) => ({
+            key: c.key,
+            label: c.key.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()),
+            count: c.rec_count,
+          }));
+          if (import.meta.env.DEV) {
+            console.log('[feedFilters] mapped filterCategories for city from metadata:', {
+              citySlug: selectedSlug,
+              rawCount: perCity.categories.length,
+              mappedCount: mapped.length,
+              sample: mapped.slice(0, 5),
+            });
+          }
+          return mapped;
+        }
+      }
+
+      // Otherwise, use global categories across the full feed
+      if (feedFiltersMetadata.categories) {
+        const mapped = feedFiltersMetadata.categories.map((c) => ({
+          key: c.key,
+          label: c.key.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()),
+          count: c.rec_count,
+        }));
+        if (import.meta.env.DEV) {
+          console.log('[feedFilters] mapped global filterCategories from metadata:', {
+            rawCount: feedFiltersMetadata.categories.length,
+            mappedCount: mapped.length,
+            sample: mapped.slice(0, 5),
+          });
+        }
+        return mapped;
+      }
+    }
+
+    // Fallback to locally computed categories when metadata isn't available yet
+    return availableCategories;
+  }, [feedFiltersMetadata, availableCategories, selectedCity]);
 
   // Render functions
   const renderFeedContent = () => {
@@ -938,14 +1155,14 @@ const SocialFeedPage: React.FC = () => {
 
   // Memoize the FeedFiltersProvider value to prevent infinite re-renders
   const feedFiltersValue = useMemo(() => ({
-    cities: citySummaries,
+    cities: filterCities,
     selectedCityId: selectedCity?.id,
     selectedCityName: selectedCity?.name,
     globalSummary: globalSummary,
     onSelectCity: handleSelectCity,
     selectedCategoryKeys,
     onToggleCategory: toggleCategory,
-    overrideCategories: availableCategories,
+    overrideCategories: filterCategories,
     isAuthenticated: !!currentUser,
     onStream: loadFromStream,
     onCleared: handleSearchCleared,
@@ -955,13 +1172,13 @@ const SocialFeedPage: React.FC = () => {
     onGroupToggle: handleGroupToggle,
     hasActiveSearch,
   }), [
-    citySummaries,
+    filterCities,
     selectedCity?.id,
     selectedCity?.name,
     globalSummary,
     selectedCategoryKeys,
     toggleCategory,
-    availableCategories,
+    filterCategories,
     currentUser,
     loadFromStream,
     handleSearchCleared,

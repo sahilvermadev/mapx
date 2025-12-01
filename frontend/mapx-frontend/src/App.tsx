@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useMemo, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import Header from './components/Header';
 import { UsernameSetupModal } from './auth';
 import { AuthProvider, useAuth } from './auth';
@@ -9,7 +9,7 @@ import { OfflineIndicator } from './hooks/useOffline';
 import { Toaster } from "sonner";
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { ProfileThemeProvider } from '@/contexts/ProfileThemeContext';
-import { FeedFiltersProvider } from '@/contexts/FeedFiltersContext';
+import { buildFeedQueryKey, fetchFeedPage, type FeedPageCursor } from '@/hooks/useFeedQuery';
 
 // Lazy load page components for better performance
 const MapPage = lazy(() => import('./pages/MapPage'));
@@ -35,12 +35,19 @@ const LoadingSkeleton: React.FC = () => (
 
 // Memoized MapPage component to prevent unnecessary re-renders
 const MemoizedMapPage = React.memo(MapPage);
+// Memoized SocialFeedPage component to keep a persistent instance mounted
+const MemoizedSocialFeedPage = React.memo(SocialFeedPage);
 
 // Main app component with optimized routing
 const AppContent: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const isMapRoute = location.pathname === '/map';
+  const isFeedRoute = location.pathname === '/feed';
+  // Only treat /feed as the base feed route. Compose/post/question (and ask)
+  // are now fully independent pages so we don't keep a background feed instance
+  // mounted behind them.
+  const isFeedBaseRoute = location.pathname === '/feed';
   const isLandingRoute = location.pathname === '/landing' || location.pathname === '/manifesto';
   const isRootRoute = location.pathname === '/';
   const { 
@@ -54,6 +61,7 @@ const AppContent: React.FC = () => {
     isInitialized,
     isLoggingOut 
   } = useAuth();
+  const queryClient = useQueryClient();
 
   // Handle root route redirect immediately - no delays
   useEffect(() => {
@@ -83,6 +91,36 @@ const AppContent: React.FC = () => {
 
   // Create persistent map instance using useMemo to ensure it's only created once
   const persistentMapInstance = useMemo(() => <MemoizedMapPage />, []);
+  // Create persistent feed instance so it stays mounted while feed-adjacent overlays
+  // (compose/post/question) render on top, similar to how the map is handled.
+  const persistentFeedInstance = useMemo(() => <MemoizedSocialFeedPage />, []);
+
+  // Prefetch feed data as soon as auth is ready so the first navigation to /feed
+  // (or any of the feed overlays) hits a warm cache, not just when the header mounts.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id) return;
+    const currentUserId = currentUser.id;
+    const keyBase = buildFeedQueryKey(currentUserId, [], { includeQna: true });
+
+    queryClient
+      .prefetchInfiniteQuery({
+        queryKey: keyBase,
+        initialPageParam: null as FeedPageCursor,
+        queryFn: ({ pageParam }) =>
+          fetchFeedPage({
+            currentUserId,
+            selectedGroupIds: [],
+            opts: { includeQna: true },
+            pageParam,
+            logPerf: false, // avoid duplicate perf logging for background prefetch
+          }),
+        staleTime: 5 * 60 * 1000,
+        gcTime: 15 * 60 * 1000,
+      })
+      .catch(() => {
+        // Prefetch is best-effort; ignore errors
+      });
+  }, [isAuthenticated, currentUser?.id, queryClient]);
 
   // Show logout transition
   if (isLoggingOut) {
@@ -157,10 +195,34 @@ const AppContent: React.FC = () => {
         {persistentMapInstance}
       </div>
       
-      {/* Route content container */}
-      {!isMapRoute && (
+      {/* Persistent Social Feed
+          - The actual feed UI lives here and stays mounted only on /feed.
+          - The /feed route below intentionally renders an empty element; it exists
+            so the URL and router state reflect that we're "on the feed" while this
+            persistent instance continues to own the UI and state.
+          - We do NOT mount this on /ask, /compose, /post/:id, or /question/:id to
+            keep those pages visually isolated and avoid background infinite scrolling. */}
+      {!isLandingRoute && !isMapRoute && isFeedBaseRoute && (
+        <div
+          className={`absolute inset-0 z-20 transition-opacity duration-200 ${
+            isFeedBaseRoute ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+          style={{
+            top: 'var(--header-height, 64px)',
+            height: 'calc(100vh - var(--header-height, 64px))',
+          }}
+        >
+          {persistentFeedInstance}
+        </div>
+      )}
+      
+      {/* Route content container
+          - We don't render this on /feed because the feed UI is handled entirely
+            by the persistent feed instance above. Rendering an empty full-screen
+            route container on /feed would intercept clicks on the feed. */}
+      {!isMapRoute && !isFeedRoute && (
         <div 
-          className="absolute inset-0 z-20"
+          className="absolute inset-0 z-30"
           style={{ 
             top: isLandingRoute ? '0' : 'var(--header-height, 64px)',
             overscrollBehavior: 'none',
@@ -172,7 +234,12 @@ const AppContent: React.FC = () => {
               <Route path="/landing" element={<LandingPage />} />
               <Route path="/manifesto" element={<ManifestoPage />} />
               <Route path="/profile/:userId" element={<ProfilePage />} />
-              <Route path="/feed" element={<SocialFeedPage />} />
+              {/* Feed route:
+                  - We render an empty wrapper here on purpose.
+                  - The real SocialFeedPage UI is the persistent instance above; this
+                    route exists so the URL (/feed) and navigation semantics match
+                    expectations without unmounting the feed component. */}
+              <Route path="/feed" element={<div />} />
               <Route path="/friends" element={<FriendsPage />} />
               <Route path="/compose" element={<RecommendationComposerPage />} />
               <Route path="/post/:recommendationId" element={<PostPage />} />

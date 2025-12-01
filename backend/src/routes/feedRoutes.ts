@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFeedPostsFromRecommendations, getFeedPostsFromGroups, getUnifiedFeedPosts } from '../db/recommendations';
+import { getFeedPostsFromRecommendations, getFeedPostsFromGroups, getUnifiedFeedPosts, getFeedFilterMetadata } from '../db/recommendations';
 
 const router = express.Router();
 
@@ -82,6 +82,39 @@ router.get('/', async (req, res) => {
       success: false,
       message: 'Failed to get feed posts',
       error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/feed/filters
+ * Get aggregate filter metadata (cities & categories) for the user's entire social feed
+ * This is independent of pagination and is used to power stable dropdown filters.
+ */
+router.get('/filters', async (req, res) => {
+  try {
+    const userId = (req as any).user.id;
+    console.log('[feedFilters] /api/feed/filters called for user:', userId);
+    const metadata = await getFeedFilterMetadata(userId);
+
+    console.log('[feedFilters] /api/feed/filters responding with counts:', {
+      userId,
+      cities: metadata.cities.length,
+      categories: metadata.categories.length,
+      sampleCities: metadata.cities.slice(0, 5),
+      sampleCategories: metadata.categories.slice(0, 5),
+    });
+
+    res.json({
+      success: true,
+      data: metadata,
+    });
+  } catch (error) {
+    console.error('Error getting feed filter metadata:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get feed filters',
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });

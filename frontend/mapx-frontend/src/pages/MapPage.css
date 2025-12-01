@@ -8,6 +8,18 @@
   -ms-touch-action: pan-x pan-y;
 }
 
+/* When the content card is open on mobile, allow the card to
+   control vertical scrolling without being clipped by the map container */
+@media (max-width: 768px) {
+  .map-page-container {
+    height: 100dvh;
+  }
+
+  .map-page-container--card-open {
+    overflow: visible;
+  }
+}
+
 /* Authentication loading overlay */
 .auth-loading-overlay {
   position: fixed;

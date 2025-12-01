@@ -139,8 +139,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Clear client state
     dispatch({ type: 'RESET_AUTH' });
     
-    // Navigate immediately - no delays
-    window.location.href = '/';
+    // Navigate immediately to the public landing page - full reload is fine on logout
+    window.location.href = '/landing';
   }, []);
 
   const closeUsernameModal = useCallback(() => {

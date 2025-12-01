@@ -281,7 +281,10 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
     
     try {
       const labelsArray = editLabels.trim() 
-        ? editLabels.split(',').map(l => l.trim()).filter(l => l.length > 0)
+        ? editLabels
+            .split(',')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.length > 0)
         : undefined;
 
       const updates: any = {
@@ -409,7 +412,10 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
 
     if (isEditing) {
       const labelsArray = editLabels.trim() 
-        ? editLabels.split(',').map(l => l.trim()).filter(l => l.length > 0)
+        ? editLabels
+            .split(',')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.length > 0)
         : [];
 
       return (
