@@ -623,38 +623,45 @@ exports.up = pgm => {
 
   // Composite index for annotation_comments - optimized for filtered aggregations
   pgm.createIndex('annotation_comments', ['recommendation_id', 'created_at'], {
-    name: 'idx_annotation_comments_rec_id_created_at'
+    name: 'idx_annotation_comments_rec_id_created_at',
+    ifNotExists: true,
   });
 
   // Composite index for annotation_likes - optimized for filtered aggregations
   pgm.createIndex('annotation_likes', ['recommendation_id', 'created_at'], {
-    name: 'idx_annotation_likes_rec_id_created_at'
+    name: 'idx_annotation_likes_rec_id_created_at',
+    ifNotExists: true,
   });
 
   // Composite index for user_follows - optimized for feed user filtering
   pgm.createIndex('user_follows', ['follower_id', 'created_at'], {
-    name: 'idx_user_follows_follower_created_at'
+    name: 'idx_user_follows_follower_created_at',
+    ifNotExists: true,
   });
 
   // Composite index for user_blocks - optimized for block checks
   pgm.createIndex('user_blocks', ['blocker_id', 'blocked_id'], {
-    name: 'idx_user_blocks_blocker_blocked'
+    name: 'idx_user_blocks_blocker_blocked',
+    ifNotExists: true,
   });
 
   // Composite index for recommendations - optimized for feed queries
   pgm.createIndex('recommendations', ['user_id', 'visibility', 'created_at'], {
-    name: 'idx_recommendations_user_visibility_created'
+    name: 'idx_recommendations_user_visibility_created',
+    ifNotExists: true,
   });
 
   // Additional composite index for recommendations with question_id filter
   pgm.createIndex('recommendations', ['user_id', 'question_id', 'visibility', 'created_at'], {
     name: 'idx_recommendations_user_question_visibility_created',
-    where: 'question_id IS NOT NULL'
+    where: 'question_id IS NOT NULL',
+    ifNotExists: true,
   });
 
   // Composite index for questions - optimized for feed queries
   pgm.createIndex('questions', ['user_id', 'visibility', 'created_at'], {
-    name: 'idx_questions_user_visibility_created'
+    name: 'idx_questions_user_visibility_created',
+    ifNotExists: true,
   });
 };
 
