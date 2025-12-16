@@ -7,9 +7,10 @@ import { AuthProvider, useAuth } from './auth';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfflineIndicator } from './hooks/useOffline';
 import { Toaster } from "sonner";
-import { ThemeProvider } from '@/contexts/ThemeContext';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { ProfileThemeProvider } from '@/contexts/ProfileThemeContext';
 import { buildFeedQueryKey, fetchFeedPage, type FeedPageCursor } from '@/hooks/useFeedQuery';
+import { THEMES } from '@/services/profileService';
 
 // Lazy load page components for better performance
 const MapPage = lazy(() => import('./pages/MapPage'));
@@ -18,20 +19,50 @@ const ManifestoPage = lazy(() => import('./pages/ManifestoPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const SocialFeedPage = lazy(() => import('./pages/SocialFeedPage'));
 const FriendsPage = lazy(() => import('./pages/FriendsPage'));
-const RecommendationComposerPage = lazy(() => import('./pages/RecommendationComposerPage'));
+const RecommendationComposerPage = lazy(() => 
+  import('./pages/RecommendationComposerPage').catch((error) => {
+    console.error('Failed to load RecommendationComposerPage:', error);
+    throw error;
+  })
+);
 const PostPage = lazy(() => import('./pages/PostPage'));
 const QuestionPage = lazy(() => import('./pages/QuestionPage'));
 const AskQuestionPage = lazy(() => import('./pages/AskQuestionPage'));
 
-// Fast loading component
-const LoadingSkeleton: React.FC = () => (
-  <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-    <div className="flex flex-col items-center gap-4">
-      <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-primary"></div>
-      <p className="text-sm text-gray-600">Loading...</p>
+// Fast loading component with theme support
+const LoadingSkeleton: React.FC = () => {
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  
+  return (
+    <div 
+      className="min-h-screen flex items-center justify-center"
+      style={{
+        backgroundColor: selectedTheme?.backgroundColor || '#FFFFFF',
+      }}
+    >
+      <div className="flex flex-col items-center gap-4">
+        <div 
+          className="animate-spin rounded-full h-8 w-8 border-4"
+          style={{
+            borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+            borderTopColor: selectedTheme?.accentColor || '#000000',
+          }}
+        ></div>
+        <p 
+          className="text-sm"
+          style={{
+            color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280',
+          }}
+        >
+          Loading...
+        </p>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // Memoized MapPage component to prevent unnecessary re-renders
 const MemoizedMapPage = React.memo(MapPage);
@@ -122,13 +153,36 @@ const AppContent: React.FC = () => {
       });
   }, [isAuthenticated, currentUser?.id, queryClient]);
 
-  // Show logout transition
+  // Show logout transition with theme support
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+
   if (isLoggingOut) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{
+          backgroundColor: selectedTheme?.backgroundColor || '#FFFFFF',
+        }}
+      >
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-primary"></div>
-          <p className="text-sm text-gray-600">Signing out...</p>
+          <div 
+            className="animate-spin rounded-full h-8 w-8 border-4"
+            style={{
+              borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
+              borderTopColor: selectedTheme?.accentColor || '#000000',
+            }}
+          ></div>
+          <p 
+            className="text-sm"
+            style={{
+              color: selectedTheme?.textMuted || selectedTheme?.textSecondary || '#6B7280',
+            }}
+          >
+            Signing out...
+          </p>
         </div>
       </div>
     );

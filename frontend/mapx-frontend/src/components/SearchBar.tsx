@@ -4,6 +4,8 @@ import type { PlaceDetails } from './ContentCard';
 import type { SearchResponse } from '../services/recommendationsApiService';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
 import { friendGroupsApi, type FriendGroup } from '../services/friendGroupsService';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 import './SearchBar.css';
 
 interface SearchBarProps {
@@ -34,10 +36,22 @@ const SearchBar: React.FC<SearchBarProps> = ({
   onClearGroups,
   showGroupFilters = false
 }) => {
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
   const placesInput = useRef<HTMLInputElement>(null);
   const aiSearchInput = useRef<HTMLInputElement>(null);
   const autocomplete = useRef<google.maps.places.Autocomplete | null>(null);
+  // Always default to 'places' mode if AI search is not available
   const [searchMode, setSearchMode] = useState<'places' | 'semantic'>('places');
+  
+  // Ensure we stay in 'places' mode if AI search props are not provided
+  useEffect(() => {
+    if (!onSemanticSearch || !onSearchResults || !onSearchLoading) {
+      setSearchMode('places');
+    }
+  }, [onSemanticSearch, onSearchResults, onSearchLoading]);
   const [semanticQuery, setSemanticQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [groups, setGroups] = useState<FriendGroup[]>([]);
@@ -192,29 +206,40 @@ const SearchBar: React.FC<SearchBarProps> = ({
     }
   };
 
-  return (
-    <div className="searchbar">
-    <div className="search-container">
-      <div className="search-mode-toggle">
-        <button
-          className={`mode-btn ${searchMode === 'places' ? 'active' : ''}`}
-          onClick={() => setSearchMode('places')}
-          disabled={!isAuthenticated}
-        >
-          <FaMapMarkerAlt />
-          Places
-        </button>
-        <button
-          className={`mode-btn ${searchMode === 'semantic' ? 'active' : ''}`}
-          onClick={() => setSearchMode('semantic')}
-          disabled={!isAuthenticated}
-        >
-          <FaBrain />
-          AI Search
-        </button>
-      </div>
+  // Hide AI search toggle if semantic search props are not provided
+  const showAISearchToggle = Boolean(onSemanticSearch && onSearchResults && onSearchLoading);
 
-      <form onSubmit={handleSemanticSearch} className="search">
+  return (
+    <div className="search-container">
+      {showAISearchToggle && (
+        <div className="search-mode-toggle">
+          <button
+            className={`mode-btn ${searchMode === 'places' ? 'active' : ''}`}
+            onClick={() => setSearchMode('places')}
+            disabled={!isAuthenticated}
+          >
+            <FaMapMarkerAlt />
+            Places
+          </button>
+          <button
+            className={`mode-btn ${searchMode === 'semantic' ? 'active' : ''}`}
+            onClick={() => setSearchMode('semantic')}
+            disabled={!isAuthenticated}
+          >
+            <FaBrain />
+            AI Search
+          </button>
+        </div>
+      )}
+
+      <form 
+        onSubmit={handleSemanticSearch} 
+        className="search"
+        style={selectedTheme ? {
+          backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || 'rgba(0, 0, 0, 0.6)',
+          borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
+        } : undefined}
+      >
         {/* Places input with autocomplete */}
         {searchMode === 'places' && (
           <input 
@@ -224,7 +249,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
             className="search-bar-input" 
             disabled={!isAuthenticated || isSearching}
             onKeyDown={handleKeyDown}
-            style={{ minWidth: 0 }}
+            style={selectedTheme ? {
+              minWidth: 0,
+              color: selectedTheme.inputText || selectedTheme.textPrimary || '#FFFFFF',
+            } : { minWidth: 0, color: '#e8eefc' }}
             aria-label="Search places"
           />
         )}
@@ -240,7 +268,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
             value={semanticQuery}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            style={{ minWidth: 0 }}
+            style={selectedTheme ? {
+              minWidth: 0,
+              color: selectedTheme.inputText || selectedTheme.textPrimary || '#FFFFFF',
+            } : { minWidth: 0, color: '#e8eefc' }}
             autoComplete="off"
             data-lpignore="true"
             autoCorrect="off"
@@ -249,6 +280,11 @@ const SearchBar: React.FC<SearchBarProps> = ({
             aria-label="AI search query"
           />
         )}
+        <style>{`
+          .search-bar-input::placeholder {
+            color: ${selectedTheme?.inputPlaceholder || selectedTheme?.textMuted || 'rgba(232, 238, 252, 0.6)'} !important;
+          }
+        `}</style>
         <button 
           type="button"
           className="clear-btn" 
@@ -312,7 +348,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
           ) : null}
         </div>
       )}
-    </div>
     </div>
   );
 };

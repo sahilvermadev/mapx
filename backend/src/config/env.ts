@@ -104,6 +104,15 @@ const envConfig: EnvConfig = {
     validate: (value) => value.length > 0,
     message: 'GOOGLE_MAPS_API_KEY is required if using Maps features'
   },
+  ADMIN_EMAILS: {
+    required: false,
+    validate: (value) => {
+      // Comma-separated list of email addresses
+      const emails = value.split(',').map(e => e.trim()).filter(e => e.length > 0);
+      return emails.length > 0 && emails.every(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    },
+    message: 'ADMIN_EMAILS must be a comma-separated list of valid email addresses'
+  },
 };
 
 /**

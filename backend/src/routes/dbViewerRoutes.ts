@@ -57,7 +57,6 @@ router.get('/services', async (req, res) => {
         s.id,
         s.name,
         s.service_type,
-        s.business_name,
         s.phone_number,
         s.email,
         s.address,

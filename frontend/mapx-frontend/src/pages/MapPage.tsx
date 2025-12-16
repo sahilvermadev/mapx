@@ -1,17 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Loader } from '@googlemaps/js-api-loader';
 import { placesApiService } from '../services/placesApiService';
-import { recommendationsApi, type SearchResponse, type ReviewedPlace } from '../services/recommendationsApiService';
+// SUNSET: Temporarily disabled AI search - SearchResponse no longer needed
+import { type ReviewedPlace } from '../services/recommendationsApiService';
 import { useAuth } from '../auth';
 import ContentCard from '../components/ContentCard';
 import SearchBar from '../components/SearchBar';
-import SearchResultsNew from '../components/SearchResultsNew';
+// SUNSET: Temporarily disabled AI search
+// import SearchResultsNew from '../components/SearchResultsNew';
 import type { PlaceDetails } from '../components/ContentCard';
 import { Button } from '@/components/ui/button';
 import { getPrimaryGoogleType } from '../utils/placeTypes';
-import { SEARCH_CONFIG } from '../config/searchConfig';
+// SUNSET: Temporarily disabled AI search - SEARCH_CONFIG no longer needed
+// import { SEARCH_CONFIG } from '../config/searchConfig';
 import { useReviewedPlacesQuery } from '../hooks/useReviewedPlacesQuery';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 import './MapPage.css';
 
 // Constants
@@ -45,17 +50,29 @@ const createPlaceDetails = (
 const MapPage: React.FC = () => {
   // Use global authentication state
   const { isAuthenticated, isChecking: isAuthChecking, user } = useAuth();
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
+  const navigate = useNavigate();
   
   // Get location state from navigation
   const location = useLocation();
-  const locationState = location.state as { lat?: number; lng?: number; placeName?: string; placeAddress?: string; googlePlaceId?: string } | null;
+  const locationState = location.state as { 
+    lat?: number; 
+    lng?: number; 
+    placeName?: string; 
+    placeAddress?: string; 
+    googlePlaceId?: string;
+  } | null;
 
   // Component state
   const [selectedPlace, setSelectedPlace] = useState<PlaceDetails | null>(null);
   const [showContentCard, setShowContentCard] = useState(false);
   const [isLocating, setIsLocating] = useState(true);
-  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
+  // SUNSET: Temporarily disabled AI search
+  // const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
+  // const [isSearching, setIsSearching] = useState(false);
   const [showReviewedPlaces, setShowReviewedPlaces] = useState(true);
   const [currentZoom, setCurrentZoom] = useState(9);
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
@@ -82,86 +99,87 @@ const MapPage: React.FC = () => {
   const zoomListenerRef = useRef<google.maps.MapsEventListener | null>(null);
 
   // Event handlers - memoized to prevent unnecessary re-renders
-  const handleSemanticSearch = useCallback(async (query: string): Promise<SearchResponse> => {
-    try {
-      const results = await recommendationsApi.semanticSearch(
-        query, 
-        SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, 
-        SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, 
-        selectedGroupIds.length > 0 ? selectedGroupIds : undefined, 
-        SEARCH_CONFIG.SEMANTIC_SEARCH.DEFAULT_CONTENT_TYPE
-      );
-      return results;
-    } catch (error) {
-      console.error('Semantic search failed:', error);
-      throw error;
-    }
-  }, [selectedGroupIds]);
+  // SUNSET: Temporarily disabled AI search handlers
+  // const handleSemanticSearch = useCallback(async (query: string): Promise<SearchResponse> => {
+  //   try {
+  //     const results = await recommendationsApi.semanticSearch(
+  //       query, 
+  //       SEARCH_CONFIG.SEMANTIC_SEARCH.LIMIT, 
+  //       SEARCH_CONFIG.SEMANTIC_SEARCH.THRESHOLD, 
+  //       selectedGroupIds.length > 0 ? selectedGroupIds : undefined, 
+  //       SEARCH_CONFIG.SEMANTIC_SEARCH.DEFAULT_CONTENT_TYPE
+  //     );
+  //     return results;
+  //   } catch (error) {
+  //     console.error('Semantic search failed:', error);
+  //     throw error;
+  //   }
+  // }, [selectedGroupIds]);
 
-  const handleSearchResults = useCallback((results: SearchResponse) => {
-    setSearchResults(results);
-  }, []);
+  // const handleSearchResults = useCallback((results: SearchResponse) => {
+  //   setSearchResults(results);
+  // }, []);
 
-  const handleSearchLoading = useCallback((loading: boolean) => {
-    setIsSearching(loading);
-  }, []);
+  // const handleSearchLoading = useCallback((loading: boolean) => {
+  //   setIsSearching(loading);
+  // }, []);
 
-  const handleSearchClose = useCallback(() => {
-    setSearchResults(null);
-  }, []);
+  // const handleSearchClose = useCallback(() => {
+  //   setSearchResults(null);
+  // }, []);
 
-  const handleSearchPlaceSelect = useCallback(async (place: any) => {
-    try {
-      // Create basic place details first
-      const placeDetails: PlaceDetails = {
-        id: place.place_id || place.place_id?.toString() || `search-${place.place_id}`,
-        name: place.place_name,
-        address: place.place_address || '',
-        category: 'point_of_interest',
-        images: [],
-        isSaved: false,
-        latitude: place.place_lat,
-        longitude: place.place_lng,
-        google_place_id: place.google_place_id,
-      };
+  // const handleSearchPlaceSelect = useCallback(async (place: any) => {
+  //   try {
+  //     // Create basic place details first
+  //     const placeDetails: PlaceDetails = {
+  //       id: place.place_id || place.place_id?.toString() || `search-${place.place_id}`,
+  //       name: place.place_name,
+  //       address: place.place_address || '',
+  //       category: 'point_of_interest',
+  //       images: [],
+  //       isSaved: false,
+  //       latitude: place.place_lat,
+  //       longitude: place.place_lng,
+  //       google_place_id: place.google_place_id,
+  //     };
 
-      // Set the place immediately to show the content card
-      setSelectedPlace(placeDetails);
-      setShowContentCard(true);
-      setSearchResults(null);
+  //     // Set the place immediately to show the content card
+  //     setSelectedPlace(placeDetails);
+  //     setShowContentCard(true);
+  //     setSearchResults(null);
 
-      // Navigate map to the place
-      if (place.place_lat && place.place_lng) {
-        moveMapToPlace(placeDetails);
-      }
+  //     // Navigate map to the place
+  //     if (place.place_lat && place.place_lng) {
+  //       moveMapToPlace(placeDetails);
+  //     }
 
-      // Fetch enhanced details and images if we have a Google Place ID
-      if (place.google_place_id) {
-        try {
-          const enhancedDetails = await getEnhancedPlaceDetails(place.google_place_id);
-          if (enhancedDetails) {
-            // Update the place details with enhanced information
-            const updatedPlaceDetails: PlaceDetails = {
-              ...placeDetails,
-              name: enhancedDetails?.displayName?.text || place.place_name,
-              address: enhancedDetails?.formattedAddress || place.place_address || '',
-              category: getPrimaryGoogleType(enhancedDetails?.types || []),
-              images: enhancedDetails?.photos?.slice(0, 3).map((photo: any) => 
-                `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`
-              ) || [],
-            };
-            
-            // Update the selected place with enhanced details
-            setSelectedPlace(updatedPlaceDetails);
-          }
-        } catch (error) {
-          console.warn('Could not fetch enhanced details for place:', place.place_name, error);
-        }
-      }
-    } catch (error) {
-      console.error('Error handling search place select:', error);
-    }
-  }, []);
+  //     // Fetch enhanced details and images if we have a Google Place ID
+  //     if (place.google_place_id) {
+  //       try {
+  //         const enhancedDetails = await getEnhancedPlaceDetails(place.google_place_id);
+  //         if (enhancedDetails) {
+  //           // Update the place details with enhanced information
+  //           const updatedPlaceDetails: PlaceDetails = {
+  //             ...placeDetails,
+  //             name: enhancedDetails?.displayName?.text || place.place_name,
+  //             address: enhancedDetails?.formattedAddress || place.place_address || '',
+  //             category: getPrimaryGoogleType(enhancedDetails?.types || []),
+  //             images: enhancedDetails?.photos?.slice(0, 3).map((photo: any) => 
+  //               `https://places.googleapis.com/v1/${photo.name}/media?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&maxWidthPx=400`
+  //             ) || [],
+  //           };
+  //           
+  //           // Update the selected place with enhanced details
+  //           setSelectedPlace(updatedPlaceDetails);
+  //         }
+  //       } catch (error) {
+  //         console.warn('Could not fetch enhanced details for place:', place.place_name, error);
+  //       }
+  //     }
+  //   } catch (error) {
+  //     console.error('Error handling search place select:', error);
+  //   }
+  // }, []);
 
   const handleGroupToggle = useCallback((groupId: number) => {
     setSelectedGroupIds(prev => 
@@ -644,6 +662,7 @@ const MapPage: React.FC = () => {
   };
 
 
+
   // Function to toggle reviewed places visibility
   const toggleReviewedPlaces = useCallback(() => {
     const newVisibility = !showReviewedPlaces;
@@ -915,10 +934,22 @@ const MapPage: React.FC = () => {
   // Show loading only when we're checking auth and don't have a user yet
   if (isAuthChecking && !user) {
     return (
-      <div className="min-h-[calc(100vh-64px)] flex items-center justify-center">
+      <div 
+        className="min-h-[calc(100vh-64px)] flex items-center justify-center"
+        style={selectedTheme ? {
+          backgroundColor: selectedTheme.backgroundColor || '#FFFFFF',
+        } : undefined}
+      >
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p>Loading user...</p>
+          <div 
+            className="animate-spin rounded-full h-8 w-8 border-b-2"
+            style={selectedTheme ? {
+              borderColor: selectedTheme.accentColor || '#000000',
+            } : undefined}
+          ></div>
+          <p style={selectedTheme ? {
+            color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+          } : undefined}>Loading user...</p>
         </div>
       </div>
     );
@@ -944,7 +975,12 @@ const MapPage: React.FC = () => {
   }, [showContentCard]);
 
   return (
-    <div className={`map-page-container ${showContentCard ? 'map-page-container--card-open' : ''}`}>
+    <div 
+      className={`map-page-container ${showContentCard ? 'map-page-container--card-open' : ''}`}
+      style={selectedTheme ? {
+        backgroundColor: selectedTheme.backgroundColor || '#0b0f17',
+      } : undefined}
+    >
 
       {showContentCard && selectedPlace && (
         <ContentCard
@@ -953,37 +989,82 @@ const MapPage: React.FC = () => {
         />
       )}
 
-      {searchResults && (
+      {/* SUNSET: Temporarily disabled AI search */}
+      {/* {searchResults && (
         <SearchResultsNew
           searchResponse={searchResults}
           isLoading={isSearching}
           onClose={handleSearchClose}
           onPlaceSelect={handleSearchPlaceSelect}
         />
-      )}
+      )} */}
 
       {/* Reviewed Places Status - Compact Neobrutalist Design */}
       {isAuthenticated && !showContentCard && (
         <div className="fixed top-20 right-4 z-40 hidden md:block">
-          <div className="bg-white border-2 border-black rounded-lg shadow-[4px_4px_0_0_#000] px-3 py-2 inline-block">
+          <div 
+            className="border-2 rounded-lg shadow-[4px_4px_0_0] px-3 py-2 inline-block"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+              borderColor: selectedTheme.borderColor || '#000000',
+              boxShadow: `4px 4px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+            } : undefined}
+          >
             <div className="flex items-center gap-2">
               {/* Status Indicator */}
-              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${showReviewedPlaces ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+              <div 
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={selectedTheme ? {
+                  backgroundColor: showReviewedPlaces 
+                    ? (selectedTheme.accentColor || '#10b981')
+                    : (selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF'),
+                } : undefined}
+              ></div>
               
               {/* Content */}
               {reviewedPlacesLoading ? (
                 <div className="flex items-center gap-1.5">
-                  <div className="animate-spin rounded-full h-2.5 w-2.5 border-2 border-black border-t-transparent"></div>
-                  <span className="text-xs font-semibold text-black">Loading...</span>
+                  <div 
+                    className="animate-spin rounded-full h-2.5 w-2.5 border-2 border-t-transparent"
+                    style={selectedTheme ? {
+                      borderColor: selectedTheme.borderColor || '#000000',
+                    } : undefined}
+                  ></div>
+                  <span 
+                    className="text-xs font-semibold"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+                    } : undefined}
+                  >Loading...</span>
                 </div>
               ) : reviewedPlacesError ? (
-                <span className="text-xs font-semibold text-red-600">Error</span>
+                <span 
+                  className="text-xs font-semibold"
+                  style={selectedTheme ? {
+                    color: selectedTheme.textHighlight || selectedTheme.accentColor || '#EF4444',
+                  } : undefined}
+                >Error</span>
               ) : (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-black">{reviewedPlaces.length}</span>
-                  <span className="text-xs font-medium text-gray-700">places</span>
+                  <span 
+                    className="text-xs font-bold"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+                    } : undefined}
+                  >{reviewedPlaces.length}</span>
+                  <span 
+                    className="text-xs font-medium"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+                    } : undefined}
+                  >places</span>
                   {showReviewedPlaces && currentZoom < 12 && (
-                    <span className="text-[10px] font-medium text-orange-600 ml-0.5">(zoom in)</span>
+                    <span 
+                      className="text-[10px] font-medium ml-0.5"
+                      style={selectedTheme ? {
+                        color: selectedTheme.accentColor || '#F97316',
+                      } : undefined}
+                    >(zoom in)</span>
                   )}
                 </div>
               )}
@@ -994,12 +1075,10 @@ const MapPage: React.FC = () => {
 
       {isMapReady && (
         <div className="search-container">
+          {/* SUNSET: Temporarily disabled AI search - removed onSemanticSearch, onSearchResults, onSearchLoading props */}
           <SearchBar 
             isAuthenticated={isAuthenticated}
             onPlaceSelected={moveMapToPlace}
-            onSemanticSearch={handleSemanticSearch}
-            onSearchResults={handleSearchResults}
-            onSearchLoading={handleSearchLoading}
             currentUserId={user?.id}
             selectedGroupIds={selectedGroupIds}
             onGroupToggle={handleGroupToggle}
@@ -1013,11 +1092,17 @@ const MapPage: React.FC = () => {
         <Button
           onClick={toggleReviewedPlaces}
           size="icon"
-          className={`h-11 w-11 rounded-lg border-0 transition-all duration-200 ${
-            showReviewedPlaces 
-              ? 'bg-green-600 hover:bg-green-700 shadow-lg' 
-              : 'bg-gray-800 hover:bg-gray-700 shadow-md'
-          } text-white`}
+          className="h-11 w-11 rounded-lg border-2 transition-all duration-200 shadow-md"
+          style={selectedTheme ? {
+            backgroundColor: showReviewedPlaces 
+              ? (selectedTheme.accentColor || '#10b981')
+              : (selectedTheme.buttonSecondary?.background || selectedTheme.cardBackground || '#1F2937'),
+            color: showReviewedPlaces
+              ? (selectedTheme.buttonPrimary?.text || '#FFFFFF')
+              : (selectedTheme.textPrimary || '#FFFFFF'),
+            borderColor: selectedTheme.borderColor || '#000000',
+            boxShadow: `4px 4px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+          } : undefined}
           title={showReviewedPlaces ? 'Hide reviewed places' : 'Show reviewed places'}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4">
@@ -1029,11 +1114,22 @@ const MapPage: React.FC = () => {
           onClick={handleLocateMe}
           disabled={isLocating}
           size="icon"
-          className="h-11 w-11 rounded-lg bg-gray-800 hover:bg-gray-700 border-0 shadow-md text-white transition-all duration-200 disabled:opacity-50"
+          className="h-11 w-11 rounded-lg border-2 shadow-md transition-all duration-200 disabled:opacity-50"
+          style={selectedTheme ? {
+            backgroundColor: selectedTheme.buttonSecondary?.background || selectedTheme.cardBackground || '#1F2937',
+            color: selectedTheme.textPrimary || '#FFFFFF',
+            borderColor: selectedTheme.borderColor || '#000000',
+            boxShadow: `4px 4px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+          } : undefined}
           title="Locate me"
         >
           {isLocating ? (
-            <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-white"></div>
+            <div 
+              className="animate-spin rounded-full h-4 w-4 border-2 border-t-transparent"
+              style={selectedTheme ? {
+                borderColor: selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF',
+              } : undefined}
+            ></div>
           ) : (
             <svg viewBox="0 0 24 24" className="h-4 w-4">
               <path fill="currentColor" d="M12 8a4 4 0 1 0 .001 8.001A4 4 0 0 0 12 8m8.94 3h-2.02A6.99 6.99 0 0 0 13 5.08V3h-2v2.08A6.99 6.99 0 0 0 5.08 11H3v2h2.08A6.99 6.99 0 0 0 11 18.92V21h2v-2.08A6.99 6.99 0 0 0 18.92 13H21v-2z"/>

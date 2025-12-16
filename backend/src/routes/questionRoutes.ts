@@ -5,6 +5,7 @@ import { insertRecommendation, type RecommendationData } from '../db/recommendat
 import { upsertService } from '../services/serviceDeduplication';
 import { extractServiceType } from '../utils/nameSimilarity';
 import { upsertPlace } from '../db/places';
+import { questionAnalysisService } from '../services/questionAnalysisService';
 
 const router = express.Router();
 
@@ -35,6 +36,43 @@ router.post('/', async (req, res) => {
       // best-effort; ignore enqueue failure
       console.warn('Failed to enqueue question embedding', e);
     }
+
+    // Analyze question to detect category (non-blocking)
+    questionAnalysisService.analyzeQuestion(text.trim())
+      .then(async (analysis) => {
+        try {
+          // Fetch current metadata from database to merge with detected category
+          const currentResult = await pool.query(
+            'SELECT metadata FROM questions WHERE id = $1',
+            [id]
+          );
+          
+          const currentMetadata = currentResult.rows[0]?.metadata || {};
+          
+          // Merge detected category with existing metadata
+          const updatedMetadata = {
+            ...currentMetadata,
+            detected_category: {
+              content_type: analysis.content_type,
+              service_category_id: analysis.service_category_id,
+              service_category_slug: analysis.service_category_slug,
+              confidence: analysis.confidence,
+            },
+          };
+
+          await pool.query(
+            'UPDATE questions SET metadata = $1 WHERE id = $2',
+            [updatedMetadata, id]
+          );
+        } catch (e) {
+          // Non-fatal; log but don't fail
+          console.warn('Failed to update question metadata with detected category', e);
+        }
+      })
+      .catch((e) => {
+        // Non-fatal; log but don't fail question creation
+        console.warn('Failed to analyze question category', e);
+      });
 
     return res.status(201).json({ success: true, data: { id, created_at: q.rows[0].created_at } });
   } catch (error) {
@@ -95,8 +133,6 @@ router.get('/:id', async (req, res) => {
     const userId = (req as any).user.id;
     const questionId = parseInt(req.params.id, 10);
 
-    console.log(`[GET /api/questions/${questionId}] User: ${userId}`);
-
     if (!Number.isFinite(questionId)) {
       return res.status(400).json({ success: false, error: 'Invalid question ID' });
     }
@@ -123,15 +159,11 @@ router.get('/:id', async (req, res) => {
         )`,
       [questionId, userId]
     );
-
-    console.log(`[GET /api/questions/${questionId}] Query result: ${result.rows.length} rows`);
     
     if (result.rows.length === 0) {
-      console.log(`[GET /api/questions/${questionId}] Question not found for user ${userId}`);
       return res.status(404).json({ success: false, error: 'Question not found' });
     }
 
-    console.log(`[GET /api/questions/${questionId}] Question found: ${result.rows[0].text}`);
     return res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error fetching question:', error);
@@ -176,7 +208,7 @@ router.post('/:questionId/answers', async (req, res) => {
         question_id: questionId, // Link the recommendation to the question
         metadata: { ...((recommendation_payload && (recommendation_payload as any).metadata) || {}), questionContext: { question_id: questionId } },
         auto_generate_embedding: true,
-      } as any;
+      } as RecommendationData & { title?: string; place_name?: string; service_name?: string };
 
       // Handle place creation if this is a place recommendation
       if (payload.content_type === 'place' && !payload.place_id) {
@@ -204,7 +236,7 @@ router.post('/:questionId/answers', async (req, res) => {
           // Extract place data from the payload
           const placeData = {
             google_place_id: payload.content_data?.location_google_place_id || payload.content_data?.google_place_id || (payload as any).google_place_id || null,
-            name: payload.title || 'Unnamed Place',
+            name: (payload as any).title || payload.content_data?.place_name || (payload as any).place_name || 'Unnamed Place',
             address: address,
             category_name: payload.content_data?.category || null,
             lat: payload.content_data?.location_lat || payload.content_data?.coordinates?.lat || (payload as any).place_lat || null,
@@ -219,8 +251,6 @@ router.post('/:questionId/answers', async (req, res) => {
           // Create or find the place
           const placeId = await upsertPlace(placeData);
           payload.place_id = placeId;
-          
-          console.log('Created place for question answer:', { placeId, placeName: placeData.name });
         } catch (error) {
           console.error('Failed to create place for question answer:', error);
           return res.status(500).json({ success: false, error: 'Failed to create place' });
@@ -252,11 +282,10 @@ router.post('/:questionId/answers', async (req, res) => {
           
           // Extract service data from the payload
           const serviceData = {
-            name: payload.title || 'Unnamed Service',
+            name: (payload as any).title || payload.content_data?.service_name || (payload as any).service_name || 'Unnamed Service',
             phone_number: payload.content_data?.contact_info?.phone || undefined,
             email: payload.content_data?.contact_info?.email || undefined,
             service_type: payload.content_data?.highlights ? extractServiceType(payload.content_data.highlights, '') || undefined : undefined,
-            business_name: payload.content_data?.business_name || undefined,
             address: serviceAddress,
             website: payload.content_data?.website || undefined,
             metadata: payload.content_data || {}
@@ -265,8 +294,6 @@ router.post('/:questionId/answers', async (req, res) => {
           // Create or find the service
           const serviceResult = await upsertService(serviceData);
           payload.service_id = serviceResult.serviceId;
-          
-          console.log('Created service for question answer:', { serviceId: serviceResult.serviceId, serviceName: serviceData.name });
         } catch (error) {
           console.error('Failed to create service for question answer:', error);
           return res.status(500).json({ success: false, error: 'Failed to create service' });
@@ -452,7 +479,7 @@ router.get('/:questionId/answers', async (req, res) => {
          r.metadata,
          r.created_at,
          r.id AS recommendation_id,
-         r.title AS recommendation_title,
+         COALESCE(p.name, s.name) AS recommendation_title,
          r.description AS recommendation_description,
          r.rating AS recommendation_rating,
          r.labels AS recommendation_labels,
@@ -461,7 +488,8 @@ router.get('/:questionId/answers', async (req, res) => {
          p.address AS place_address
        FROM recommendations r
        JOIN users u ON u.id = r.user_id
-       LEFT JOIN places p ON p.id = r.place_id
+       LEFT JOIN places p ON p.id = r.place_id AND p.deleted_at IS NULL
+       LEFT JOIN services s ON s.id = r.service_id AND s.deleted_at IS NULL
        WHERE r.question_id = $1
          AND NOT EXISTS (
            SELECT 1 FROM user_blocks 

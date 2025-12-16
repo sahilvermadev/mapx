@@ -297,7 +297,16 @@ run_migrations() {
     echo "🗄️  Running database migrations..."
     docker exec -it recce_backend_prod npm run migrate
     echo -e "${GREEN}✅ Migrations completed!${NC}"
-    log_deployment "Migrations run"
+
+    # Sync service categories after migrations
+    echo ""
+    echo "🔄 Syncing service categories..."
+    # Use dotenv/config so DATABASE_URL from env is available to the script
+    # Note: sync-categories.js is copied to scripts/ during Docker build
+    docker exec recce_backend_prod node -r dotenv/config scripts/sync-service-categories.js
+    echo -e "${GREEN}✅ Category sync completed!${NC}"
+
+    log_deployment "Migrations run + categories synced"
 }
 
 # Refresh embeddings

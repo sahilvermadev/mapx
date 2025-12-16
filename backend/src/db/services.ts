@@ -5,7 +5,7 @@ export interface ServiceData {
   phone_number?: string;
   email?: string;
   service_type?: string;
-  business_name?: string;
+  // business_name removed from write-path; legacy data remains in DB but is no longer updated
   address?: string;
   website?: string;
   // normalized location fields for city filtering
@@ -30,6 +30,7 @@ export interface Service {
   admin1_name?: string;
   country_code?: string;
   metadata: Record<string, any>;
+  deleted_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -49,6 +50,11 @@ export interface ServiceWithNames extends Service {
 
 /**
  * Normalize phone number by removing spaces, dashes, and standardizing format
+ * Handles Indian phone numbers with various formats:
+ * - 10 digits: "9876543210"
+ * - With country code: "+919876543210" or "919876543210"
+ * - With leading zero: "09876543210" -> "9876543210"
+ * - Landline with STD: "08012345678" -> "8012345678" (removes leading 0)
  */
 export function normalizePhoneNumber(phone: string): string {
   if (!phone) return '';
@@ -56,16 +62,24 @@ export function normalizePhoneNumber(phone: string): string {
   // Remove all non-digit characters
   const digits = phone.replace(/\D/g, '');
   
+  if (!digits) return '';
+  
   // Handle Indian phone numbers (10 digits, optionally with +91)
   if (digits.length === 10) {
     return digits;
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    // Remove leading zero: "09876543210" -> "9876543210"
+    return digits.substring(1);
   } else if (digits.length === 12 && digits.startsWith('91')) {
+    // Country code without +: "919876543210" -> "9876543210"
     return digits.substring(2);
-  } else if (digits.length === 13 && digits.startsWith('+91')) {
-    return digits.substring(3);
+  } else if (digits.length === 13 && digits.startsWith('91')) {
+    // Country code with + (already stripped): "919876543210" -> "9876543210"
+    return digits.substring(2);
   }
   
-  // Return as-is if doesn't match expected patterns
+  // For international numbers or other formats, return as-is
+  // This allows storage of non-Indian numbers
   return digits;
 }
 
@@ -79,30 +93,34 @@ export function normalizeEmail(email: string): string {
 
 /**
  * Get service by phone number
+ * Uses SELECT FOR UPDATE SKIP LOCKED to prevent race conditions when used in transactions
  */
-export async function getServiceByPhone(phoneNumber: string): Promise<Service | null> {
+export async function getServiceByPhone(phoneNumber: string, forUpdate: boolean = false): Promise<Service | null> {
   const normalizedPhone = normalizePhoneNumber(phoneNumber);
   if (!normalizedPhone) return null;
   
-  const result = await pool.query(
-    'SELECT * FROM services WHERE phone_number = $1',
-    [normalizedPhone]
-  );
+  const query = forUpdate 
+    ? 'SELECT * FROM services WHERE phone_number = $1 AND deleted_at IS NULL FOR UPDATE SKIP LOCKED'
+    : 'SELECT * FROM services WHERE phone_number = $1 AND deleted_at IS NULL';
+  
+  const result = await pool.query(query, [normalizedPhone]);
   
   return result.rows[0] || null;
 }
 
 /**
  * Get service by email
+ * Uses SELECT FOR UPDATE SKIP LOCKED to prevent race conditions when used in transactions
  */
-export async function getServiceByEmail(email: string): Promise<Service | null> {
+export async function getServiceByEmail(email: string, forUpdate: boolean = false): Promise<Service | null> {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) return null;
   
-  const result = await pool.query(
-    'SELECT * FROM services WHERE email = $1',
-    [normalizedEmail]
-  );
+  const query = forUpdate
+    ? 'SELECT * FROM services WHERE email = $1 AND deleted_at IS NULL FOR UPDATE SKIP LOCKED'
+    : 'SELECT * FROM services WHERE email = $1 AND deleted_at IS NULL';
+  
+  const result = await pool.query(query, [normalizedEmail]);
   
   return result.rows[0] || null;
 }
@@ -112,7 +130,7 @@ export async function getServiceByEmail(email: string): Promise<Service | null> 
  */
 export async function getServiceWithNames(serviceId: number): Promise<ServiceWithNames | null> {
   const serviceResult = await pool.query(
-    'SELECT * FROM services WHERE id = $1',
+    'SELECT * FROM services WHERE id = $1 AND deleted_at IS NULL',
     [serviceId]
   );
   
@@ -152,16 +170,15 @@ export async function createService(serviceData: ServiceData): Promise<number> {
     // Insert service
     const serviceResult = await client.query(
       `INSERT INTO services (
-        phone_number, email, name, service_type, business_name, 
+        phone_number, email, name, service_type,
         address, website, city_name, city_slug, admin1_name, country_code, metadata
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING id`,
       [
         normalizedPhone,
         normalizedEmail,
         serviceData.name,
         serviceData.service_type || null,
-        serviceData.business_name || null,
         serviceData.address || null,
         serviceData.website || null,
         serviceData.city_name || null,
@@ -222,10 +239,6 @@ export async function updateService(serviceId: number, updates: Partial<ServiceD
     if (updates.service_type !== undefined) {
       updateFields.push(`service_type = $${paramCount++}`);
       values.push(updates.service_type);
-    }
-    if (updates.business_name !== undefined) {
-      updateFields.push(`business_name = $${paramCount++}`);
-      values.push(updates.business_name);
     }
     if (updates.address !== undefined) {
       updateFields.push(`address = $${paramCount++}`);
@@ -378,7 +391,7 @@ export async function updateCanonicalName(serviceId: number): Promise<void> {
  */
 export async function getServiceById(serviceId: number): Promise<Service | null> {
   const result = await pool.query(
-    'SELECT * FROM services WHERE id = $1',
+    'SELECT * FROM services WHERE id = $1 AND deleted_at IS NULL',
     [serviceId]
   );
   
@@ -392,11 +405,136 @@ export async function searchServicesByName(name: string, limit: number = 10): Pr
   const result = await pool.query(
     `SELECT DISTINCT s.* FROM services s
      LEFT JOIN service_names sn ON s.id = sn.service_id
-     WHERE s.name ILIKE $1 OR sn.name ILIKE $1
+     WHERE (s.name ILIKE $1 OR sn.name ILIKE $1)
+       AND s.deleted_at IS NULL
      ORDER BY s.updated_at DESC
      LIMIT $2`,
     [`%${name}%`, limit]
   );
   
   return result.rows;
+}
+
+/**
+ * Update cached aggregates for a service
+ */
+export async function updateServiceAggregates(
+  serviceId: number,
+  aggregates: {
+    rating_average?: number | null;
+    rating_count?: number;
+    primary_category_id?: number | null;
+    common_tags?: string[];
+  }
+): Promise<boolean> {
+  const updateFields: string[] = [];
+  const values: any[] = [];
+  let paramCount = 1;
+
+  if (aggregates.rating_average !== undefined) {
+    updateFields.push(`rating_average = $${paramCount++}`);
+    values.push(aggregates.rating_average);
+  }
+  if (aggregates.rating_count !== undefined) {
+    updateFields.push(`rating_count = $${paramCount++}`);
+    values.push(aggregates.rating_count);
+  }
+  if (aggregates.primary_category_id !== undefined) {
+    updateFields.push(`primary_category_id = $${paramCount++}`);
+    values.push(aggregates.primary_category_id);
+  }
+  if (aggregates.common_tags !== undefined) {
+    updateFields.push(`common_tags = $${paramCount++}`);
+    values.push(aggregates.common_tags);
+  }
+
+  if (updateFields.length === 0) {
+    return false;
+  }
+
+  // Always update updated_at
+  updateFields.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(serviceId);
+
+  const updateQuery = `
+    UPDATE services 
+    SET ${updateFields.join(', ')}
+    WHERE id = $${paramCount}
+    RETURNING id
+  `;
+
+  const result = await pool.query(updateQuery, values);
+  return result.rows.length > 0;
+}
+
+/**
+ * Recalculate and update all aggregates for a service
+ */
+export async function recalculateServiceAggregates(serviceId: number): Promise<boolean> {
+  const client = await pool.connect();
+  
+  try {
+    await client.query('BEGIN');
+
+    // Calculate rating average and count (only from non-deleted recommendations)
+    const ratingResult = await client.query(
+      `SELECT 
+         AVG(srd.rating)::NUMERIC(3, 2) as rating_average,
+         COUNT(*) as rating_count
+       FROM service_recommendation_details srd
+       INNER JOIN recommendations r ON srd.recommendation_id = r.id
+       WHERE srd.service_id = $1 
+         AND srd.rating IS NOT NULL
+         AND r.deleted_at IS NULL`,
+      [serviceId]
+    );
+
+    const rating_average = ratingResult.rows[0]?.rating_average
+      ? parseFloat(ratingResult.rows[0].rating_average)
+      : null;
+    const rating_count = parseInt(ratingResult.rows[0]?.rating_count || '0', 10);
+
+    // Get primary category (highest confidence) - only from non-deleted services
+    const categoryResult = await client.query(
+      `SELECT stc.category_id
+       FROM service_to_category stc
+       INNER JOIN services s ON stc.service_id = s.id
+       WHERE stc.service_id = $1
+         AND s.deleted_at IS NULL
+       ORDER BY stc.confidence DESC, stc.added_by_user DESC
+       LIMIT 1`,
+      [serviceId]
+    );
+    const primary_category_id = categoryResult.rows[0]?.category_id || null;
+
+    // Get most common tags (top 10) - only from non-deleted recommendations
+    const tagsResult = await client.query(
+      `SELECT st.tag, SUM(st.frequency) as total_frequency
+       FROM service_tags st
+       INNER JOIN recommendations r ON st.recommendation_id = r.id
+       WHERE st.service_id = $1
+         AND (r.deleted_at IS NULL OR st.recommendation_id IS NULL)
+       GROUP BY st.tag
+       ORDER BY total_frequency DESC
+       LIMIT 10`,
+      [serviceId]
+    );
+    const common_tags = tagsResult.rows.map(row => row.tag);
+
+    // Update service with calculated aggregates
+    await updateServiceAggregates(serviceId, {
+      rating_average,
+      rating_count,
+      primary_category_id,
+      common_tags,
+    });
+
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }

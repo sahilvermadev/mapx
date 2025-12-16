@@ -6,11 +6,12 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import FeedPost from '@/components/FeedPost';
+import ServiceFeedPost from '@/components/ServiceFeedPost';
 import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
 import SearchResultsInline from '@/components/SearchResultsInline';
 import SuggestedUsersCard from '@/components/SocialFeed/SuggestedUsersCard';
 import QuestionFeedPost from '@/components/QuestionFeedPost';
-import NewPostsBanner from '@/components/SocialFeed/NewPostsBanner';
+// import NewPostsBanner from '@/components/SocialFeed/NewPostsBanner'; // SUNSET: Temporarily disabled
 import FeedGroups from '@/components/SocialFeed/FeedGroups';
 import FeedAISearch from '@/components/FeedAISearch';
 import { FeedFiltersProvider } from '@/contexts/FeedFiltersContext';
@@ -31,8 +32,9 @@ import { type User, type FeedPost as FeedPostType } from '@/services/socialServi
 import {
   getLastViewedFeedTimestamp,
   setLastViewedFeedTimestamp,
-  countNewPosts,
-  getFirstNewPostIndex,
+  // SUNSET: Temporarily disabled new posts banner
+  // countNewPosts,
+  // getFirstNewPostIndex,
 } from '@/utils/feedTimestamp';
 
 const SocialFeedPage: React.FC = () => {
@@ -149,14 +151,16 @@ const SocialFeedPage: React.FC = () => {
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   const [selectedCity, setSelectedCity] = useState<{ id?: string; name?: string } | undefined>(undefined);
   const [selectedCategoryKeys, setSelectedCategoryKeys] = useState<string[]>([]);
-  const [showNewPostsBanner, setShowNewPostsBanner] = useState(false);
+  // SUNSET: Temporarily disabled new posts banner
+  // const [showNewPostsBanner, setShowNewPostsBanner] = useState(false);
   const [isSuggestedUsersClosed, setIsSuggestedUsersClosed] = useState(false);
-  const [newPostsCount, setNewPostsCount] = useState(0);
+  // const [newPostsCount, setNewPostsCount] = useState(0);
   const [enableCitySummaries, setEnableCitySummaries] = useState(false);
   
   // Refs
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const firstNewPostRef = useRef<HTMLDivElement | null>(null);
+  // SUNSET: Temporarily disabled new posts banner
+  // const firstNewPostRef = useRef<HTMLDivElement | null>(null);
   
   // Search functionality
   const {
@@ -287,21 +291,22 @@ const SocialFeedPage: React.FC = () => {
     }
   }, [loading, suggestedUsersLoading, typedPosts.length, typedSuggestedUsers.length]);
 
+  // SUNSET: Temporarily disabled new posts banner
   // Calculate new posts count when feed loads
-  useEffect(() => {
-    if (!loading && typedPosts.length > 0 && !searchResponse) {
-      const lastViewed = getLastViewedFeedTimestamp();
-      const count = countNewPosts(typedPosts, lastViewed);
-      setNewPostsCount(count);
-      setShowNewPostsBanner(count > 0);
-      
-      // Reset ref when posts change
-      firstNewPostRef.current = null;
-    } else if (searchResponse) {
-      // Hide banner during search
-      setShowNewPostsBanner(false);
-    }
-  }, [loading, typedPosts, searchResponse]);
+  // useEffect(() => {
+  //   if (!loading && typedPosts.length > 0 && !searchResponse) {
+  //     const lastViewed = getLastViewedFeedTimestamp();
+  //     const count = countNewPosts(typedPosts, lastViewed);
+  //     setNewPostsCount(count);
+  //     setShowNewPostsBanner(count > 0);
+  //     
+  //     // Reset ref when posts change
+  //     firstNewPostRef.current = null;
+  //   } else if (searchResponse) {
+  //     // Hide banner during search
+  //     setShowNewPostsBanner(false);
+  //   }
+  // }, [loading, typedPosts, searchResponse]);
 
   // Update last viewed timestamp when user leaves the page or when page becomes hidden
   useEffect(() => {
@@ -333,77 +338,78 @@ const SocialFeedPage: React.FC = () => {
     };
   }, [typedPosts]);
 
+  // SUNSET: Temporarily disabled new posts banner
   // Auto-dismiss banner when new posts come into view using IntersectionObserver
-  useEffect(() => {
-    if (!showNewPostsBanner || newPostsCount === 0) return;
+  // useEffect(() => {
+  //   if (!showNewPostsBanner || newPostsCount === 0) return;
 
-    let observer: IntersectionObserver | null = null;
-    let timeoutId: NodeJS.Timeout;
+  //   let observer: IntersectionObserver | null = null;
+  //   let timeoutId: NodeJS.Timeout;
 
-    // Wait for the ref to be set (it's set during render)
-    // Use a small delay to ensure the DOM has been updated
-    timeoutId = setTimeout(() => {
-      if (!firstNewPostRef.current) {
-        // If ref is still not set, the first new post might not be in the current view
-        // In this case, we'll rely on the user scrolling or clicking the banner
-        return;
-      }
+  //   // Wait for the ref to be set (it's set during render)
+  //   // Use a small delay to ensure the DOM has been updated
+  //   timeoutId = setTimeout(() => {
+  //     if (!firstNewPostRef.current) {
+  //       // If ref is still not set, the first new post might not be in the current view
+  //       // In this case, we'll rely on the user scrolling or clicking the banner
+  //       return;
+  //     }
 
-      const element = firstNewPostRef.current;
-      
-      // Check if element is already visible (accounting for fixed headers)
-      const rect = element.getBoundingClientRect();
-      const headerHeight = 80; // Account for fixed header
-      const isAlreadyVisible = rect.top < window.innerHeight && rect.bottom > headerHeight;
+  //     const element = firstNewPostRef.current;
+  //     
+  //     // Check if element is already visible (accounting for fixed headers)
+  //     const rect = element.getBoundingClientRect();
+  //     const headerHeight = 80; // Account for fixed header
+  //     const isAlreadyVisible = rect.top < window.innerHeight && rect.bottom > headerHeight;
 
-      // If already visible, dismiss immediately
-      if (isAlreadyVisible) {
-        setShowNewPostsBanner(false);
-        if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
-          setLastViewedFeedTimestamp(typedPosts[0].created_at);
-        }
-        return;
-      }
+  //     // If already visible, dismiss immediately
+  //     if (isAlreadyVisible) {
+  //       setShowNewPostsBanner(false);
+  //       if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+  //         setLastViewedFeedTimestamp(typedPosts[0].created_at);
+  //       }
+  //       return;
+  //     }
 
-      // Use IntersectionObserver to detect when the first new post enters the viewport
-      // This is more reliable than scroll position calculations
-      observer = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            // When the first new post is visible in the viewport, dismiss the banner
-            if (entry.isIntersecting && entry.intersectionRatio > 0) {
-              setShowNewPostsBanner(false);
-              // Update timestamp to mark that user has seen the new posts
-              if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
-                setLastViewedFeedTimestamp(typedPosts[0].created_at);
-              }
-              // Disconnect observer once we've dismissed the banner
-              if (observer) {
-                observer.disconnect();
-              }
-            }
-          });
-        },
-        {
-          // Trigger when at least 10% of the element is visible
-          // This ensures the banner dismisses when the post is actually visible, not just barely in view
-          threshold: 0.1,
-          // Add root margin to account for fixed headers and trigger slightly earlier
-          rootMargin: '-80px 0px 0px 0px',
-        }
-      );
+  //     // Use IntersectionObserver to detect when the first new post enters the viewport
+  //     // This is more reliable than scroll position calculations
+  //     observer = new IntersectionObserver(
+  //       (entries) => {
+  //         entries.forEach((entry) => {
+  //           // When the first new post is visible in the viewport, dismiss the banner
+  //           if (entry.isIntersecting && entry.intersectionRatio > 0) {
+  //             setShowNewPostsBanner(false);
+  //             // Update timestamp to mark that user has seen the new posts
+  //             if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+  //               setLastViewedFeedTimestamp(typedPosts[0].created_at);
+  //             }
+  //             // Disconnect observer once we've dismissed the banner
+  //             if (observer) {
+  //               observer.disconnect();
+  //             }
+  //           }
+  //         });
+  //       },
+  //       {
+  //         // Trigger when at least 10% of the element is visible
+  //         // This ensures the banner dismisses when the post is actually visible, not just barely in view
+  //         threshold: 0.1,
+  //         // Add root margin to account for fixed headers and trigger slightly earlier
+  //         rootMargin: '-80px 0px 0px 0px',
+  //       }
+  //     );
 
-      observer.observe(element);
-    }, 100); // Small delay to ensure DOM is updated
+  //     observer.observe(element);
+  //   }, 100); // Small delay to ensure DOM is updated
 
-    // Cleanup function
-    return () => {
-      clearTimeout(timeoutId);
-      if (observer) {
-        observer.disconnect();
-      }
-    };
-  }, [showNewPostsBanner, newPostsCount, typedPosts]);
+  //   // Cleanup function
+  //   return () => {
+  //     clearTimeout(timeoutId);
+  //     if (observer) {
+  //       observer.disconnect();
+  //     }
+  //   };
+  // }, [showNewPostsBanner, newPostsCount, typedPosts]);
 
   // Infinite scroll effect
   useEffect(() => {
@@ -461,31 +467,32 @@ const SocialFeedPage: React.FC = () => {
     window.dispatchEvent(new CustomEvent('feed-search:submit', { detail: text }));
   }, []);
 
-  const handleShowNewPosts = useCallback(() => {
-    if (firstNewPostRef.current) {
-      // Account for fixed header (64px) and city bar (56px mobile, 64px desktop)
-      // Header height is now dynamic via CSS variable
-      const headerHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-height') || '64');
-      const offset = headerHeight + 20; // 20px padding
-      
-      const elementTop = firstNewPostRef.current.getBoundingClientRect().top + window.scrollY;
-      window.scrollTo({
-        top: Math.max(0, elementTop - offset),
-        behavior: 'smooth',
-      });
-    } else {
-      // Fallback: refresh the feed
-      queryClient.invalidateQueries({ queryKey: ['feed', currentUser?.id, selectedGroupIds] });
-    }
-  }, [currentUser?.id, selectedGroupIds, queryClient]);
+  // SUNSET: Temporarily disabled new posts banner
+  // const handleShowNewPosts = useCallback(() => {
+  //   if (firstNewPostRef.current) {
+  //     // Account for fixed header (64px) and city bar (56px mobile, 64px desktop)
+  //     // Header height is now dynamic via CSS variable
+  //     const headerHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-height') || '64');
+  //     const offset = headerHeight + 20; // 20px padding
+  //     
+  //     const elementTop = firstNewPostRef.current.getBoundingClientRect().top + window.scrollY;
+  //     window.scrollTo({
+  //       top: Math.max(0, elementTop - offset),
+  //       behavior: 'smooth',
+  //     });
+  //   } else {
+  //     // Fallback: refresh the feed
+  //     queryClient.invalidateQueries({ queryKey: ['feed', currentUser?.id, selectedGroupIds] });
+  //   }
+  // }, [currentUser?.id, selectedGroupIds, queryClient]);
 
-  const handleDismissBanner = useCallback(() => {
-    setShowNewPostsBanner(false);
-    // Update timestamp to current time (user has seen the new posts notification)
-    if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
-      setLastViewedFeedTimestamp(typedPosts[0].created_at);
-    }
-  }, [typedPosts]);
+  // const handleDismissBanner = useCallback(() => {
+  //   setShowNewPostsBanner(false);
+  //   // Update timestamp to current time (user has seen the new posts notification)
+  //   if (typedPosts.length > 0 && typedPosts[0]?.created_at) {
+  //     setLastViewedFeedTimestamp(typedPosts[0].created_at);
+  //   }
+  // }, [typedPosts]);
 
   // Computed values - now using centralized getScore from hook
   const { matchedRecIds, matchedAnswerRecIds, matchedQuestionIds } = useMemo(() => {
@@ -579,10 +586,19 @@ const SocialFeedPage: React.FC = () => {
   };
 
   const categoryKeyFromPost = useCallback((post: any): string | null => {
-    // Prefer backend-provided normalized field from places
+    // For service posts, prefer backend-provided service category slug
+    if (post?.content_type === 'service') {
+      const serviceCategorySlug: string | undefined = post?.service_category_slug;
+      if (serviceCategorySlug && typeof serviceCategorySlug === 'string') {
+        return serviceCategorySlug.toLowerCase();
+      }
+    }
+    
+    // For place posts, prefer backend-provided normalized field from places
     const primary: string | undefined = post?.place_primary_type;
     if (primary && typeof primary === 'string') return primary.toLowerCase();
-    // Fallbacks
+    
+    // Fallbacks for legacy posts without category data
     if (post?.labels && Array.isArray(post.labels)) {
       const labels = post.labels.map((l: any) => String(l).toLowerCase());
       if (labels.some((l: string) => l.includes('restaurant') || l.includes('food'))) return 'restaurant';
@@ -972,29 +988,32 @@ const SocialFeedPage: React.FC = () => {
 
     const shouldGroup = Boolean(searchResponse);
     if (!shouldGroup) {
-      const lastViewed = getLastViewedFeedTimestamp();
-      const firstNewIndex = getFirstNewPostIndex(filteredPosts, lastViewed);
-      let firstNewPostSet = false; // Track if we've set the ref
+      // SUNSET: Temporarily disabled new posts banner - commenting out ref logic
+      // const lastViewed = getLastViewedFeedTimestamp();
+      // const firstNewIndex = getFirstNewPostIndex(filteredPosts, lastViewed);
+      // let firstNewPostSet = false; // Track if we've set the ref
       
       return (
         <div className="space-y-1.5">
           {filteredPosts.map((post: any, index: number) => {
-            const isFirstNewPost = !firstNewPostSet && index === firstNewIndex && firstNewIndex >= 0;
-            
-            if (isFirstNewPost) {
-              firstNewPostSet = true;
-            }
+            // SUNSET: Temporarily disabled new posts banner
+            // const isFirstNewPost = !firstNewPostSet && index === firstNewIndex && firstNewIndex >= 0;
+            // 
+            // if (isFirstNewPost) {
+            //   firstNewPostSet = true;
+            // }
             
             if (post.type === 'question') {
               return (
                 <div
                   key={`q-${post.id}`}
-                  ref={isFirstNewPost ? (el) => {
-                    if (el) {
-                      firstNewPostRef.current = el;
-                    }
-                  } : undefined}
-                  data-is-new-post={isFirstNewPost ? 'true' : undefined}
+                  // SUNSET: Temporarily disabled new posts banner
+                  // ref={isFirstNewPost ? (el) => {
+                  //   if (el) {
+                  //     firstNewPostRef.current = el;
+                  //   }
+                  // } : undefined}
+                  // data-is-new-post={isFirstNewPost ? 'true' : undefined}
                 >
                   <QuestionFeedPost
                     question={post}
@@ -1007,17 +1026,19 @@ const SocialFeedPage: React.FC = () => {
                 </div>
               );
             }
+            const PostComponent = post.content_type === 'service' ? ServiceFeedPost : FeedPost;
             return (
               <div
                 key={post.recommendation_id}
-                ref={isFirstNewPost ? (el) => {
-                  if (el) {
-                    firstNewPostRef.current = el;
-                  }
-                } : undefined}
-                data-is-new-post={isFirstNewPost ? 'true' : undefined}
+                // SUNSET: Temporarily disabled new posts banner
+                // ref={isFirstNewPost ? (el) => {
+                //   if (el) {
+                //     firstNewPostRef.current = el;
+                //   }
+                // } : undefined}
+                // data-is-new-post={isFirstNewPost ? 'true' : undefined}
               >
-                <FeedPost
+                <PostComponent
                   post={post}
                   currentUserId={currentUser?.id || ''}
                   onPostUpdate={() => {
@@ -1211,14 +1232,15 @@ const SocialFeedPage: React.FC = () => {
         <div className={`grid grid-cols-1 gap-8 ${showSuggestedUsers ? 'lg:grid-cols-4' : 'lg:grid-cols-1 lg:max-w-4xl lg:mx-auto'}`}>
           <div className={showSuggestedUsers ? 'lg:col-span-3' : 'lg:col-span-1'}>
             
+            {/* SUNSET: Temporarily disabled new posts banner */}
             {/* New Posts Banner - small floating element above posts */}
-            {showNewPostsBanner && newPostsCount > 0 && (
+            {/* {showNewPostsBanner && newPostsCount > 0 && (
               <NewPostsBanner
                 count={newPostsCount}
                 onShowNewPosts={handleShowNewPosts}
                 onDismiss={handleDismissBanner}
               />
-            )}
+            )} */}
             
             {(searchResponse || isSummaryLoading) && (
               <div className="mb-12 space-y-4">

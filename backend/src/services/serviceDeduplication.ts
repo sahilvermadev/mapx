@@ -9,13 +9,15 @@ import {
   updateCanonicalName,
   getServiceWithNames,
   normalizePhoneNumber,
-  normalizeEmail
+  normalizeEmail,
+  updateServiceAggregates
 } from '../db/services';
 import { 
   areNamesLikelySame, 
   extractServiceType, 
   validateServiceData 
 } from '../utils/nameSimilarity';
+import { serviceCategoryService } from './serviceCategoryService';
 
 export interface UpsertServiceResult {
   serviceId: number;
@@ -53,29 +55,67 @@ export async function upsertService(serviceData: ServiceData): Promise<UpsertSer
     country_code: (serviceData as any).country_code,
     address: (serviceData as any).address,
     website: (serviceData as any).website,
-    business_name: (serviceData as any).business_name,
     service_type: validation.cleaned.service_type || (serviceData as any).service_type,
   } as any;
   
-  // Try to find existing service by phone number first (highest priority)
-  let existingService: Service | null = null;
-  let lookupMethod = '';
+  // Use transaction with SELECT FOR UPDATE to prevent race conditions
+  const pool = (await import('../db')).default;
+  const client = await pool.connect();
   
-  if (cleanedData.phone_number) {
-    existingService = await getServiceByPhone(cleanedData.phone_number);
-    lookupMethod = 'phone';
-  }
-  
-  // If not found by phone, try email
-  if (!existingService && cleanedData.email) {
-    existingService = await getServiceByEmail(cleanedData.email);
-    lookupMethod = 'email';
-  }
-  
-  if (existingService) {
-    return await handleExistingService(existingService, cleanedData, lookupMethod);
-  } else {
-    return await handleNewService(cleanedData);
+  try {
+    await client.query('BEGIN');
+    
+    // Try to find existing service by phone number first (highest priority)
+    // Use FOR UPDATE SKIP LOCKED to prevent race conditions
+    let existingService: Service | null = null;
+    let lookupMethod = '';
+    
+    if (cleanedData.phone_number) {
+      const normalizedPhone = normalizePhoneNumber(cleanedData.phone_number);
+      if (normalizedPhone) {
+        const lockedResult = await client.query(
+          'SELECT * FROM services WHERE phone_number = $1 AND deleted_at IS NULL FOR UPDATE SKIP LOCKED',
+          [normalizedPhone]
+        );
+        existingService = lockedResult.rows[0] || null;
+        if (existingService) {
+          lookupMethod = 'phone';
+        }
+      }
+    }
+    
+    // If not found by phone, try email
+    if (!existingService && cleanedData.email) {
+      const normalizedEmail = normalizeEmail(cleanedData.email);
+      if (normalizedEmail) {
+        const lockedResult = await client.query(
+          'SELECT * FROM services WHERE email = $1 AND deleted_at IS NULL FOR UPDATE SKIP LOCKED',
+          [normalizedEmail]
+        );
+        existingService = lockedResult.rows[0] || null;
+        if (existingService) {
+          lookupMethod = 'email';
+        }
+      }
+    }
+    
+    let result: UpsertServiceResult;
+    
+    if (existingService) {
+      result = await handleExistingService(existingService, cleanedData, lookupMethod);
+    } else {
+      // Use INSERT ... ON CONFLICT for atomic upsert to prevent race conditions
+      result = await handleNewServiceAtomic(client, cleanedData);
+    }
+    
+    await client.query('COMMIT');
+    return result;
+    
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -89,16 +129,16 @@ async function handleExistingService(
 ): Promise<UpsertServiceResult> {
   const serviceId = existingService.id;
   
-  // Get existing service with all name variations
+  // Get existing service with all name variations (ensure not deleted)
   const serviceWithNames = await getServiceWithNames(serviceId);
   if (!serviceWithNames) {
-    throw new Error('Service not found after lookup');
+    throw new Error('Service not found or has been deleted');
   }
+  // deleted_at check is handled in getServiceWithNames query
   console.log('[serviceDedup] existing service snapshot:', {
     id: serviceId,
     existing_service_type: existingService.service_type,
     existing_name: existingService.name,
-    existing_business_name: existingService.business_name,
   });
   
   // Check if the new name is similar to existing names
@@ -122,23 +162,18 @@ async function handleExistingService(
     
     // Ensure we persist service_type if the existing record is missing it
     if (!existingService.service_type) {
-      const incomingType = newData.service_type || extractServiceType(newData.name, newData.business_name);
+      const incomingType = newData.service_type || extractServiceType(newData.name, undefined);
       console.log('[serviceDedup] resolving missing service_type for existing service:', {
         incomingType,
         newData_service_type: newData.service_type,
-        extracted_from_name: extractServiceType(newData.name, newData.business_name)
+        extracted_from_name: extractServiceType(newData.name, undefined)
       });
       if (incomingType) {
         updates.service_type = incomingType;
         hasUpdates = true;
       }
     }
-    
-    if (newData.business_name && !existingService.business_name) {
-      updates.business_name = newData.business_name;
-      hasUpdates = true;
-    }
-    
+
     if (newData.address && !existingService.address) {
       updates.address = newData.address;
       hasUpdates = true;
@@ -187,6 +222,31 @@ async function handleExistingService(
       action = 'merged';
       reasoning += '. No new information to add.';
     }
+
+    // Auto-detect and link category if not already linked
+    try {
+      const categoryId = await serviceCategoryService.linkServiceToCategoryAuto(
+        serviceId,
+        undefined, // No explicit category provided
+        existingService.service_type || newData.service_type,
+        existingService.name,
+        undefined, // business name deprecated – avoid using it for new category decisions
+        false, // Auto-detected, not user-provided
+        0.8 // Medium confidence for auto-detection
+      );
+      if (categoryId) {
+        // Update primary_category_id if this is the first/only category
+        const primaryCategory = await serviceCategoryService.getPrimaryCategory(serviceId);
+        if (primaryCategory) {
+          await updateServiceAggregates(serviceId, {
+            primary_category_id: primaryCategory.id,
+          });
+        }
+      }
+    } catch (error) {
+      // Non-fatal: log but don't fail the deduplication
+      console.warn('[serviceDedup] Failed to auto-link category:', error);
+    }
     
   } else {
     // Names are not similar - this might be a different person with same phone/email
@@ -211,12 +271,192 @@ async function handleExistingService(
 }
 
 /**
- * Handle case where no existing service is found
+ * Handle case where no existing service is found (atomic version using INSERT ON CONFLICT)
+ * This prevents race conditions when multiple requests try to create the same service
+ */
+async function handleNewServiceAtomic(client: any, serviceData: any): Promise<UpsertServiceResult> {
+  // Extract service type if not provided
+  if (!serviceData.service_type) {
+    const extractedType = extractServiceType(serviceData.name, undefined);
+    if (extractedType) {
+      serviceData.service_type = extractedType;
+    }
+  }
+  
+  // Normalize phone and email
+  const normalizedPhone = serviceData.phone_number ? normalizePhoneNumber(serviceData.phone_number) : null;
+  const normalizedEmail = serviceData.email ? normalizeEmail(serviceData.email) : null;
+  
+  // Validate that at least one identifier is provided
+  if (!normalizedPhone && !normalizedEmail) {
+    throw new Error('Service must have either phone number or email');
+  }
+  
+  // Use INSERT ... ON CONFLICT to atomically handle race conditions
+  // This ensures that if two concurrent requests try to create the same service,
+  // only one succeeds and the other gets the existing service ID
+  // If another request creates the service between our check and insert, we'll get the existing one
+  let conflictTarget = '';
+  let conflictClause = '';
+  
+  if (normalizedPhone && normalizedEmail) {
+    // If both exist, conflict can happen on phone_number (checked first)
+    // Note: We can't use WHERE in ON CONFLICT, so we'll handle deleted_at in the UPDATE clause
+    conflictTarget = 'phone_number';
+    conflictClause = `
+      ON CONFLICT (phone_number) DO UPDATE SET
+        email = COALESCE(EXCLUDED.email, services.email),
+        name = COALESCE(services.name, EXCLUDED.name),
+        updated_at = CURRENT_TIMESTAMP,
+        deleted_at = NULL
+    `;
+  } else if (normalizedPhone) {
+    conflictTarget = 'phone_number';
+    conflictClause = `
+      ON CONFLICT (phone_number) DO UPDATE SET
+        name = COALESCE(services.name, EXCLUDED.name),
+        updated_at = CURRENT_TIMESTAMP,
+        deleted_at = NULL
+    `;
+  } else if (normalizedEmail) {
+    conflictTarget = 'email';
+    conflictClause = `
+      ON CONFLICT (email) DO UPDATE SET
+        name = COALESCE(services.name, EXCLUDED.name),
+        updated_at = CURRENT_TIMESTAMP,
+        deleted_at = NULL
+    `;
+  }
+  
+  const insertResult = await client.query(
+    `INSERT INTO services (
+      phone_number, email, name, service_type, 
+      address, website, city_name, city_slug, admin1_name, country_code, metadata, deleted_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL)
+    ${conflictClause}
+    RETURNING id, phone_number, email, name`,
+    [
+      normalizedPhone,
+      normalizedEmail,
+      serviceData.name,
+      serviceData.service_type || null,
+      serviceData.address || null,
+      serviceData.website || null,
+      serviceData.city_name || null,
+      serviceData.city_slug || null,
+      serviceData.admin1_name || null,
+      serviceData.country_code || null,
+      JSON.stringify(serviceData.metadata || {})
+    ]
+  );
+  
+  const serviceId = insertResult.rows[0].id;
+  
+  // Check if this was a new insert or an update due to conflict
+  // We can tell by checking if the returned phone/email matches what we tried to insert
+  const wasConflict = conflictTarget === 'phone_number' 
+    ? insertResult.rows[0].phone_number === normalizedPhone && normalizedPhone !== null
+    : conflictTarget === 'email'
+    ? insertResult.rows[0].email === normalizedEmail && normalizedEmail !== null
+    : false;
+  
+  // Get the full service record to check if it's truly new
+  const existingCheck = await client.query(
+    'SELECT * FROM services WHERE id = $1 AND deleted_at IS NULL',
+    [serviceId]
+  );
+  const existingService = existingCheck.rows[0];
+  
+  // Check if service_names already has entries (indicates existing service)
+  const nameCheck = await client.query(
+    'SELECT COUNT(*) as count FROM service_names WHERE service_id = $1',
+    [serviceId]
+  );
+  const hasExistingNames = parseInt(nameCheck.rows[0].count) > 0;
+  const isNewService = !hasExistingNames;
+  
+  // Insert initial name entry (only if new service, or add name variation if existing)
+  if (isNewService) {
+    await client.query(
+      `INSERT INTO service_names (service_id, name, frequency, confidence)
+       VALUES ($1, $2, 1, 1.0)
+       ON CONFLICT (service_id, name) DO UPDATE SET
+         frequency = service_names.frequency + 1,
+         last_seen = CURRENT_TIMESTAMP`,
+      [serviceId, serviceData.name]
+    );
+  } else {
+    // Service already existed, add name variation
+    await client.query(
+      `INSERT INTO service_names (service_id, name, frequency, confidence)
+       VALUES ($1, $2, 1, 1.0)
+       ON CONFLICT (service_id, name) DO UPDATE SET
+         frequency = service_names.frequency + 1,
+         confidence = GREATEST(service_names.confidence, EXCLUDED.confidence),
+         last_seen = CURRENT_TIMESTAMP`,
+      [serviceId, serviceData.name]
+    );
+    
+    // Update canonical name
+    const namesResult = await client.query(
+      `SELECT name, frequency, confidence, 
+              (frequency * confidence) as score
+       FROM service_names 
+       WHERE service_id = $1 
+       ORDER BY score DESC, frequency DESC, confidence DESC
+       LIMIT 1`,
+      [serviceId]
+    );
+    
+    if (namesResult.rows.length > 0) {
+      const canonicalName = namesResult.rows[0].name;
+      await client.query(
+        'UPDATE services SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [canonicalName, serviceId]
+      );
+    }
+  }
+  
+  // Auto-detect and link category
+  try {
+    const categoryId = await serviceCategoryService.linkServiceToCategoryAuto(
+      serviceId,
+      undefined, // No explicit category provided
+      serviceData.service_type,
+      serviceData.name,
+      serviceData.business_name,
+      false, // Auto-detected, not user-provided
+      0.8 // Medium confidence for auto-detection
+    );
+    if (categoryId) {
+      // Update primary_category_id
+      await updateServiceAggregates(serviceId, {
+        primary_category_id: categoryId,
+      });
+    }
+  } catch (error) {
+    // Non-fatal: log but don't fail the creation
+    console.warn('[serviceDedup] Failed to auto-link category:', error);
+  }
+  
+  return {
+    serviceId,
+    isNew: !wasConflict,
+    action: wasConflict ? 'merged' : 'created',
+    confidence: wasConflict ? 0.9 : 1.0,
+    reasoning: wasConflict 
+      ? `Service already existed (conflict on ${conflictTarget}), merged new data`
+      : 'Created new service entity'
+  };
+}
+
+/**
+ * Handle case where no existing service is found (legacy version, kept for backward compatibility)
  */
 async function handleNewService(serviceData: any): Promise<UpsertServiceResult> {
   // Extract service type if not provided
   if (!serviceData.service_type) {
-    const extractedType = extractServiceType(serviceData.name, serviceData.business_name);
+    const extractedType = extractServiceType(serviceData.name, undefined);
     if (extractedType) {
       serviceData.service_type = extractedType;
     }
@@ -228,9 +468,30 @@ async function handleNewService(serviceData: any): Promise<UpsertServiceResult> 
     phone_number: serviceData?.phone_number,
     email: serviceData?.email,
     service_type: serviceData?.service_type,
-    business_name: serviceData?.business_name,
   });
   const serviceId = await createService(serviceData);
+  
+  // Auto-detect and link category
+  try {
+    const categoryId = await serviceCategoryService.linkServiceToCategoryAuto(
+      serviceId,
+      undefined, // No explicit category provided
+      serviceData.service_type,
+      serviceData.name,
+      undefined, // business name deprecated – avoid using it for new category decisions
+      false, // Auto-detected, not user-provided
+      0.8 // Medium confidence for auto-detection
+    );
+    if (categoryId) {
+      // Update primary_category_id
+      await updateServiceAggregates(serviceId, {
+        primary_category_id: categoryId,
+      });
+    }
+  } catch (error) {
+    // Non-fatal: log but don't fail the creation
+    console.warn('[serviceDedup] Failed to auto-link category:', error);
+  }
   
   return {
     serviceId,

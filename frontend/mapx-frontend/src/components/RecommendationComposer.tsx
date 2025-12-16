@@ -7,13 +7,14 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
 import { insertPlainMention } from '@/utils/mentions';
-import { useRecommendationComposer, type ExtractedData } from '@/hooks/useRecommendationComposer';
+import { useRecommendationComposer, type ExtractedData, type QuestionMetadata } from '@/hooks/useRecommendationComposer';
 import { useMentionHandler } from '@/hooks/useMentionHandler';
-import WritingStep from '@/components/composer/steps/WritingStep';
-import AnalyzingStep from '@/components/composer/steps/AnalyzingStep';
-import CompletingStep from '@/components/composer/steps/CompletingStep';
 import PreviewStep from '@/components/composer/steps/PreviewStep';
+import ContentTypeSelectionStep from '@/components/composer/steps/ContentTypeSelectionStep';
+import ServiceBasicsStep from '@/components/composer/steps/ServiceBasicsStep';
+import MapStep from '@/components/composer/steps/MapStep';
 import MentionMenu from '@/components/MentionMenu';
+import ServiceDetailsForm, { type ServiceDetailsFormData } from '@/components/ServiceDetailsForm';
 import {
   CELEBRATION_DELAY_MS,
   CELEBRATION_SHAPES_COUNT,
@@ -31,6 +32,7 @@ interface RecommendationComposerProps {
   currentUserId: string;
   questionContext?: string;
   questionId?: number;
+  questionMetadata?: QuestionMetadata;
 }
 
 interface LocationData {
@@ -56,11 +58,10 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   onPostCreated,
   currentUserId,
   questionContext,
-  questionId
+  questionId,
+  questionMetadata
 }) => {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const previewTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   
   const { user: currentUser } = useAuth();
   
@@ -74,9 +75,12 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     : null;
   const accentColor = selectedTheme?.accentColor || '#000000';
   const textOnAccent = getReadableTextColor(accentColor);
+  const borderColor = selectedTheme?.borderColor || '#000000';
+  const backgroundColor = selectedTheme?.backgroundColor || '#FFFFFF';
+  const cardBackground = selectedTheme?.cardBackground || '#FFFFFF';
   
   // Use the custom hooks for state management
-  const composer = useRecommendationComposer(currentUserId, questionId);
+  const composer = useRecommendationComposer(currentUserId, questionId, questionMetadata);
   const mentionHandler = useMentionHandler(currentUserId);
 
   // Extract stable functions and values to avoid dependency issues
@@ -86,6 +90,11 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     location: composerLocation,
     improveText,
     isImprovingText,
+    serviceDetails,
+    setServiceDetails,
+    handleContentTypeSelect,
+    handleServiceBasicsSubmit,
+    serviceBasics,
   } = composer;
 
   // Memoize celebration shapes to prevent re-generation on each render
@@ -102,16 +111,24 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     });
   }, [accentColor]);
 
-  // Container style: no card for analyzing step
+  // Container style: no card on mobile for map-selection, no card for preview step
   const stepContainerClassName = useMemo(() => {
-    if (composer.currentStep === 'analyzing') {
-      return 'w-full max-w-4xl p-4 md:p-6 lg:p-8';
+    if (composer.currentStep === 'map-selection') {
+      return 'w-full max-w-4xl sm:rounded-lg sm:border-2 p-0 sm:p-3 md:p-4 md:p-6 lg:p-8';
     }
-    return 'w-full max-w-4xl rounded-lg border-2 p-4 md:p-6 lg:p-8';
+    if (composer.currentStep === 'preview') {
+      return 'w-full max-w-4xl p-0';
+    }
+    return 'w-full max-w-4xl rounded-lg border-2 p-3 sm:p-4 md:p-6 lg:p-8';
   }, [composer.currentStep]);
   
   const stepContainerStyle = useMemo(() => {
-    if (composer.currentStep === 'analyzing') {
+    if (composer.currentStep === 'map-selection') {
+      // Transparent background on mobile, card styling on desktop via CSS classes
+      return undefined;
+    }
+    if (composer.currentStep === 'preview') {
+      // No border/background for preview step - buttons should be outside
       return undefined;
     }
     return selectedTheme ? {
@@ -125,33 +142,68 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     };
   }, [composer.currentStep, selectedTheme]);
 
-  // Auto-focus input when completing step is shown
-  useEffect(() => {
-    if (composer.currentStep === 'completing' && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [composer.currentStep]);
-
   // Initialize component when opened
   useEffect(() => {
     if (!isOpen) return;
     
-    // Reset all state including celebration
-    reset();
-    setShowCelebration(false);
-    
     // Check for question context from props or location.state
     const contextToUse = questionContext || composerLocation.state?.questionContext;
-    initializeWithQuestion(contextToUse);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, questionContext, questionId]);
-
-  // Auto-focus textarea when opened (but only for writing step)
-  useEffect(() => {
-    if (isOpen && composer.currentStep === 'writing' && textareaRef.current) {
-      textareaRef.current.focus();
+    
+    // If we're answering a question, wait for metadata if it's not available yet
+    if (questionId && contextToUse && questionMetadata === undefined) {
+      // Metadata is being fetched - don't initialize yet, let the metadata effect handle it
+      return;
     }
-  }, [isOpen, composer.currentStep]);
+    
+    // If we have question metadata with a detected category, go directly to the right flow
+    const hasDetectedCategory = questionMetadata?.detected_category && 
+                                 questionMetadata.detected_category.content_type !== 'unclear';
+    
+    if (hasDetectedCategory && contextToUse) {
+      // Reset state but keep the step (already initialized correctly)
+      reset(true);
+      setShowCelebration(false);
+      initializeWithQuestion(contextToUse);
+    } else if (contextToUse) {
+      // We have question context but no metadata (or unclear category)
+      reset();
+      setShowCelebration(false);
+      initializeWithQuestion(contextToUse);
+    } else {
+      // No question context - start fresh
+      reset();
+      setShowCelebration(false);
+      composer.setCurrentStep('content-type-selection');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, questionContext, questionId, questionMetadata]);
+
+  // Re-initialize when questionMetadata becomes available (handles race condition)
+  useEffect(() => {
+    if (!isOpen || !questionId || !questionMetadata) return;
+    
+    const contextToUse = questionContext || composerLocation.state?.questionContext;
+    if (!contextToUse) return;
+    
+    const detectedCategory = questionMetadata.detected_category;
+    
+    // If we have a detected category that's not unclear, route to the correct flow
+    if (detectedCategory && detectedCategory.content_type !== 'unclear') {
+      const expectedStep = detectedCategory.content_type === 'service' ? 'service-basics' : 'map-selection';
+      
+      // Check if we need to re-route (metadata arrived after initial render)
+      const needsReRoute = 
+        composer.currentStep === 'content-type-selection' ||
+        composer.currentStep !== expectedStep ||
+        composer.explicitContentType !== detectedCategory.content_type;
+      
+      if (needsReRoute) {
+        reset(true);
+        initializeWithQuestion(contextToUse);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionMetadata, isOpen, questionId, questionContext]);
 
   // Fetch mention suggestions with proper cleanup
   useEffect(() => {
@@ -177,34 +229,6 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
       isMounted = false;
     };
   }, [mentionHandler.mentionQuery, mentionHandler.fetchSuggestions]);
-
-  // Handle text change with mention detection
-  const handleTextChange = useCallback((value: string) => {
-    mentionHandler.handleTextChange(value, textareaRef, composer.setText);
-    if (composer.error) {
-      composer.setError(null);
-    }
-  }, [mentionHandler, composer]);
-
-  // Handle text selection for mention positioning
-  const handleTextSelection = useCallback((newPos: number) => {
-    mentionHandler.handleTextSelection(textareaRef, newPos);
-  }, [mentionHandler]);
-
-  // Handle mention selection
-  const handleMentionSelect = useCallback((user: MentionUser) => {
-    mentionHandler.handleMentionSelect(user, composer.text, textareaRef, composer.setText);
-  }, [mentionHandler, composer.text]);
-
-  // Handle field response
-  const handleFieldResponse = useCallback(async (field: string, response: any) => {
-    await composer.handleFieldResponse(field, response);
-  }, [composer]);
-
-  // Handle location selection
-  const handleLocationSelected = useCallback((location: LocationData) => {
-    composer.handleLocationSelected(location);
-  }, [composer]);
 
   // Helper function to update both extractedData and fieldResponses
   const updateLocationData = useCallback((location: LocationData) => {
@@ -278,11 +302,6 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     updateLocationData(location);
   }, [updateLocationData]);
 
-  // Handle skip field
-  const handleSkipField = useCallback(() => {
-    composer.handleSkipField();
-  }, [composer]);
-
   // Shared celebration handler
   const handleCelebration = useCallback(() => {
     setShowCelebration(true);
@@ -310,9 +329,22 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
 
   // Handle approve preview
   const handleApprovePreview = useCallback(async () => {
-    const success = await composer.handleSubmit(mentionHandler.getMapping);
-    if (success) {
-      handleCelebration();
+    console.log('[RecommendationComposer] handleApprovePreview called');
+    try {
+      const getMapping = mentionHandler?.getMapping || (() => ({}));
+      console.log('[RecommendationComposer] Calling handleSubmit...');
+      const success = await composer.handleSubmit(getMapping);
+      console.log('[RecommendationComposer] handleSubmit result:', success);
+      if (success) {
+        handleCelebration();
+      } else {
+        console.error('[RecommendationComposer] handleSubmit returned false');
+        toast.error('Failed to post recommendation. Please try again.');
+      }
+    } catch (error) {
+      console.error('[RecommendationComposer] Error in handleApprovePreview:', error);
+      toast.error('An error occurred while posting the recommendation.');
+      throw error;
     }
   }, [composer, mentionHandler, handleCelebration]);
 
@@ -326,8 +358,16 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
 
   // Handle save edit
   const handleSaveEdit = useCallback(() => {
+    // For services, sync editedPreview to serviceDetails.experience_summary
+    if (composer.explicitContentType === 'service' && composer.editedPreview?.trim()) {
+      setServiceDetails(prev => ({
+        ...prev,
+        experience_summary: composer.editedPreview.trim(),
+        service_experience: composer.editedPreview.trim(), // Also set for compatibility
+      }));
+    }
     composer.setIsEditingDescription(false);
-  }, [composer]);
+  }, [composer, setServiceDetails]);
 
   // Handle improve text with AI
   const handleImproveText = useCallback(async () => {
@@ -391,49 +431,81 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     });
   }, [composer.editedPreview, composer.setEditedPreview, mentionHandler]);
 
-  const renderWritingStep = useCallback(() => (
-    <WritingStep
-      error={composer.error}
-      text={composer.text}
-      textareaRef={textareaRef}
-      onChange={handleTextChange}
-      onContinue={composer.handleAnalyze}
-      onClearError={() => composer.setError(null)}
-      onTextSelection={handleTextSelection}
-      mentionMenu={
-        <MentionMenu
-          show={mentionHandler.showMentionMenu}
-          suggestions={mentionHandler.mentionSuggestions}
-          position={mentionHandler.mentionPosition}
-          onSelect={handleMentionSelect}
-        />
-      }
-    />
-  ), [composer, handleTextChange, handleTextSelection, handleMentionSelect, mentionHandler]);
-
-  const renderAnalyzingStep = useCallback(() => (
-    <AnalyzingStep />
-  ), []);
-
-  const renderCompletingStep = useCallback(() => (
-    <CompletingStep
-      missingFields={composer.missingFields}
-      currentFieldIndex={composer.currentFieldIndex}
-      textareaRef={textareaRef}
-      fieldResponses={composer.fieldResponses}
-      onFieldResponse={handleFieldResponse}
-      onLocationSelected={handleLocationSelected}
-      onSkipField={handleSkipField}
-      onBack={composer.goBack}
-      isSubmitting={composer.isSubmitting}
-      onSubmit={async () => {
-        const success = await composer.handleSubmit(mentionHandler.getMapping);
-        if (success) {
-          handleCelebration();
-        }
+  const renderContentTypeSelectionStep = useCallback(() => (
+    <ContentTypeSelectionStep
+      onSelect={handleContentTypeSelect}
+      onSkip={() => {
+        // Skip defaults to place flow
+        handleContentTypeSelect('place');
       }}
     />
-  ), [composer, handleFieldResponse, handleLocationSelected, handleSkipField, mentionHandler, handleCelebration]);
+  ), [handleContentTypeSelect]);
+
+  const renderMapStep = useCallback(() => (
+    <MapStep
+      onBack={composer.goBack}
+      onPlaceSelected={composer.handlePlaceSelectedFromMap}
+    />
+  ), [composer]);
+
+  const renderServiceBasicsStep = useCallback(() => (
+    <ServiceBasicsStep
+      initialData={serviceBasics || {}}
+      onContinue={handleServiceBasicsSubmit}
+      onBack={composer.goBack}
+    />
+  ), [serviceBasics, handleServiceBasicsSubmit, composer]);
+
+  const handleServiceDetailsSubmit = useCallback(async (data: ServiceDetailsFormData) => {
+    // If category changed, update category_id - backend will derive service_type from it
+    if (data.category_id && data.category_id !== serviceBasics?.category_id) {
+      composer.setExtractedData(prev => ({
+        ...prev,
+        service_category_id: data.category_id,
+      }));
+      composer.setFieldResponses(prev => ({
+        ...prev,
+        service_category_id: data.category_id,
+      }));
+    }
+
+    // Map service details to the format expected by the mapper
+    setServiceDetails({
+      service_category_id: data.category_id || serviceBasics?.category_id || null,
+      service_price_range: data.price_range,
+      exact_price: data.exact_price,
+      service_quote: data.verbatim_quote,
+      experience_summary: data.experience_summary,
+      service_experience: data.experience_summary, // Also set service_experience for compatibility
+      context_tags: data.context_tags,
+    });
+    // Move to preview after service details are filled
+    composer.setCurrentStep('preview');
+  }, [setServiceDetails, composer, serviceBasics]);
+
+  const renderServiceDetailsStep = useCallback(() => (
+    <div className="space-y-2.5 sm:space-y-3 md:space-y-4">
+      <div>
+        <h2 
+          className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-light tracking-tight leading-tight"
+          style={{ color: selectedTheme?.textPrimary || '#000000' }}
+        >
+          Service Details
+        </h2>
+        <p className="text-xs sm:text-sm mt-1" style={{ color: selectedTheme?.textMuted || '#6B7280' }}>
+          Help others by sharing more details about this service
+        </p>
+      </div>
+      <ServiceDetailsForm
+        initialData={{
+          category_id: serviceBasics?.category_id || serviceDetails.service_category_id,
+          ...serviceDetails,
+        }}
+        onSubmit={handleServiceDetailsSubmit}
+        onCancel={() => composer.setCurrentStep('service-basics')}
+      />
+    </div>
+  ), [serviceBasics, serviceDetails, handleServiceDetailsSubmit, composer, selectedTheme]);
 
   const renderPreviewStep = useCallback(() => {
     const previewMentionMenu = (
@@ -476,6 +548,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         onPlaceNameChange={handlePlaceNameChange}
         onPlaceAddressChange={handlePlaceAddressChange}
         onLocationSelected={handlePreviewLocationSelected}
+        serviceDetails={serviceDetails}
+        serviceBasics={serviceBasics}
       />
     );
   }, [
@@ -492,6 +566,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     handlePreviewLocationSelected,
     handleImproveText,
     isImprovingText,
+    serviceDetails,
+    serviceBasics,
   ]);
 
   // Neobrutalist celebration animation component
@@ -509,7 +585,8 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-white"
+            className="absolute inset-0"
+            style={{ backgroundColor }}
           />
           
           {/* Celebration Content - Neobrutalist Style */}
@@ -524,8 +601,12 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                 stiffness: 300,
                 damping: 20
               }}
-              className="relative rounded-lg border-4 border-black bg-white p-6 md:p-8 shadow-[8px_8px_0_0_#000] md:shadow-[12px_12px_0_0_#000]"
-              style={{ backgroundColor: accentColor, borderColor: '#000' }}
+              className="relative rounded-lg border-4 p-6 md:p-8"
+              style={{ 
+                backgroundColor: accentColor, 
+                borderColor: borderColor,
+                boxShadow: `8px 8px 0 0 ${borderColor}`,
+              }}
             >
               {/* Checkmark Container */}
               <motion.div
@@ -537,9 +618,18 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                   stiffness: 300,
                   damping: 15
                 }}
-                className="w-16 h-16 md:w-20 md:h-20 rounded-lg border-4 border-black bg-white shadow-[3px_3px_0_0_#000] md:shadow-[4px_4px_0_0_#000] flex items-center justify-center mb-4 md:mb-6 mx-auto"
+                className="w-16 h-16 md:w-20 md:h-20 rounded-lg border-4 flex items-center justify-center mb-4 md:mb-6 mx-auto"
+                style={{
+                  backgroundColor: cardBackground,
+                  borderColor: borderColor,
+                  boxShadow: `3px 3px 0 0 ${borderColor}`,
+                }}
               >
-                <Check className="h-8 w-8 md:h-12 md:w-12 text-black" strokeWidth={4} />
+                <Check 
+                  className="h-8 w-8 md:h-12 md:w-12" 
+                  strokeWidth={4}
+                  style={{ color: borderColor }}
+                />
               </motion.div>
               
               {/* Success Message */}
@@ -587,13 +677,13 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                   duration: 1.2,
                   ease: 'easeOut'
                 }}
-                className="absolute rounded-lg border-2 border-black"
+                className="absolute rounded-lg border-2"
                 style={{
                   width: `${shape.size}px`,
                   height: `${shape.size}px`,
-                  backgroundColor: shape.shapeColor === '#000' ? '#000' : shape.shapeColor,
-                  borderColor: '#000',
-                  boxShadow: '3px 3px 0 0 #000'
+                  backgroundColor: shape.shapeColor === '#000' ? borderColor : shape.shapeColor,
+                  borderColor: borderColor,
+                  boxShadow: `3px 3px 0 0 ${borderColor}`
                 }}
               />
             ))}
@@ -601,7 +691,7 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         </motion.div>
       )}
     </AnimatePresence>
-  ), [showCelebration, accentColor, textOnAccent, celebrationShapes]);
+  ), [showCelebration, accentColor, textOnAccent, celebrationShapes, borderColor, backgroundColor, cardBackground]);
 
   return (
     <>
@@ -623,7 +713,7 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           >
             <div className="h-full flex flex-col">
               <div className="flex-1 overflow-y-auto">
-                <div className="h-full flex items-center justify-center p-4 md:p-12">
+                <div className={`h-full flex items-center justify-center ${composer.currentStep === 'map-selection' ? 'p-0 sm:p-2 md:p-4 lg:p-12' : 'p-3 sm:p-4 md:p-8 lg:p-12'}`}>
                   <motion.div
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
@@ -635,11 +725,27 @@ const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                     }}
                     className={stepContainerClassName}
                     style={stepContainerStyle}
+                    data-step={composer.currentStep}
                   >
+                  {composer.currentStep === 'map-selection' && (
+                    <style>{`
+                      [data-step="map-selection"] {
+                        background-color: transparent !important;
+                      }
+                      @media (min-width: 768px) {
+                        [data-step="map-selection"] {
+                          background-color: ${selectedTheme?.cardBackground || '#FFFFFF'} !important;
+                          border-color: ${selectedTheme?.borderColor || '#000000'} !important;
+                          box-shadow: 6px 6px 0 0 ${selectedTheme?.borderColor || '#000000'} !important;
+                        }
+                      }
+                    `}</style>
+                  )}
                     <AnimatePresence mode="wait">
-                      {composer.currentStep === 'writing' && renderWritingStep()}
-                      {composer.currentStep === 'analyzing' && renderAnalyzingStep()}
-                      {composer.currentStep === 'completing' && renderCompletingStep()}
+                      {composer.currentStep === 'content-type-selection' && renderContentTypeSelectionStep()}
+                      {composer.currentStep === 'map-selection' && renderMapStep()}
+                      {composer.currentStep === 'service-basics' && renderServiceBasicsStep()}
+                      {composer.currentStep === 'service-details' && renderServiceDetailsStep()}
                       {composer.currentStep === 'preview' && renderPreviewStep()}
                     </AnimatePresence>
                   </motion.div>

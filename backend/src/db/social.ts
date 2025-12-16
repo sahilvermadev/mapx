@@ -664,7 +664,8 @@ export async function getUserRecommendations(
     // Build dynamic WHERE clause for optional filters
     const whereParts: string[] = [
       'r.user_id = $1',
-      "r.visibility IN ('public', 'friends')"
+      "r.visibility IN ('public', 'friends')",
+      'r.deleted_at IS NULL'
     ];
     const params: (string | number)[] = [userId];
     let paramCount = 1;
@@ -681,7 +682,7 @@ export async function getUserRecommendations(
       paramCount++;
       const searchPattern = `%${sanitizedSearch}%`;
       whereParts.push(
-        `(r.description ILIKE $${paramCount} OR r.title ILIKE $${paramCount} OR p.name ILIKE $${paramCount})`
+        `(r.description ILIKE $${paramCount} OR p.name ILIKE $${paramCount} OR s.name ILIKE $${paramCount})`
       );
       params.push(searchPattern);
     }
@@ -728,7 +729,7 @@ export async function getUserRecommendations(
       `SELECT 
         r.id as recommendation_id,
         r.place_id,
-        r.title,
+        COALESCE(p.name, s.name) as title,
         r.description, r.rating, r.visibility, r.created_at, r.labels, r.metadata, r.content_type, r.content_data,
         p.name as place_name, p.address as place_address, p.lat as place_lat, p.lng as place_lng, p.google_place_id,
         p.city_name as place_city_name, p.city_slug as place_city_slug, p.country_code as place_country_code, p.admin1_name as place_admin1_name,
@@ -740,6 +741,7 @@ export async function getUserRecommendations(
         false as is_saved
       FROM recommendations r
       LEFT JOIN places p ON r.place_id = p.id
+      LEFT JOIN services s ON r.service_id = s.id
       JOIN users u ON r.user_id = u.id
       LEFT JOIN (
         SELECT recommendation_id, COUNT(*)::int as comments_count

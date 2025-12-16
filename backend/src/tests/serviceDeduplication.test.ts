@@ -37,8 +37,7 @@ async function testScenario1() {
     const result1 = await upsertService({
       name: 'Ramesh Singh',
       phone_number: '9910192219',
-      service_type: 'painter',
-      business_name: 'Ramesh Paint Works'
+      service_type: 'painter'
     });
     
     console.log('First service created:', result1);
@@ -47,8 +46,7 @@ async function testScenario1() {
     const result2 = await upsertService({
       name: 'Ramesh S',
       phone_number: '9910192219',
-      service_type: 'painter',
-      business_name: 'Ramesh Paint Works'
+      service_type: 'painter'
     });
     
     console.log('Second service (should be merged):', result2);
@@ -124,8 +122,7 @@ async function testScenario4() {
     const result = await upsertService({
       name: 'Vijay Sharma',
       phone_number: '9123456789',
-      service_type: 'electrician',
-      business_name: 'Vijay Electricals'
+      service_type: 'electrician'
     });
     
     console.log('New service created:', result);

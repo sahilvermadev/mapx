@@ -1,10 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import RecommendationComposer from '@/components/RecommendationComposer';
 import { useAuth } from '@/auth';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
+import { extractQuestionMetadata } from '@/utils/questionMetadata';
+import type { QuestionMetadata } from '@/hooks/useRecommendationComposer';
 
 const RecommendationComposerPage: React.FC = () => {
   const navigate = useNavigate();
@@ -56,6 +58,24 @@ const RecommendationComposerPage: React.FC = () => {
   // Get question context from navigation state
   const questionContext = location.state?.questionContext;
   const questionId = location.state?.questionId;
+  const [questionMetadata, setQuestionMetadata] = useState<QuestionMetadata | undefined>(
+    location.state?.questionMetadata
+  );
+
+  // Fetch question metadata if questionId is provided but metadata wasn't in route state
+  useEffect(() => {
+    if (questionId && questionMetadata === undefined) {
+      extractQuestionMetadata(questionId)
+        .then((metadata) => {
+          // Set metadata (or empty object if none found) to indicate we've checked
+          setQuestionMetadata(metadata || {});
+        })
+        .catch(() => {
+          // Non-fatal; set empty metadata to indicate we've checked (failed to fetch)
+          setQuestionMetadata({});
+        });
+    }
+  }, [questionId, questionMetadata]);
 
   return (
     <div className="min-h-[calc(100vh-64px)]">
@@ -74,9 +94,11 @@ const RecommendationComposerPage: React.FC = () => {
         currentUserId={currentUser.id}
         questionContext={questionContext}
         questionId={questionId}
+        questionMetadata={questionMetadata}
       />
     </div>
   );
 };
 
-export default React.memo(RecommendationComposerPage);
+// Temporarily removing React.memo to debug dynamic import issue
+export default RecommendationComposerPage;

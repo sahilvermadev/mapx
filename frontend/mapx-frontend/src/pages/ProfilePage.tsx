@@ -19,6 +19,7 @@ import { useProfilePlacesQuery } from '@/hooks/useProfilePlacesQuery';
 import { getApiBaseUrl } from '@/config/apiConfig';
 
 import FeedPost from '@/components/FeedPost';
+import ServiceFeedPost from '@/components/ServiceFeedPost';
 import QuestionFeedPost from '@/components/QuestionFeedPost';
 import CityFilterBar, { type CitySummary } from '@/components/SocialFeed/CityFilterBar';
 
@@ -1244,6 +1245,14 @@ const ProfilePage: React.FC<ProfilePageProps> = () => {
                         currentUserId={currentUser?.id || ''}
                         onQuestionUpdate={handleQuestionUpdate}
                         allowEdit={true}
+                      />
+                    ) : item.content_type === 'service' ? (
+                      <ServiceFeedPost
+                        key={uniqueKey}
+                        post={item}
+                        currentUserId={currentUser?.id || ''}
+                        allowEdit={true}
+                        onPostUpdate={() => handlePostUpdate(postId)}
                       />
                     ) : (
                       <FeedPost

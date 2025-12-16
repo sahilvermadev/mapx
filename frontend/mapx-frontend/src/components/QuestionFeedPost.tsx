@@ -219,12 +219,18 @@ const QuestionFeedPost: React.FC<QuestionFeedPostProps> = ({
     setShowAnswers(prev => !prev);
   }, [promptLoginIfNeeded]);
 
-  const handleAnswer = useCallback(() => {
+  const handleAnswer = useCallback(async () => {
     if (promptLoginIfNeeded()) return;
+    
+    // Fetch question metadata before navigating to ensure we have category info
+    const { extractQuestionMetadata } = await import('@/utils/questionMetadata');
+    const questionMetadata = await extractQuestionMetadata(question.id);
+    
     navigate('/compose', { 
       state: { 
         questionContext, 
-        questionId: question.id 
+        questionId: question.id,
+        questionMetadata
       } 
     });
   }, [navigate, questionContext, question.id, promptLoginIfNeeded]);

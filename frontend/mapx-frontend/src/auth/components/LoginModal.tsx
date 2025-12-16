@@ -71,7 +71,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, next }) => {
           <div className="p-8">
             <div className="text-center mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Sign in</h2>
-              <p className="text-sm text-gray-600 mt-1">Continue to Recce</p>
+              <p className="text-sm text-gray-600 mt-1">Continue to Rekky</p>
             </div>
 
             <Button

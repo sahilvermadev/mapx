@@ -131,8 +131,8 @@ export async function generateRecommendationEmbedding(recommendationData: {
   place_address?: string;
   service_name?: string;
   service_type?: string;
-  business_name?: string;
   address?: string;
+  service_category_name?: string;
   user_name?: string;
   // Structured payloads
   content_data?: Record<string, any>;
@@ -175,11 +175,11 @@ export async function generateRecommendationEmbedding(recommendationData: {
   if (recommendationData.service_name) {
     textParts.push(`Service: ${recommendationData.service_name}`);
   }
+  if (recommendationData.service_category_name) {
+    textParts.push(`Category: ${recommendationData.service_category_name}`);
+  }
   if (recommendationData.service_type) {
     textParts.push(`Service Type: ${recommendationData.service_type}`);
-  }
-  if (recommendationData.business_name) {
-    textParts.push(`Business: ${recommendationData.business_name}`);
   }
   if (recommendationData.address) {
     textParts.push(`Service Address: ${recommendationData.address}`);

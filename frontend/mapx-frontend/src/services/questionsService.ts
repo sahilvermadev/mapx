@@ -48,8 +48,8 @@ export const questionsApi = {
     return res.data as ApiResponse<{ id: number; created_at: string }>;
   },
   getQuestion: async (questionId: number): Promise<ApiResponse<QuestionDto>> => {
-    const res = await apiClient.get(`/questions/${questionId}`);
-    return res.data as ApiResponse<QuestionDto>;
+    const res = await apiClient.get<QuestionDto>(`/questions/${questionId}`);
+    return res; // apiClient.get already returns ApiResponse<T>
   },
   getAnswers: async (questionId: number, params?: { limit?: number }): Promise<ApiResponse<AnswerDto[]>> => {
     return apiClient.get<AnswerDto[]>(`/questions/${questionId}/answers`, params);

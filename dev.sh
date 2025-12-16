@@ -96,8 +96,10 @@ start_dev() {
         echo "  Frontend: http://localhost:5173"
         echo "  Backend API: http://localhost:5000"
         echo ""
-        echo "💡 View logs: ./dev.sh logs"
-        echo "💡 Stop services: ./dev.sh stop"
+        echo "💡 Next steps:"
+        echo "  - Run migrations: make dev-migrate (this will also sync categories)"
+        echo "  - View logs: ./dev.sh logs"
+        echo "  - Stop services: ./dev.sh stop"
     fi
 }
 
@@ -171,6 +173,19 @@ run_migrations() {
         docker exec -it recce_backend_container npm run migrate
     fi
     echo -e "${GREEN}✅ Migrations completed!${NC}"
+    
+    # Sync service categories after migrations
+    echo ""
+    echo "🔄 Syncing service categories..."
+    if docker compose ps backend | grep -q "Up"; then
+        # Run backend's sync-categories script inside the container so it can use /app/node_modules
+        echo "   -> docker exec recce_backend_container sh -c \"cd /app && node -r dotenv/config sync-categories.js\""
+        docker exec recce_backend_container sh -c "cd /app && node -r dotenv/config sync-categories.js"
+        echo -e "${GREEN}✅ Category sync completed!${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Backend container is not running. Skipping category sync.${NC}"
+        echo "💡 Run manually: make dev-sync-categories"
+    fi
 }
 
 # Function to install dependencies

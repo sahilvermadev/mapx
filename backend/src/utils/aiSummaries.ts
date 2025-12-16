@@ -35,7 +35,6 @@ export interface SearchContext {
         service_id?: number | null;
         service_name: string;
         service_type?: string | null;
-        service_business_name?: string | null;
         service_address?: string | null;
         total_recommendations: number;
         average_similarity: number;

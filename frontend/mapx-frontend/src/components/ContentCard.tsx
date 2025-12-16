@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
 import { X, ChevronLeft, ChevronRight, Star, Heart, MapPin, MessageCircle } from 'lucide-react';
-import ReviewModal, { type ReviewPayload } from './ReviewModal';
 import { recommendationsApi, type PlaceRecommendation } from '../services/recommendationsApiService';
 import { formatGoogleTypeForDisplay } from '../utils/placeTypes';
 import { Button } from '@/components/ui/button';
@@ -17,6 +16,8 @@ import { socialApi, type Comment } from '../services/social';
 import { useAuth } from '../auth';
 import LoginModal from '../auth/components/LoginModal';
 import { Input } from '@/components/ui/input';
+import { useTheme } from '@/contexts/ThemeContext';
+import { THEMES } from '@/services/profileService';
 
 export interface PlaceDetails {
   id: string;
@@ -112,11 +113,14 @@ const ContentCard: React.FC<ContentCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { user: currentUser, isAuthenticated } = useAuth();
+  const { theme: themeName } = useTheme();
+  const selectedTheme = themeName && THEMES[themeName as keyof typeof THEMES] 
+    ? THEMES[themeName as keyof typeof THEMES] 
+    : null;
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [realReviews, setRealReviews] = useState<RealReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
   const [reviewsError, setReviewsError] = useState<string | null>(null);
-  const [reviewOpen, setReviewOpen] = useState(false);
   const [networkAverageRating, setNetworkAverageRating] = useState<number | null>(null);
   const [networkRatingCount, setNetworkRatingCount] = useState<number>(0);
   
@@ -249,56 +253,6 @@ const ContentCard: React.FC<ContentCardProps> = ({
     return true;
   }, [isAuthenticated, currentUser]);
 
-  const handleSubmitReview = useCallback((payload: ReviewPayload) => {
-    console.log('Review submitted:', payload);
-    // This is now handled by the ReviewModal internally
-  }, []);
-
-  const handleReviewSuccess = (result: { place_id: number; annotation_id: number }) => {
-    console.log('Review saved successfully:', result);
-    // Refresh reviews after successful submission by refetching
-    const fetchReviews = async () => {
-      if (!place.google_place_id) return;
-      
-      try {
-        const placeInfo = await recommendationsApi.getPlaceByGoogleId(place.google_place_id);
-        if (!placeInfo) return;
-
-        const recommendations = await recommendationsApi.getPlaceRecommendations(placeInfo.id, 'friends', DEFAULT_REVIEWS_LIMIT);
-        
-        const reviews: RealReview[] = recommendations.map(transformRecommendationToReview);
-        setRealReviews(reviews);
-        
-        // Update likes state for all reviews
-        const updatedLikes: Record<number, ReviewLikeState> = {};
-        reviews.forEach(review => {
-          updatedLikes[review.id] = {
-            count: review.likes_count || 0,
-            isLiked: review.is_liked_by_current_user || false
-          };
-        });
-        setReviewLikes(prev => ({ ...prev, ...updatedLikes }));
-
-        // Refresh network consolidated rating as well
-        try {
-          const net = await recommendationsApi.getPlaceNetworkRating(placeInfo.id);
-          setNetworkAverageRating(net.average_rating);
-          setNetworkRatingCount(net.rating_count);
-        } catch (e) {
-          console.warn('Failed to refresh network rating');
-        }
-      } catch (error) {
-        console.error('Failed to refresh reviews:', error);
-      }
-    };
-    
-    fetchReviews();
-  };
-
-  const handleReviewError = (error: string) => {
-    console.error('Review save failed:', error);
-    // You can add UI feedback here, like showing an error toast
-  };
 
   // Handle like/unlike for a review
   const handleLike = useCallback(async (reviewId: number) => {
@@ -480,7 +434,12 @@ const ContentCard: React.FC<ContentCardProps> = ({
 
   // Render components
   const renderImageGallery = () => (
-    <div className="relative w-full h-64 md:h-72 overflow-hidden border-b-2 border-black flex-shrink-0">
+    <div 
+      className="relative w-full h-64 md:h-72 overflow-hidden border-b-2 flex-shrink-0"
+      style={selectedTheme ? {
+        borderColor: selectedTheme.borderColor || '#000000',
+      } : undefined}
+    >
       {place.images && place.images.length > 0 ? (
         <>
           <img 
@@ -538,10 +497,20 @@ const ContentCard: React.FC<ContentCardProps> = ({
           )}
         </>
       ) : (
-        <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+        <div 
+          className="w-full h-full flex items-center justify-center"
+          style={selectedTheme ? {
+            background: `linear-gradient(to bottom right, ${selectedTheme.hoverBackground || '#F9FAFB'}, ${selectedTheme.activeBackground || '#F3F4F6'})`,
+          } : undefined}
+        >
           <div className="text-center">
             <div className="text-6xl mb-4 opacity-30">📷</div>
-            <p className="text-gray-500 font-medium">No image available</p>
+            <p 
+              className="font-medium"
+              style={selectedTheme ? {
+                color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+              } : undefined}
+            >No image available</p>
           </div>
           
           {/* Close Button */}
@@ -561,28 +530,59 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const renderPlaceHeader = () => (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">
+        <CardTitle 
+          className="text-2xl font-bold tracking-tight"
+          style={selectedTheme ? {
+            color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+          } : undefined}
+        >
           {place.name}
         </CardTitle>
       </div>
-      <div className="flex items-start gap-2 text-sm text-gray-600">
+      <div 
+        className="flex items-start gap-2 text-sm"
+        style={selectedTheme ? {
+          color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+        } : undefined}
+      >
         <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
         <span className="leading-relaxed">{place.address}</span>
       </div>
       {networkAverageRating !== null && networkRatingCount > 0 && (
-        <div className="flex items-center gap-2 text-sm text-gray-700">
+        <div 
+          className="flex items-center gap-2 text-sm"
+          style={selectedTheme ? {
+            color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+          } : undefined}
+        >
           <div className="flex items-center gap-1">
             {Array.from({ length: Math.round(networkAverageRating) }).map((_, i) => (
-              <Star key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+              <Star 
+                key={i} 
+                className="h-4 w-4"
+                style={selectedTheme ? {
+                  fill: selectedTheme.accentColor || '#FCD34D',
+                  color: selectedTheme.accentColor || '#FCD34D',
+                } : undefined}
+              />
             ))}
           </div>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm">
             {networkAverageRating.toFixed(1)}
           </span>
         </div>
       )}
       {place.category && place.category !== 'point_of_interest' && (
-        <Badge variant="secondary" className="w-fit rounded-md border border-black/20 bg-white text-gray-700 font-medium shadow-[1px_1px_0_0_#000]">
+        <Badge 
+          variant="secondary" 
+          className="w-fit rounded-md border font-medium"
+          style={selectedTheme ? {
+            backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+            borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || '#000000',
+            color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+            boxShadow: `1px 1px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+          } : undefined}
+        >
           {formatGoogleTypeForDisplay(place.category)}
         </Badge>
       )}
@@ -592,7 +592,26 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const renderReviewItem = (review: RealReview, index: number) => (
     <motion.div
       key={review.id}
-      className="group flex gap-3 p-3 rounded-md border border-black/20 hover:border-black/40 bg-white hover:bg-gray-50/50 transition-all duration-200 shadow-sm hover:shadow-[2px_2px_0_0_#000]"
+      className="group flex gap-3 p-3 rounded-md border transition-all duration-200 shadow-sm"
+      style={selectedTheme ? {
+        backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+        borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.2)',
+        boxShadow: `1px 1px 0 0 ${selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.1)'}`,
+      } : undefined}
+      onMouseEnter={(e) => {
+        if (selectedTheme) {
+          e.currentTarget.style.borderColor = selectedTheme.borderColor || '#000000';
+          e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || '#F9FAFB';
+          e.currentTarget.style.boxShadow = `2px 2px 0 0 ${selectedTheme.borderColor || '#000000'}`;
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (selectedTheme) {
+          e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.2)';
+          e.currentTarget.style.backgroundColor = selectedTheme.cardBackground || '#FFFFFF';
+          e.currentTarget.style.boxShadow = `1px 1px 0 0 ${selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.1)'}`;
+        }
+      }}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
@@ -620,17 +639,42 @@ const ContentCard: React.FC<ContentCardProps> = ({
       
       <div className="flex-1 min-w-0 space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-gray-900 text-sm">{review.user_name}</span>
-          <span className="text-gray-400">•</span>
-          <span className="text-gray-500 text-xs">
+          <span 
+            className="font-semibold text-sm"
+            style={selectedTheme ? {
+              color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+            } : undefined}
+          >{review.user_name}</span>
+          <span 
+            style={selectedTheme ? {
+              color: selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF',
+            } : undefined}
+          >•</span>
+          <span 
+            className="text-xs"
+            style={selectedTheme ? {
+              color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+            } : undefined}
+          >
             {formatDate(review.created_at)}
           </span>
           {review.rating && (
             <>
-              <span className="text-gray-400">•</span>
+              <span 
+                style={selectedTheme ? {
+                  color: selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF',
+                } : undefined}
+              >•</span>
               <div className="flex items-center gap-1">
                 {Array.from({ length: review.rating }).map((_, i) => (
-                  <Star key={i} className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                  <Star 
+                    key={i} 
+                    className="h-3 w-3"
+                    style={selectedTheme ? {
+                      fill: selectedTheme.accentColor || '#FCD34D',
+                      color: selectedTheme.accentColor || '#FCD34D',
+                    } : undefined}
+                  />
                 ))}
               </div>
             </>
@@ -641,7 +685,12 @@ const ContentCard: React.FC<ContentCardProps> = ({
           <div className="space-y-2">
             {/* Always show notes if they exist */}
             {review.notes && (
-              <p className="text-gray-600 text-sm leading-relaxed">{renderWithMentions(review.notes, (userId) => navigate(`/profile/${userId}`))}</p>
+              <p 
+                className="text-sm leading-relaxed"
+                style={selectedTheme ? {
+                  color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+                } : undefined}
+              >{renderWithMentions(review.notes, (userId) => navigate(`/profile/${userId}`))}</p>
             )}
           
           {/* Display additional content data */}
@@ -655,8 +704,18 @@ const ContentCard: React.FC<ContentCardProps> = ({
                 );
                 return hasHighlights ? (
                   <div className="flex items-start gap-2">
-                    <span className="text-gray-500 text-xs font-medium min-w-0 flex-shrink-0">Highlights:</span>
-                    <span className="text-gray-600 text-xs">
+                    <span 
+                      className="text-xs font-medium min-w-0 flex-shrink-0"
+                      style={selectedTheme ? {
+                        color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                      } : undefined}
+                    >Highlights:</span>
+                    <span 
+                      className="text-xs"
+                      style={selectedTheme ? {
+                        color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+                      } : undefined}
+                    >
                       {Array.isArray(highlights) ? highlights.filter(h => h && String(h).trim()).join(', ') : highlights}
                     </span>
                   </div>
@@ -665,8 +724,18 @@ const ContentCard: React.FC<ContentCardProps> = ({
               {/* Removed visit_type display as it is not needed */}
               {review.content_data.companions_count !== undefined && (
                 <div className="flex items-start gap-2">
-                  <span className="text-gray-500 text-xs font-medium min-w-0 flex-shrink-0">Companions:</span>
-                  <span className="text-gray-600 text-xs">
+                  <span 
+                    className="text-xs font-medium min-w-0 flex-shrink-0"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                    } : undefined}
+                  >Companions:</span>
+                  <span 
+                    className="text-xs"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+                    } : undefined}
+                  >
                     {review.content_data.companions_count === 0 ? 'Solo' : 
                      review.content_data.companions_count === 1 ? '1 person' : 
                      `${review.content_data.companions_count} people`}
@@ -675,8 +744,18 @@ const ContentCard: React.FC<ContentCardProps> = ({
               )}
               {review.content_data.went_with && review.content_data.went_with.length > 0 && (
                 <div className="flex items-start gap-2">
-                  <span className="text-gray-500 text-xs font-medium min-w-0 flex-shrink-0">Went with:</span>
-                  <span className="text-gray-600 text-xs">{renderWithMentions(review.content_data.went_with.join(', '), (userId) => navigate(`/profile/${userId}`))}</span>
+                  <span 
+                    className="text-xs font-medium min-w-0 flex-shrink-0"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                    } : undefined}
+                  >Went with:</span>
+                  <span 
+                    className="text-xs"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+                    } : undefined}
+                  >{renderWithMentions(review.content_data.went_with.join(', '), (userId) => navigate(`/profile/${userId}`))}</span>
                 </div>
               )}
             </div>
@@ -687,11 +766,32 @@ const ContentCard: React.FC<ContentCardProps> = ({
         {/* Review Actions */}
         <div className="flex items-center gap-3 pt-1">
           <button 
-            className={`flex items-center gap-1.5 transition-colors duration-200 text-xs font-medium px-2 py-1 rounded-md border border-transparent ${
-              (reviewLikes[review.id]?.isLiked || false)
-                ? 'text-red-500 bg-red-50 border-red-200'
-                : 'text-gray-500 hover:text-red-500 hover:border-red-200 hover:bg-red-50'
-            }`}
+            className="flex items-center gap-1.5 transition-colors duration-200 text-xs font-medium px-2 py-1 rounded-md border border-transparent"
+            style={selectedTheme ? {
+              color: (reviewLikes[review.id]?.isLiked || false)
+                ? (selectedTheme.accentColor || '#EF4444')
+                : (selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280'),
+              backgroundColor: (reviewLikes[review.id]?.isLiked || false)
+                ? (selectedTheme.hoverBackground || '#FEF2F2')
+                : 'transparent',
+              borderColor: (reviewLikes[review.id]?.isLiked || false)
+                ? (selectedTheme.borderColorMuted || selectedTheme.borderColor || '#FECACA')
+                : 'transparent',
+            } : undefined}
+            onMouseEnter={(e) => {
+              if (selectedTheme && !(reviewLikes[review.id]?.isLiked || false)) {
+                e.currentTarget.style.color = selectedTheme.accentColor || '#EF4444';
+                e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || selectedTheme.borderColor || '#FECACA';
+                e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || '#FEF2F2';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedTheme && !(reviewLikes[review.id]?.isLiked || false)) {
+                e.currentTarget.style.color = selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280';
+                e.currentTarget.style.borderColor = 'transparent';
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
+            }}
             onClick={() => handleLike(review.id)}
           >
             <Heart className={`h-3.5 w-3.5 ${(reviewLikes[review.id]?.isLiked || false) ? 'fill-current' : ''}`} />
@@ -699,7 +799,24 @@ const ContentCard: React.FC<ContentCardProps> = ({
           </button>
           
           <button 
-            className="flex items-center gap-1.5 text-gray-500 hover:text-blue-500 transition-colors duration-200 text-xs font-medium px-2 py-1 rounded-md border border-transparent hover:border-blue-200 hover:bg-blue-50"
+            className="flex items-center gap-1.5 transition-colors duration-200 text-xs font-medium px-2 py-1 rounded-md border border-transparent"
+            style={selectedTheme ? {
+              color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+            } : undefined}
+            onMouseEnter={(e) => {
+              if (selectedTheme) {
+                e.currentTarget.style.color = selectedTheme.accentColor || '#3B82F6';
+                e.currentTarget.style.borderColor = selectedTheme.borderColorMuted || selectedTheme.borderColor || '#DBEAFE';
+                e.currentTarget.style.backgroundColor = selectedTheme.hoverBackground || '#EFF6FF';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedTheme) {
+                e.currentTarget.style.color = selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280';
+                e.currentTarget.style.borderColor = 'transparent';
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
+            }}
             onClick={() => handleToggleComments(review.id)}
           >
             <MessageCircle className="h-3.5 w-3.5" />
@@ -717,7 +834,12 @@ const ContentCard: React.FC<ContentCardProps> = ({
               {/* Loading state */}
               {commentsState.isLoading && (
                 <div className="flex items-center justify-center py-4">
-                  <div className="text-xs text-gray-500">Loading comments...</div>
+                  <div 
+                    className="text-xs"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                    } : undefined}
+                  >Loading comments...</div>
                 </div>
               )}
               
@@ -743,15 +865,41 @@ const ContentCard: React.FC<ContentCardProps> = ({
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-900">{comment.user_name || 'Anonymous User'}</span>
-                        <span className="text-gray-600">{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
+                        <span 
+                          className="font-semibold"
+                          style={selectedTheme ? {
+                            color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+                          } : undefined}
+                        >{comment.user_name || 'Anonymous User'}</span>
+                        <span 
+                          style={selectedTheme ? {
+                            color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+                          } : undefined}
+                        >{renderWithMentions(comment.comment, (userId) => navigate(`/profile/${userId}`))}</span>
                       </div>
                       <div className="flex items-center gap-3 mt-1">
-                        <span className="text-gray-400">{formatDate(comment.created_at)}</span>
+                        <span 
+                          style={selectedTheme ? {
+                            color: selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF',
+                          } : undefined}
+                        >{formatDate(comment.created_at)}</span>
                         {comment.user_id === currentUser?.id && (
                           <button
                             onClick={() => handleDeleteComment(review.id, comment.id)}
-                            className="text-gray-400 hover:text-red-500 text-xs"
+                            className="text-xs"
+                            style={selectedTheme ? {
+                              color: selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF',
+                            } : undefined}
+                            onMouseEnter={(e) => {
+                              if (selectedTheme) {
+                                e.currentTarget.style.color = selectedTheme.accentColor || '#EF4444';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (selectedTheme) {
+                                e.currentTarget.style.color = selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF';
+                              }
+                            }}
                           >
                             Delete
                           </button>
@@ -766,13 +914,24 @@ const ContentCard: React.FC<ContentCardProps> = ({
               {/* No comments message */}
               {!commentsState.isLoading && commentsState.comments.length === 0 && (
                 <div className="text-center py-4">
-                  <p className="text-xs text-gray-500">No comments yet. Be the first to comment!</p>
+                  <p 
+                    className="text-xs"
+                    style={selectedTheme ? {
+                      color: selectedTheme.textMuted || selectedTheme.textSecondary || '#6B7280',
+                    } : undefined}
+                  >No comments yet. Be the first to comment!</p>
                 </div>
               )}
               
               {/* Comment form */}
               {!commentsState.isLoading && currentUser && (
-                <form onSubmit={(e) => handleAddComment(review.id, e)} className="flex items-center gap-2 pt-2 border-t border-black/10">
+                <form 
+                  onSubmit={(e) => handleAddComment(review.id, e)} 
+                  className="flex items-center gap-2 pt-2 border-t"
+                  style={selectedTheme ? {
+                    borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.1)',
+                  } : undefined}
+                >
                   <Avatar className="h-6 w-6 flex-shrink-0">
                     {currentUser.profilePictureUrl ? (
                       <img
@@ -793,14 +952,42 @@ const ContentCard: React.FC<ContentCardProps> = ({
                     value={commentsState.newComment}
                     onChange={(e) => updateCommentsState(review.id, { newComment: e.target.value })}
                     placeholder="Add a comment..."
-                    className="flex-1 h-7 text-sm md:text-xs rounded-md border border-black/20 bg-white text-gray-900 placeholder:text-gray-400"
+                    className="flex-1 h-7 text-sm md:text-xs rounded-md border"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.inputBackground || selectedTheme.cardBackground || '#FFFFFF',
+                      borderColor: selectedTheme.inputBorder || selectedTheme.borderColor || '#000000',
+                      color: selectedTheme.inputText || selectedTheme.textPrimary || '#000000',
+                    } : undefined}
                     disabled={commentsState.isSubmitting}
                   />
+                  <style>{`
+                    input::placeholder {
+                      color: ${selectedTheme?.inputPlaceholder || selectedTheme?.textMuted || '#9CA3AF'} !important;
+                    }
+                  `}</style>
                   <Button
                     type="submit"
                     size="sm"
-                    className="h-7 px-3 text-xs rounded-md border border-black bg-white text-gray-900 shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all disabled:opacity-50"
+                    className="h-7 px-3 text-xs rounded-md border transition-all disabled:opacity-50"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+                      borderColor: selectedTheme.borderColor || '#000000',
+                      color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+                      boxShadow: `1px 1px 0 0 ${selectedTheme.borderColor || '#000000'}`,
+                    } : undefined}
                     disabled={!commentsState.newComment.trim() || commentsState.isSubmitting}
+                    onMouseEnter={(e) => {
+                      if (selectedTheme && !commentsState.isSubmitting && commentsState.newComment.trim()) {
+                        e.currentTarget.style.transform = 'translate(0.5px, 0.5px)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedTheme && !commentsState.isSubmitting && commentsState.newComment.trim()) {
+                        e.currentTarget.style.transform = 'translate(0, 0)';
+                        e.currentTarget.style.boxShadow = `1px 1px 0 0 ${selectedTheme.borderColor || '#000000'}`;
+                      }
+                    }}
                   >
                     {commentsState.isSubmitting ? '...' : 'Post'}
                   </Button>
@@ -816,13 +1003,12 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const renderReviewsSection = () => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900">Reviews ({realReviews.length})</h3>
-        <button 
-          className="rounded-md border border-black bg-white text-gray-900 px-4 py-2 text-sm font-semibold shadow-[2px_2px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all"
-          onClick={() => setReviewOpen(true)}
-        >
-          Write a review
-        </button>
+        <h3 
+          className="text-lg font-semibold"
+          style={selectedTheme ? {
+            color: selectedTheme.textPrimary || selectedTheme.textColor || '#000000',
+          } : undefined}
+        >Reviews ({realReviews.length})</h3>
       </div>
       
       <div className="space-y-3">
@@ -833,20 +1019,53 @@ const ContentCard: React.FC<ContentCardProps> = ({
             ))}
           </div>
         ) : reviewsError ? (
-          <div className="p-6 text-center rounded-md border-2 border-amber-300 bg-amber-50 shadow-[2px_2px_0_0_#f59e0b]">
+          <div 
+            className="p-6 text-center rounded-md border-2"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.hoverBackground || '#FEF3C7',
+              borderColor: selectedTheme.accentColor || '#F59E0B',
+              boxShadow: `2px 2px 0 0 ${selectedTheme.accentColor || '#F59E0B'}`,
+            } : undefined}
+          >
             <div className="text-4xl mb-3 opacity-30">📍</div>
-            <p className="text-amber-700 font-medium mb-2">
+            <p 
+              className="font-medium mb-2"
+              style={selectedTheme ? {
+                color: selectedTheme.accentColor || '#92400E',
+              } : undefined}
+            >
               Manual Location
             </p>
-            <p className="text-amber-600 text-sm">
+            <p 
+              className="text-sm"
+              style={selectedTheme ? {
+                color: selectedTheme.textSecondary || selectedTheme.textMuted || '#D97706',
+              } : undefined}
+            >
               {reviewsError}
             </p>
           </div>
         ) : realReviews.length === 0 ? (
-          <div className="p-8 text-center rounded-md border border-black/20 bg-gray-50 shadow-sm">
+          <div 
+            className="p-8 text-center rounded-md border shadow-sm"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.hoverBackground || '#F9FAFB',
+              borderColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.2)',
+            } : undefined}
+          >
             <div className="text-4xl mb-3 opacity-30">💬</div>
-            <p className="text-gray-600 font-medium mb-2">No reviews yet</p>
-            <p className="text-gray-500 text-sm">Be the first to review this place!</p>
+            <p 
+              className="font-medium mb-2"
+              style={selectedTheme ? {
+                color: selectedTheme.textSecondary || selectedTheme.textMuted || '#6B7280',
+              } : undefined}
+            >No reviews yet</p>
+            <p 
+              className="text-sm"
+              style={selectedTheme ? {
+                color: selectedTheme.textMuted || selectedTheme.textSecondary || '#9CA3AF',
+              } : undefined}
+            >Be the first to review this place!</p>
           </div>
         ) : (
           <AnimatePresence>
@@ -903,9 +1122,9 @@ const ContentCard: React.FC<ContentCardProps> = ({
       {/* Content Card */}
       <motion.div
         className="
-          content-card-root fixed bg-white z-50 overflow-hidden flex flex-col
-          inset-x-0 bottom-0 rounded-t-2xl border-t-2 border-black shadow-[0_-8px_0_0_#000] h-[90dvh]
-          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:shadow-[8px_0_0_0_#000] md:pt-16 md:h-screen
+          content-card-root fixed z-50 overflow-hidden flex flex-col
+          inset-x-0 bottom-0 rounded-t-2xl border-t-2 h-[90dvh]
+          md:inset-x-auto md:inset-y-0 md:left-0 md:bottom-auto md:w-96 md:rounded-r-lg md:rounded-t-none md:border-t-0 md:border-r-2 md:pt-16 md:h-screen
         "
         initial={isMobile ? { y: '100%' } : { x: '-100%' }}
         animate={isMobile ? { y: 0 } : { x: 0 }}
@@ -915,14 +1134,31 @@ const ContentCard: React.FC<ContentCardProps> = ({
         dragConstraints={isMobile ? { top: 0 } : {}}
         dragElastic={isMobile ? 0.2 : 0}
         onDragEnd={handleDragEnd}
-        style={isMobile ? { y, opacity } : {}}
+        style={isMobile ? { y, opacity } : {
+          ...(selectedTheme ? {
+            backgroundColor: selectedTheme.cardBackground || '#FFFFFF',
+            borderColor: selectedTheme.borderColor || '#000000',
+            boxShadow: isMobile 
+              ? `0 -8px 0 0 ${selectedTheme.borderColor || '#000000'}`
+              : `8px 0 0 0 ${selectedTheme.borderColor || '#000000'}`,
+          } : {
+            backgroundColor: '#FFFFFF',
+            borderColor: '#000000',
+            boxShadow: isMobile ? '0 -8px 0 0 #000' : '8px 0 0 0 #000',
+          }),
+        }}
       >
         {/* Drag handle for mobile */}
         <div 
           className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none md:hidden flex-shrink-0"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
+          <div 
+            className="w-12 h-1.5 rounded-full"
+            style={selectedTheme ? {
+              backgroundColor: selectedTheme.textMuted || selectedTheme.textSecondary || '#D1D5DB',
+            } : undefined}
+          />
         </div>
 
         {/* Scrollable content: images + details + reviews */}
@@ -932,7 +1168,11 @@ const ContentCard: React.FC<ContentCardProps> = ({
           <div className="p-4 md:p-6 space-y-8">
             {renderPlaceHeader()}
             
-            <Separator className="bg-black/20" />
+            <Separator 
+              style={selectedTheme ? {
+                backgroundColor: selectedTheme.borderColorMuted || selectedTheme.borderColor || 'rgba(0,0,0,0.2)',
+              } : undefined}
+            />
             
             {renderReviewsSection()}
             
@@ -940,22 +1180,6 @@ const ContentCard: React.FC<ContentCardProps> = ({
           </div>
         </div>
 
-        {/* Review Modal */}
-        <ReviewModal 
-          isOpen={reviewOpen} 
-          onClose={() => setReviewOpen(false)} 
-          onSubmit={handleSubmitReview}
-          placeData={{
-            name: place.name,
-            address: place.address,
-            latitude: place.latitude,
-            longitude: place.longitude,
-            google_place_id: place.google_place_id,
-          }}
-          onSuccess={handleReviewSuccess}
-          onError={handleReviewError}
-        />
-        
         {/* Login Modal */}
         {showLoginModal && (
           <LoginModal 

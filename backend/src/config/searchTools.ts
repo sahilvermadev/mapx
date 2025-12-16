@@ -55,6 +55,20 @@ export const SEARCH_MY_NETWORK_TOOL = {
         enum: ['place', 'service', null],
         description: 'Filter results by content type. "place" for physical locations (restaurants, cafes, shops, venues). "service" for service providers (plumbers, tutors, instructors, contractors). Use null to search both types.'
       },
+      category_id: {
+        type: ['integer', 'null'],
+        description: 'Filter services by category ID (e.g., 1 = babysitter, 5 = plumber). Only applies when content_type is "service". Use null for no category filter.'
+      },
+      price_range: {
+        type: ['string', 'null'],
+        enum: ['₹', '₹₹', '₹₹₹', '₹₹₹₹', null],
+        description: 'Filter services by price range. ₹ = budget, ₹₹ = moderate, ₹₹₹ = higher-end, ₹₹₹₹ = luxury. Only applies when content_type is "service". Use null for no price range filter.'
+      },
+      context_tags: {
+        type: ['array', 'null'],
+        items: { type: 'string' },
+        description: 'Filter services by context tags (e.g., ["emergency", "night_visit"]). Only applies when content_type is "service". Use null or empty array for no tag filter.'
+      },
       limit: {
         type: 'integer',
         enum: [1, 2, 3],
@@ -91,6 +105,21 @@ export const ASK_MY_NETWORK_TOOL = {
       }
     },
     required: ['intent', 'reason']
+  }
+} as const;
+
+export const LOOKUP_SERVICE_CATEGORY_TOOL = {
+  name: 'lookup_service_category',
+  description: 'Look up service category IDs by service type name. Use this when you need to find the correct category_id for a service search. Call this BEFORE calling search_my_network when content_type="service".',
+  parameters: {
+    type: 'object',
+    properties: {
+      service_type: {
+        type: 'string',
+        description: 'The service type to look up (e.g., "architect", "physics tutor", "plumber", "wedding photographer")'
+      }
+    },
+    required: ['service_type']
   }
 } as const;
 

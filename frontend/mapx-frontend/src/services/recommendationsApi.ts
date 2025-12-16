@@ -11,12 +11,21 @@ export interface SaveRecommendationRequest {
 
   // Place data
   google_place_id?: string;
-  place_name: string;
+  place_name?: string;
   place_address?: string;
   place_lat?: number;
   place_lng?: number;
   place_metadata?: Record<string, any>;
   place_category?: string; // Add category for the place
+  
+  // Service data
+  service_name?: string;
+  service_phone?: string;
+  service_email?: string;
+  service_type?: string;
+  service_address?: string;
+  service_website?: string;
+  service_metadata?: Record<string, any>;
   
   // Legacy annotation-style fields (kept for compatibility; backend ignores most)
   went_with?: string[];
@@ -109,7 +118,6 @@ export type SearchResult =
       service_id: number;
       service_name: string;
       service_type?: string | null;
-      service_business_name?: string | null;
       service_address?: string | null;
       recommendations: SearchRecommendation[];
       average_similarity: number;

@@ -39,6 +39,14 @@ export interface SaveRecommendationRequestDTO {
   place_lng?: number;
   place_category?: string | null;
   place_metadata?: Record<string, any>;
+  // Service data
+  service_name?: string;
+  service_phone?: string;
+  service_email?: string;
+  service_type?: string;
+  service_address?: string;
+  service_website?: string;
+  service_metadata?: Record<string, any>;
   rating?: number | null;
   visibility?: 'friends' | 'public';
   labels?: string[];
@@ -46,17 +54,20 @@ export interface SaveRecommendationRequestDTO {
 }
 
 function extractLocation(data: Record<string, any>): LocationData {
+  // For services, check if city_location is provided as structured data
+  const cityLocation = data.city_location;
   const loc: LocationData = {
     name: data.name || data.location_name,
-    address: data.location || data.location_address,
-    lat: data.lat || data.location_lat,
-    lng: data.lng || data.location_lng,
+    address: data.location || data.location_address || data.service_address,
+    lat: data.lat || data.location_lat || data.city_lat,
+    lng: data.lng || data.location_lng || data.city_lng,
     google_place_id: data.google_place_id || data.location_google_place_id,
     // attempt to collect normalized fields if present in form/extracted data
-    city_name: data.city_name || data.city || data.location_city,
-    admin1_name: data.admin1_name || data.admin1 || data.state || data.location_admin1,
-    country_code: (data.country_code || data.country || data.location_country || '').toString().toUpperCase() || undefined,
-    location_text: typeof data.location === 'string' ? data.location : (typeof data.location_address === 'string' ? data.location_address : undefined),
+    // Priority: city_location object > direct fields > fallback to city string
+    city_name: cityLocation?.city_name || data.city_name || data.city || data.location_city,
+    admin1_name: cityLocation?.admin1_name || data.admin1_name || data.admin1 || data.state || data.location_admin1,
+    country_code: cityLocation?.country_code || (data.country_code || data.country || data.location_country || '').toString().toUpperCase() || undefined,
+    location_text: typeof data.location === 'string' ? data.location : (typeof data.location_address === 'string' ? data.location_address : (cityLocation?.name || undefined)),
   };
   return loc;
 }
@@ -105,6 +116,27 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
     additional_details: { ...fieldResponses }
   };
 
+  // Add service-specific fields if this is a service recommendation
+  if (contentType === 'service') {
+    content_data.service_rating = combined.service_rating || rating || null;
+    content_data.service_price_range = combined.service_price_range || null;
+    content_data.service_exact_price = combined.exact_price || null;
+    content_data.service_experience = combined.service_experience || combined.description || formattedRecommendation;
+    content_data.service_quote = combined.service_quote || combined.verbatim_quote || null;
+    content_data.service_category_id = combined.service_category_id || null;
+    content_data.context_tags = combined.context_tags || [];
+    // Add phone country code for services
+    content_data.phone_country_code = combined.phone_country_code || undefined;
+    // Add structured location fields for services (from city_location)
+    const cityLocation = combined.city_location;
+    if (cityLocation) {
+      content_data.city_name = cityLocation.city_name || location.city_name;
+      content_data.city_slug = cityLocation.city_name ? toSlug(cityLocation.city_name) : location.city_name ? toSlug(location.city_name) : undefined;
+      content_data.admin1_name = cityLocation.admin1_name || location.admin1_name;
+      content_data.country_code = cityLocation.country_code || location.country_code;
+    }
+  }
+
   const dto: SaveRecommendationRequestDTO = {
     content_type: contentType,
     google_place_id: location.google_place_id,
@@ -120,7 +152,23 @@ export function buildSaveRecommendationDto(input: BuildDtoInput): SaveRecommenda
       type: combined.type,
       google_place_id: location.google_place_id
     },
-    title: combined.name || location.name,
+    // Service fields (only populated if content_type is 'service')
+    service_name: contentType === 'service' ? (combined.service_name || combined.name || location.name) : undefined,
+    service_phone: contentType === 'service' ? (combined.service_phone || combined.contact_info?.phone) : undefined,
+    service_email: contentType === 'service' ? (combined.service_email || combined.contact_info?.email) : undefined,
+    // Backend will derive service_type from service_category_id
+    service_type: contentType === 'service' ? combined.service_type : undefined,
+    service_address: contentType === 'service' ? (combined.service_address || location.address) : undefined,
+    service_website: contentType === 'service' ? combined.service_website : undefined,
+    service_metadata: contentType === 'service' ? {
+      contact_info: combined.contact_info,
+      ...combined.service_metadata
+    } : undefined,
+    // Title removed - backend derives from place_name or service_name
+    // Always set description so backend validation passes.
+    // For services, this will typically mirror the experience summary,
+    // but the UI for service posts will only render the structured
+    // service experience card to avoid duplicate text.
     description: formattedRecommendation,
     content_data,
     rating: rating || combined.rating || null,

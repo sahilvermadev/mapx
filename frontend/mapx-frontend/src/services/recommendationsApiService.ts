@@ -117,7 +117,6 @@ export type SearchResult =
       service_id: number;
       service_name: string;
       service_type?: string | null;
-      service_business_name?: string | null;
       service_address?: string | null;
       distance_label?: string | null;
       recommendations: SearchRecommendation[];

@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import FeedPostSkeleton from '@/components/skeletons/FeedPostSkeleton';
-import { Heart, MessageCircle, MapPin, Star, Share2, Edit2, Trash2, X, Save, MoreVertical, ChevronDown, ChevronUp } from 'lucide-react';
+import { Heart, MessageCircle, MapPin, Star, Share2, Edit2, Trash2, X, Save, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,8 +22,9 @@ import { toast } from 'sonner';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useProfileTheme } from '@/contexts/ProfileThemeContext';
 import { THEMES } from '@/services/profileService';
-import { CURATED_LABELS, MAX_LABEL_LENGTH } from '@/components/composer/constants';
-import { getTagInlineStyles, getScrollbarStyles } from '@/utils/themeUtils';
+import { CURATED_LABELS } from '@/components/composer/constants';
+import { getTagInlineStyles } from '@/utils/themeUtils';
+import LabelPicker from '@/components/LabelPicker';
 
 // Types
 interface FeedPostProps {
@@ -107,14 +109,6 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     ? THEMES[userTheme as keyof typeof THEMES] 
     : null);
   
-  /**
-   * Memoized scrollbar styles based on current theme
-   * These CSS variables are inherited by child elements with .label-menu-scrollbar class
-   */
-  const scrollbarStyles = useMemo(() => 
-    getScrollbarStyles(themeName, selectedTheme),
-    [themeName, selectedTheme]
-  );
   
   // Get theme-specific tag styles with fallback
   const tagStyle = selectedTheme?.tagStyle || {
@@ -151,9 +145,6 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   const [editVisibility, setEditVisibility] = useState<'friends' | 'public'>((post.visibility as 'friends' | 'public') || 'public');
   const [editLabels, setEditLabels] = useState<string[]>(post.labels || []);
   const [showLabelPicker, setShowLabelPicker] = useState<boolean>(false);
-  const [labelSearch, setLabelSearch] = useState<string>('');
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(Object.keys(CURATED_LABELS)));
-  const [customLabel, setCustomLabel] = useState<string>('');
   
   // Get tag inline styles for theme
   const tagInlineStyles = React.useMemo(() => getTagInlineStyles(themeName), [themeName]);
@@ -322,65 +313,9 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
   };
 
   // Label management functions
-  const filteredLabelEntries = React.useMemo(() => {
-    const query = labelSearch.trim().toLowerCase();
-    if (!query) {
-      return Object.entries(CURATED_LABELS);
-    }
-
-    return Object.entries(CURATED_LABELS)
-      .map(([category, labelList]) => {
-        const filtered = labelList.filter(label =>
-          label.toLowerCase().includes(query)
-        );
-        return [category, filtered] as [string, string[]];
-      })
-      .filter(([, labels]) => labels.length > 0);
-  }, [labelSearch]);
-
-  const toggleLabel = React.useCallback((label: string) => {
-    const normalizedLabel = label.trim();
-    const isSelected = editLabels.some(l => l.toLowerCase() === normalizedLabel.toLowerCase());
-    
-    if (isSelected) {
-      setEditLabels(prev => prev.filter(l => l.toLowerCase() !== normalizedLabel.toLowerCase()));
-    } else {
-      setEditLabels(prev => [...prev, normalizedLabel]);
-    }
-  }, [editLabels]);
-
   const removeLabel = React.useCallback((labelToRemove: string) => {
     setEditLabels(prev => prev.filter(l => l !== labelToRemove));
   }, []);
-
-  const toggleCategory = React.useCallback((category: string) => {
-    setExpandedCategories(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(category)) {
-        newSet.delete(category);
-      } else {
-        newSet.add(category);
-      }
-      return newSet;
-    });
-  }, []);
-
-  const addCustomLabel = React.useCallback(() => {
-    const value = customLabel.trim();
-    if (!value) return;
-    
-    const normalized = value.replace(/\s+/g, ' ').slice(0, MAX_LABEL_LENGTH);
-    const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1);
-    
-    const exists = editLabels.some(l => l.toLowerCase() === capitalized.toLowerCase());
-    if (exists) {
-      setCustomLabel('');
-      return;
-    }
-    
-    setEditLabels(prev => [...prev, capitalized]);
-    setCustomLabel('');
-  }, [customLabel, editLabels]);
 
   const handleStartEdit = () => {
     setEditTitle(postData.title || '');
@@ -399,8 +334,6 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
     setEditVisibility((postData.visibility as 'friends' | 'public') || 'public');
     setEditLabels(postData.labels || []);
     setShowLabelPicker(false);
-    setLabelSearch('');
-    setCustomLabel('');
   };
 
   const handleSaveEdit = async () => {
@@ -785,222 +718,17 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
               </div>
 
               {/* Label Picker Panel */}
-              <AnimatePresence initial={false}>
-                {showLabelPicker && (
-                  <motion.div
-                    key="label-picker"
-                    initial={{ opacity: 0, y: -12, height: 0 }}
-                    animate={{ opacity: 1, y: 0, height: 'auto' }}
-                    exit={{ opacity: 0, y: -8, height: 0 }}
-                    transition={{ duration: 0.25, ease: 'easeOut' }}
-                    className="overflow-hidden mt-2"
-                  >
-                    <motion.div
-                      layout
-                      transition={{ duration: 0.25, ease: 'easeOut' }}
-                      className="rounded-md border shadow-sm"
-                      style={{
-                        borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.2)',
-                        backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
-                        ...scrollbarStyles,
-                      }}
-                    >
-                      {/* Header */}
-                      <motion.div
-                        layout="position"
-                        className="sticky top-0 z-10 flex flex-col gap-3 border-b p-3 md:flex-row md:items-center md:justify-between"
-                        style={{
-                          borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
-                          backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
-                        }}
-                      >
-                        <motion.h3
-                          layout="position"
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.2, delay: 0.05 }}
-                          className="text-xs font-semibold"
-                          style={{ color: selectedTheme?.textPrimary || '#000000' }}
-                        >
-                          Select Labels
-                        </motion.h3>
-                        <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                          <Input
-                            value={labelSearch}
-                            onChange={(e) => setLabelSearch(e.target.value)}
-                            placeholder="Search labels..."
-                            className="h-7 w-full md:w-48 text-xs"
-                            style={{
-                              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || '#FFFFFF',
-                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setShowLabelPicker(false)}
-                            className="h-7 w-full md:w-7 md:p-0"
-                            aria-label="Close label picker"
-                            style={{
-                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
-                            }}
-                          >
-                            <X className="h-3.5 w-3.5" style={{ color: 'inherit' }} />
-                          </Button>
-                        </div>
-                      </motion.div>
-
-                      {/* Categories */}
-                      <div className="max-h-[40vh] overflow-y-auto p-3 space-y-3 label-menu-scrollbar">
-                        {filteredLabelEntries.length > 0 ? (
-                          filteredLabelEntries.map(([category, labelList]) => (
-                            <motion.div key={category} layout className="space-y-2">
-                              <button
-                                type="button"
-                                onClick={() => toggleCategory(category)}
-                                className="flex items-center gap-2 w-full text-left font-semibold text-xs transition-colors"
-                                style={{
-                                  color: selectedTheme?.textSecondary || selectedTheme?.textMuted || selectedTheme?.textColor || '#6B7280',
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (selectedTheme) {
-                                    e.currentTarget.style.color = selectedTheme.textPrimary || selectedTheme.textColor || '#000000';
-                                  }
-                                }}
-                                onMouseLeave={(e) => {
-                                  if (selectedTheme) {
-                                    e.currentTarget.style.color = selectedTheme.textSecondary || selectedTheme.textMuted || selectedTheme.textColor || '#6B7280';
-                                  }
-                                }}
-                              >
-                                {expandedCategories.has(category) ? (
-                                  <ChevronDown className="h-3.5 w-3.5" style={{ color: 'inherit' }} />
-                                ) : (
-                                  <ChevronUp className="h-3.5 w-3.5" style={{ color: 'inherit' }} />
-                                )}
-                                <span style={{ color: 'inherit' }}>{category}</span>
-                              </button>
-                              <AnimatePresence initial={false}>
-                                {expandedCategories.has(category) && (
-                                  <motion.div
-                                    key={`${category}-labels`}
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.2, ease: 'easeOut' }}
-                                    className="flex flex-wrap gap-1.5 pl-5"
-                                  >
-                                    {labelList.map((label: string) => {
-                                      const isSelected = editLabels.some(
-                                        l => l.toLowerCase() === label.toLowerCase()
-                                      );
-                                      return (
-                                        <motion.button
-                                          key={label}
-                                          type="button"
-                                          whileTap={{ scale: 0.96 }}
-                                          onClick={() => toggleLabel(label)}
-                                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium transition-all border select-none ${
-                                            isSelected
-                                              ? 'shadow-[1px_1px_0_0_#000]'
-                                              : 'hover:shadow-[1px_1px_0_0_#000] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
-                                          }`}
-                                          style={isSelected ? {
-                                            backgroundColor: selectedTheme?.selectedBackground || '#FEF3C7',
-                                            color: selectedTheme?.textPrimary || '#92400E',
-                                            borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.3)',
-                                          } : {
-                                            backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
-                                            color: selectedTheme?.textMuted || '#6B7280',
-                                            borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.2)',
-                                          }}
-                                        >
-                                          {label}
-                                        </motion.button>
-                                      );
-                                    })}
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </motion.div>
-                          ))
-                        ) : (
-                          <motion.div
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="rounded-md border border-dashed p-3 text-xs text-center"
-                            style={{
-                              borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
-                              backgroundColor: selectedTheme?.hoverBackground || '#F9FAFB',
-                              color: selectedTheme?.textMuted || '#6B7280',
-                            }}
-                          >
-                            No labels found. Try a different search.
-                          </motion.div>
-                        )}
-                      </div>
-
-                      {/* Footer - Custom Label Input */}
-                      <motion.div
-                        layout="position"
-                        className="sticky bottom-0 flex flex-col gap-2 border-t p-3"
-                        style={{
-                          borderColor: selectedTheme?.borderColorMuted || 'rgba(0, 0, 0, 0.1)',
-                          backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
-                        }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="text"
-                            value={customLabel}
-                            onChange={(e) => setCustomLabel(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addCustomLabel();
-                              }
-                            }}
-                            placeholder="Add custom label..."
-                            className="h-7 text-xs flex-1"
-                            maxLength={MAX_LABEL_LENGTH}
-                            style={{
-                              backgroundColor: selectedTheme?.inputBackground || selectedTheme?.cardBackground || '#FFFFFF',
-                              color: selectedTheme?.textPrimary || selectedTheme?.textColor || '#000000',
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={addCustomLabel}
-                            disabled={!customLabel.trim()}
-                            className="h-7 px-3 text-xs"
-                            style={selectedTheme ? {
-                              backgroundColor: selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000',
-                              color: selectedTheme.buttonPrimary?.text || selectedTheme.textColor || '#FFFFFF',
-                              borderColor: selectedTheme.borderColor || 'rgba(0, 0, 0, 0.2)',
-                            } : undefined}
-                            onMouseEnter={(e) => {
-                              if (selectedTheme && customLabel.trim()) {
-                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.hover || selectedTheme.accentColor || '#000000';
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (selectedTheme && customLabel.trim()) {
-                                e.currentTarget.style.backgroundColor = selectedTheme.buttonPrimary?.background || selectedTheme.accentColor || '#000000';
-                              }
-                            }}
-                          >
-                            Add
-                          </Button>
-                        </div>
-                      </motion.div>
-                    </motion.div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <LabelPicker
+                labels={CURATED_LABELS}
+                selectedLabels={editLabels}
+                onLabelsChange={setEditLabels}
+                variant="inline"
+                isOpen={showLabelPicker}
+                onClose={() => setShowLabelPicker(false)}
+                showSearch={true}
+                maxHeight="max-h-[40vh]"
+                initiallyExpanded={true}
+              />
             </div>
 
             <div className="flex items-center gap-2 pt-2 border-t-[1.5px] border-black/20 mt-3">
@@ -1199,6 +927,115 @@ const FeedPost: React.FC<FeedPostProps> = ({ post, currentUserId, noOuterSpacing
               </div>
             </div>
           ) : null;
+        })()}
+
+        {/* Service-specific rich details */}
+        {postData.content_type === 'service' && postData.content_data && (() => {
+          const serviceData = postData.content_data;
+          const priceRange = serviceData.service_price_range || serviceData.price_range;
+          const experienceSummary = serviceData.service_experience || serviceData.experience_summary;
+          const verbatimQuote = serviceData.service_quote || serviceData.verbatim_quote;
+          const contextTags = serviceData.context_tags || [];
+          const categoryName = serviceData.service_category_name || serviceData.category_name;
+          
+          const hasServiceDetails = priceRange || experienceSummary || verbatimQuote || contextTags.length > 0 || categoryName;
+
+          if (!hasServiceDetails) return null;
+
+          return (
+            <div className="mb-3 space-y-2 p-3 rounded-lg border" 
+              style={{
+                backgroundColor: selectedTheme?.cardBackground || '#FFFFFF',
+                borderColor: selectedTheme?.borderColor || 'rgba(0, 0, 0, 0.1)',
+              }}
+            >
+              {/* Category Badge */}
+              {categoryName && (
+                <div className="flex items-center gap-2">
+                  <Badge 
+                    variant="secondary"
+                    className="text-xs"
+                    style={selectedTheme ? {
+                      backgroundColor: selectedTheme.accentColor + '20',
+                      color: selectedTheme.accentColor,
+                      borderColor: selectedTheme.accentColor,
+                    } : undefined}
+                  >
+                    {categoryName}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Price Range */}
+              {priceRange && (
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-xs font-medium"
+                    style={{ color: selectedTheme?.textMuted || '#6B7280' }}
+                  >
+                    Price:
+                  </span>
+                  <span 
+                    className="text-xs font-bold"
+                    style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                  >
+                    {priceRange}
+                  </span>
+                </div>
+              )}
+
+              {/* Experience Summary */}
+              {experienceSummary && (
+                <div className="space-y-1">
+                  <span 
+                    className="text-xs font-medium"
+                    style={{ color: selectedTheme?.textMuted || '#6B7280' }}
+                  >
+                    Experience:
+                  </span>
+                  <p 
+                    className="text-xs leading-relaxed"
+                    style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                  >
+                    {experienceSummary}
+                  </p>
+                </div>
+              )}
+
+              {/* Verbatim Quote */}
+              {verbatimQuote && (
+                <div className="space-y-1 pl-3 border-l-2"
+                  style={{ borderColor: selectedTheme?.accentColor || '#000000' }}
+                >
+                  <span 
+                    className="text-xs font-medium italic"
+                    style={{ color: selectedTheme?.textPrimary || '#000000' }}
+                  >
+                    "{verbatimQuote}"
+                  </span>
+                </div>
+              )}
+
+              {/* Context Tags */}
+              {contextTags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {contextTags.map((tag: string, idx: number) => (
+                    <Badge
+                      key={idx}
+                      variant="outline"
+                      className="text-[10px] px-1.5 py-0.5"
+                      style={selectedTheme ? {
+                        borderColor: selectedTheme.borderColor,
+                        color: selectedTheme.textPrimary,
+                      } : undefined}
+                    >
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
         })()}
 
         {postData.labels && postData.labels.length > 0 && (

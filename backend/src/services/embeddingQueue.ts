@@ -1,6 +1,7 @@
 import { generateAnnotationEmbedding, generateRecommendationEmbedding, generateSearchEmbedding } from '../utils/embeddings';
 import { getPlaceById, getUserById } from '../db/places';
 import { getServiceById } from '../db/services';
+import { getCategoryById } from '../db/serviceCategories';
 import pool from '../db';
 
 export interface EmbeddingTask {
@@ -120,14 +121,15 @@ class EmbeddingQueue {
         recordData = await this.getFullRecordData(task.type, task.recordId);
       }
       
-      // Get place, service and user information for enhanced embedding
-      const [place, service, user] = await Promise.all([
+      // Get place, service, user, and category information for enhanced embedding
+      const [place, service, user, category] = await Promise.all([
         recordData.place_id ? getPlaceById(recordData.place_id) : null,
         recordData.service_id ? getServiceById(recordData.service_id) : null,
-        getUserById(recordData.user_id)
+        getUserById(recordData.user_id),
+        recordData.service_category_id ? getCategoryById(recordData.service_category_id) : null
       ]);
 
-      // Create enhanced data with place and user info
+      // Create enhanced data with place, user, and category info
       const enhancedData = {
         ...recordData,
         place_name: place?.name,
@@ -136,8 +138,9 @@ class EmbeddingQueue {
         // service enrichment
         service_name: service?.name,
         service_type: service?.service_type,
-        business_name: service?.business_name,
-        address: service?.address
+        address: service?.address,
+        // category enrichment
+        service_category_name: category?.name
       };
 
       // Generate embedding based on type
@@ -155,8 +158,8 @@ class EmbeddingQueue {
           place_address: enhancedData.place_address,
           service_name: enhancedData.service_name,
           service_type: enhancedData.service_type,
-          business_name: enhancedData.business_name,
           address: enhancedData.address,
+          service_category_name: enhancedData.service_category_name,
           user_name: enhancedData.user_name,
           content_data: enhancedData.content_data,
           metadata: enhancedData.metadata,

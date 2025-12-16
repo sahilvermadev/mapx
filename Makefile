@@ -1,7 +1,7 @@
 # Makefile for RECCE Application
 # Provides convenient shortcuts for common development and deployment tasks
 
-.PHONY: help dev-start dev-stop dev-logs dev-status dev-migrate dev-clean dev-reset
+.PHONY: help dev-start dev-stop dev-logs dev-status dev-migrate dev-clean dev-reset dev-sync-categories
 .PHONY: prod-deploy prod-update prod-stop prod-logs prod-status prod-migrate
 .PHONY: install test build clean
 
@@ -17,6 +17,7 @@ help:
 	@echo "  make dev-logs       - View logs from all services"
 	@echo "  make dev-status     - Check service status"
 	@echo "  make dev-migrate    - Run database migrations"
+	@echo "  make dev-sync-categories - Sync service categories with comprehensive list"
 	@echo "  make dev-reset      - Reset database (⚠️ deletes data)"
 	@echo "  make dev-clean      - Remove all containers and volumes"
 	@echo ""
@@ -56,6 +57,10 @@ dev-status:
 
 dev-migrate:
 	@./dev.sh migrate
+
+dev-sync-categories:
+	@echo "🔄 Syncing service categories..."
+	@docker exec recce_backend_container sh -c "cd /app && node -r dotenv/config sync-categories.js" || echo "⚠️  Backend container not running. Start with: make dev-start"
 
 dev-reset:
 	@./dev.sh reset-db

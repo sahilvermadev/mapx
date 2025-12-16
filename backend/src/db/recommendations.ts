@@ -11,7 +11,7 @@ export interface RecommendationData {
   content_type: 'place' | 'service' | 'unclear';
   place_id?: number; // Optional, only for place-type recommendations
   service_id?: number; // Optional, only for service-type recommendations
-  title?: string;
+  service_category_id?: number; // Optional, only for service-type recommendations
   description: string;
   content_data?: Record<string, any>; // JSONB for type-specific data
   rating?: number; // 1-5
@@ -28,7 +28,8 @@ export interface Recommendation {
   user_id: string;
   content_type: 'place' | 'service' | 'unclear';
   place_id?: number;
-  title?: string;
+  service_id?: number;
+  service_category_id?: number;
   description: string;
   content_data: Record<string, any>;
   rating?: number;
@@ -103,7 +104,7 @@ export async function insertRecommendation(recommendationData: RecommendationDat
     // Prepare the insert query
     const insertQuery = `
       INSERT INTO recommendations (
-        user_id, content_type, place_id, service_id, title, description, content_data,
+        user_id, content_type, place_id, service_id, service_category_id, description, content_data,
         rating, visibility, labels, metadata, embedding, question_id
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -120,7 +121,7 @@ export async function insertRecommendation(recommendationData: RecommendationDat
       recommendationData.content_type,
       recommendationData.place_id || null,
       recommendationData.service_id || null,
-      recommendationData.title || null,
+      recommendationData.service_category_id || null,
       recommendationData.description,
       JSON.stringify(recommendationData.content_data || {}),
       recommendationData.rating || null,
@@ -178,7 +179,7 @@ export async function insertRecommendation(recommendationData: RecommendationDat
  */
 export async function getRecommendationById(id: number): Promise<Recommendation | null> {
   const result = await pool.query(
-    'SELECT * FROM recommendations WHERE id = $1',
+    'SELECT * FROM recommendations WHERE id = $1 AND deleted_at IS NULL',
     [id]
   );
   
@@ -198,10 +199,10 @@ export async function getRecommendationWithSocialData(
       `SELECT 
         r.id as recommendation_id,
         r.user_id,
-        r.content_type,
-        r.title,
-        r.description,
-        r.content_data,
+      r.content_type,
+      COALESCE(p.name, s.name) as title,
+      r.description,
+      r.content_data,
         r.rating,
         r.visibility,
         r.labels,
@@ -225,14 +226,15 @@ export async function getRecommendationWithSocialData(
         CASE WHEN sp.id IS NOT NULL THEN true ELSE false END as is_saved
       FROM recommendations r
       JOIN users u ON r.user_id = u.id
-      LEFT JOIN places p ON r.place_id = p.id
-      LEFT JOIN services s ON r.service_id = s.id
+      LEFT JOIN places p ON r.place_id = p.id AND p.deleted_at IS NULL
+      LEFT JOIN services s ON r.service_id = s.id AND s.deleted_at IS NULL
       LEFT JOIN annotation_comments ac ON r.id = ac.recommendation_id
       LEFT JOIN annotation_likes al ON r.id = al.recommendation_id
       LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $2
       LEFT JOIN saved_places sp ON r.id = sp.recommendation_id AND sp.user_id = $2
       WHERE r.id = $1
-      GROUP BY r.id, r.user_id, r.content_type, r.title, r.description, r.content_data,
+        AND r.deleted_at IS NULL
+      GROUP BY r.id, r.user_id, r.content_type, p.name, s.name, r.description, r.content_data,
                r.rating, r.visibility, r.labels, r.metadata, r.created_at, r.updated_at,
                p.id, p.name, p.address, p.lat, p.lng, p.google_place_id,
                s.id, s.name, s.address,
@@ -258,7 +260,7 @@ export async function getRecommendationsByPlaceId(
 ): Promise<Recommendation[]> {
   
   
-  let query = 'SELECT * FROM recommendations WHERE place_id = $1';
+  let query = 'SELECT * FROM recommendations WHERE place_id = $1 AND deleted_at IS NULL';
   const params: any[] = [placeId];
   let paramCount = 1;
   
@@ -305,6 +307,7 @@ export async function getNetworkAverageRatingForPlace(
     WHERE r.place_id = $1
       AND r.rating IS NOT NULL
       AND r.visibility IN ('public','friends')
+      AND r.deleted_at IS NULL
       AND r.user_id IN (
         SELECT following_id FROM user_follows WHERE follower_id = $2
         UNION SELECT $2
@@ -324,7 +327,7 @@ export async function getRecommendationsByUserId(
   offset: number = 0
 ): Promise<Recommendation[]> {
   const result = await pool.query(
-    'SELECT * FROM recommendations WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+    'SELECT * FROM recommendations WHERE user_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT $2 OFFSET $3',
     [userId, limit, offset]
   );
   
@@ -340,7 +343,7 @@ export async function getRecommendationsByContentType(
   limit: number = 50,
   offset: number = 0
 ): Promise<Recommendation[]> {
-  let query = 'SELECT * FROM recommendations WHERE content_type = $1';
+  let query = 'SELECT * FROM recommendations WHERE content_type = $1 AND deleted_at IS NULL';
   const params: any[] = [contentType];
   
   if (visibility !== 'all') {
@@ -381,10 +384,6 @@ export async function updateRecommendation(
     if (updates.place_id !== undefined) {
       updateFields.push(`place_id = $${paramCount++}`);
       values.push(updates.place_id);
-    }
-    if (updates.title !== undefined) {
-      updateFields.push(`title = $${paramCount++}`);
-      values.push(updates.title);
     }
     if (updates.description !== undefined) {
       updateFields.push(`description = $${paramCount++}`);
@@ -456,7 +455,7 @@ export async function deleteRecommendation(id: number, userId: string): Promise<
     
     // Delete and get question_id in one query using RETURNING
     const result = await client.query(
-      'DELETE FROM recommendations WHERE id = $1 AND user_id = $2 RETURNING id, question_id',
+      'UPDATE recommendations SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL RETURNING id, question_id',
       [id, userId]
     );
     
@@ -531,6 +530,7 @@ export async function searchRecommendationsBySimilarity(
     SELECT *, 1 - (embedding <=> $1) as similarity
     FROM recommendations 
     WHERE embedding IS NOT NULL 
+      AND deleted_at IS NULL
       AND 1 - (embedding <=> $1) > $2
   `;
   
@@ -582,7 +582,7 @@ export async function searchRecommendationsBySimilarity(
       similarity: result.rows[0].similarity,
       match_percentage: Math.round(result.rows[0].similarity * 100),
       content_type: result.rows[0].content_type,
-      title: result.rows[0].title?.substring(0, 50) + '...'
+      description: result.rows[0].description?.substring(0, 50) + '...'
     });
     
   }
@@ -606,7 +606,7 @@ export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterM
   //
   // We aggregate:
   // - Cities from both places and services
-  // - Categories from place primary_type and recommendation content_type
+  // - Categories from service category slugs, place primary_type, and recommendation content_type (fallback)
 
   const client = await pool.connect();
   try {
@@ -627,11 +627,12 @@ export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterM
         WHERE blocker_id = $1 OR blocked_id = $1
       ),
       visible_recommendations AS (
-        SELECT r.id, r.place_id, r.service_id, r.content_type
+        SELECT r.id, r.place_id, r.service_id, r.content_type, r.service_category_id
         FROM recommendations r
         WHERE r.user_id IN (SELECT user_id FROM followed_users)
           AND r.visibility IN ('public','friends')
           AND r.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+          AND r.deleted_at IS NULL
       )
       SELECT
         (
@@ -642,8 +643,8 @@ export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterM
               COALESCE(p.country_code, s.country_code) AS country_code,
               COUNT(*)::int                            AS rec_count
             FROM visible_recommendations vr
-            LEFT JOIN places p   ON vr.place_id = p.id
-            LEFT JOIN services s ON vr.service_id = s.id
+            LEFT JOIN places p   ON vr.place_id = p.id AND p.deleted_at IS NULL
+            LEFT JOIN services s ON vr.service_id = s.id AND s.deleted_at IS NULL
             WHERE (p.city_slug IS NOT NULL OR s.city_slug IS NOT NULL)
             GROUP BY COALESCE(p.city_slug, s.city_slug), COALESCE(p.country_code, s.country_code)
           ) AS city_row
@@ -654,6 +655,7 @@ export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterM
             SELECT
               LOWER(
                 COALESCE(
+                  NULLIF(sc.slug, ''),
                   NULLIF(p.primary_type, ''),
                   NULLIF(vr.content_type, '')
                 )
@@ -661,11 +663,14 @@ export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterM
               COUNT(*)::int  AS rec_count
             FROM visible_recommendations vr
             LEFT JOIN places p ON vr.place_id = p.id
+            LEFT JOIN service_categories sc ON vr.service_category_id = sc.id
             WHERE
-              (p.primary_type IS NOT NULL AND p.primary_type <> '')
+              (sc.slug IS NOT NULL AND sc.slug <> '')
+              OR (p.primary_type IS NOT NULL AND p.primary_type <> '')
               OR (vr.content_type IS NOT NULL AND vr.content_type <> '')
             GROUP BY LOWER(
               COALESCE(
+                NULLIF(sc.slug, ''),
                 NULLIF(p.primary_type, ''),
                 NULLIF(vr.content_type, '')
               )
@@ -679,23 +684,27 @@ export async function getFeedFilterMetadata(userId: string): Promise<FeedFilterM
               COALESCE(p.city_slug, s.city_slug) AS city_slug,
               LOWER(
                 COALESCE(
+                  NULLIF(sc.slug, ''),
                   NULLIF(p.primary_type, ''),
                   NULLIF(vr.content_type, '')
                 )
               )                                  AS key,
               COUNT(*)::int                      AS rec_count
             FROM visible_recommendations vr
-            LEFT JOIN places p   ON vr.place_id = p.id
-            LEFT JOIN services s ON vr.service_id = s.id
+            LEFT JOIN places p   ON vr.place_id = p.id AND p.deleted_at IS NULL
+            LEFT JOIN services s ON vr.service_id = s.id AND s.deleted_at IS NULL
+            LEFT JOIN service_categories sc ON vr.service_category_id = sc.id
             WHERE (p.city_slug IS NOT NULL OR s.city_slug IS NOT NULL)
               AND (
-                (p.primary_type IS NOT NULL AND p.primary_type <> '')
+                (sc.slug IS NOT NULL AND sc.slug <> '')
+                OR (p.primary_type IS NOT NULL AND p.primary_type <> '')
                 OR (vr.content_type IS NOT NULL AND vr.content_type <> '')
               )
             GROUP BY
               COALESCE(p.city_slug, s.city_slug),
               LOWER(
                 COALESCE(
+                  NULLIF(sc.slug, ''),
                   NULLIF(p.primary_type, ''),
                   NULLIF(vr.content_type, '')
                 )
@@ -1001,13 +1010,14 @@ export async function getUnifiedFeedPosts(
       FROM user_blocks
       WHERE blocker_id = $1 OR blocked_id = $1
     ),
-    visible_recommendations AS (
+      visible_recommendations AS (
       SELECT r.id
       FROM recommendations r
       WHERE r.user_id IN (SELECT user_id FROM followed_users)
         AND r.visibility IN ('public','friends')
         AND r.question_id IS NULL
         AND r.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+        AND r.deleted_at IS NULL
       ORDER BY r.created_at DESC
       LIMIT $${subqueryLimitParam}
     ),
@@ -1020,13 +1030,14 @@ export async function getUnifiedFeedPosts(
       ORDER BY q.created_at DESC
       LIMIT $${subqueryLimitParam}
     ),
-    visible_answers AS (
+      visible_answers AS (
       SELECT r.id
       FROM recommendations r
       WHERE r.user_id IN (SELECT user_id FROM followed_users)
         AND r.visibility IN ('public','friends')
         AND r.question_id IS NOT NULL
         AND r.user_id NOT IN (SELECT blocked_user_id FROM blocked_pairs)
+        AND r.deleted_at IS NULL
       ORDER BY r.created_at DESC
       LIMIT $${subqueryLimitParam}
     ),
@@ -1065,7 +1076,7 @@ export async function getUnifiedFeedPosts(
       r.id as recommendation_id,
       r.user_id,
       r.content_type,
-      r.title,
+      COALESCE(p.name, s.name) as title,
       r.description,
       r.content_data,
       r.rating,
@@ -1083,6 +1094,13 @@ export async function getUnifiedFeedPosts(
       p.country_code as place_country_code,
       s.city_slug as service_city_slug,
       s.country_code as service_country_code,
+      srd.price_range as service_price_range,
+      srd.exact_price as service_exact_price,
+      srd.experience_summary as service_experience_summary,
+      srd.verbatim_quote as service_verbatim_quote,
+      srd.context_tags as service_context_tags,
+      sc.name as service_category_name,
+      sc.slug as service_category_slug,
       u.display_name as user_name,
       u.profile_picture_url as user_picture,
       NULL::int as answers_count,
@@ -1094,7 +1112,9 @@ export async function getUnifiedFeedPosts(
     JOIN recommendations r ON r.id = vr.id
     JOIN users u ON r.user_id = u.id
     LEFT JOIN places p ON r.place_id = p.id
-    LEFT JOIN services s ON r.service_id = s.id
+    LEFT JOIN services s ON r.service_id = s.id AND s.deleted_at IS NULL
+    LEFT JOIN service_recommendation_details srd ON srd.recommendation_id = r.id
+    LEFT JOIN service_categories sc ON sc.id = r.service_category_id
     LEFT JOIN comments_agg ca ON ca.recommendation_id = r.id
     LEFT JOIN likes_agg la ON la.recommendation_id = r.id
     LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
@@ -1127,6 +1147,13 @@ export async function getUnifiedFeedPosts(
       NULL::text as place_country_code,
       NULL::text as service_city_slug,
       NULL::text as service_country_code,
+      NULL::text as service_price_range,
+      NULL::text as service_exact_price,
+      NULL::text as service_experience_summary,
+      NULL::text as service_verbatim_quote,
+      NULL::text[] as service_context_tags,
+      NULL::text as service_category_name,
+      NULL::text as service_category_slug,
       u.display_name as user_name,
       u.profile_picture_url as user_picture,
       q.answers_count,
@@ -1147,7 +1174,7 @@ export async function getUnifiedFeedPosts(
       r.id as recommendation_id,
       r.user_id,
       r.content_type,
-      r.title,
+      COALESCE(p.name, s.name) as title,
       r.description,
       r.content_data,
       r.rating,
@@ -1165,6 +1192,13 @@ export async function getUnifiedFeedPosts(
       p.country_code as place_country_code,
       s.city_slug as service_city_slug,
       s.country_code as service_country_code,
+      srd.price_range as service_price_range,
+      srd.exact_price as service_exact_price,
+      srd.experience_summary as service_experience_summary,
+      srd.verbatim_quote as service_verbatim_quote,
+      srd.context_tags as service_context_tags,
+      sc.name as service_category_name,
+      sc.slug as service_category_slug,
       u.display_name as user_name,
       u.profile_picture_url as user_picture,
       NULL::int as answers_count,
@@ -1176,7 +1210,9 @@ export async function getUnifiedFeedPosts(
     JOIN recommendations r ON r.id = va.id
     JOIN users u ON r.user_id = u.id
     LEFT JOIN places p ON r.place_id = p.id
-    LEFT JOIN services s ON r.service_id = s.id
+    LEFT JOIN services s ON r.service_id = s.id AND s.deleted_at IS NULL
+    LEFT JOIN service_recommendation_details srd ON srd.recommendation_id = r.id
+    LEFT JOIN service_categories sc ON sc.id = r.service_category_id
     LEFT JOIN comments_agg ca ON ca.recommendation_id = r.id
     LEFT JOIN likes_agg la ON la.recommendation_id = r.id
     LEFT JOIN annotation_likes al2 ON r.id = al2.recommendation_id AND al2.user_id = $1
@@ -1271,7 +1307,7 @@ export async function regenerateAllRecommendationEmbeddings(): Promise<{ success
   
   try {
     // Get all recommendation IDs
-    const result = await client.query('SELECT id FROM recommendations');
+    const result = await client.query('SELECT id FROM recommendations WHERE deleted_at IS NULL');
     const recommendationIds = result.rows.map(row => row.id);
     
     console.log(`Queuing embedding regeneration for ${recommendationIds.length} recommendations...`);

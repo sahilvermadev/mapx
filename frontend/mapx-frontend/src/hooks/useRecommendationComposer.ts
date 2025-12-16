@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { aiClient } from '@/services/aiClient';
@@ -7,10 +7,9 @@ import { recommendationsApi } from '@/services/recommendationsApi';
 import { convertUsernamesToTokens } from '@/utils/mentions';
 import { handleError } from '@/utils/errorHandling';
 import {
-  RECOMMENDATION_PREFIX,
-  MIN_TEXT_LENGTH,
-  QUESTION_ANALYSIS_DELAY_MS,
   ERROR_MESSAGES,
+  type ContentType,
+  CONTENT_TYPES,
 } from '@/components/composer/constants';
 
 export interface ExtractedData {
@@ -37,185 +36,77 @@ export interface ExtractedData {
   [key: string]: any;
 }
 
-export interface MissingField {
-  field: string;
-  question: string;
-  required: boolean;
-  needsLocationPicker?: boolean;
+export type ComposerStep =
+  | 'content-type-selection'
+  | 'map-selection'
+  | 'service-basics'
+  | 'service-details'
+  | 'preview';
+
+export interface QuestionMetadata {
+  detected_category?: {
+    content_type: 'place' | 'service' | 'unclear';
+    service_category_id: number | null;
+    service_category_slug: string | null;
+    confidence: number;
+  };
 }
 
-export type ComposerStep = 'writing' | 'analyzing' | 'completing' | 'preview';
-
-export function useRecommendationComposer(currentUserId: string, questionId?: number) {
+export function useRecommendationComposer(
+  currentUserId: string, 
+  questionId?: number,
+  questionMetadata?: QuestionMetadata
+) {
   const [text, setText] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData>({});
-  const [missingFields, setMissingFields] = useState<MissingField[]>([]);
-  const [currentStep, setCurrentStep] = useState<ComposerStep>('writing');
+  // Initialize step based on question metadata if available
+  const [currentStep, setCurrentStep] = useState<ComposerStep>(() => {
+    // If we have question metadata with a detected category, start at the appropriate step
+    if (questionMetadata?.detected_category) {
+      const contentType = questionMetadata.detected_category.content_type;
+      if (contentType === 'service') {
+        return 'service-basics';
+      } else if (contentType === 'place') {
+        return 'map-selection';
+      }
+    }
+    // Default to content-type-selection
+    return 'content-type-selection';
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
   const [fieldResponses, setFieldResponses] = useState<Record<string, any>>({});
-  const [error, setError] = useState<string | null>(null);
   const [labels, setLabels] = useState<string[]>([]);
   const [highlights, setHighlights] = useState<string>('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const [editedPreview, setEditedPreview] = useState<string>('');
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const [isImprovingText, setIsImprovingText] = useState(false);
+  // Service details state
+  const [serviceDetails, setServiceDetails] = useState<Record<string, any>>({});
+  // Explicit content type (set by user, bypasses AI classification)
+  const [explicitContentType, setExplicitContentType] = useState<'place' | 'service' | null>(null);
+  // Service basics data (from ServiceBasicsStep)
+  const [serviceBasics, setServiceBasics] = useState<{
+    category_id: number | null;
+    name: string;
+    city_location?: {
+      name: string;
+      city_name?: string;
+      admin1_name?: string;
+      country_code?: string;
+      lat?: number;
+      lng?: number;
+    } | null;
+    phone_country_code?: string;
+    phone?: string;
+    email?: string;
+    description?: string;
+  } | null>(null);
 
   const location = useLocation();
 
-  // Helper function to prepare text for AI analysis based on context
-  const prepareTextForAnalysis = useCallback((text: string, isQuestionContext: boolean = false): string => {
-    if (isQuestionContext) {
-      // For question context, we don't need to add a prefix
-      // The AI will detect this is answering a question based on the question patterns
-      return text;
-    } else {
-      // For standalone recommendations, ensure it starts with recommendation language
-      if (!text.toLowerCase().startsWith(RECOMMENDATION_PREFIX.toLowerCase())) {
-        return RECOMMENDATION_PREFIX + text;
-      }
-      return text;
-    }
-  }, []);
-
-  const performAnalysis = useCallback(async (textToAnalyze: string, isQuestionContext: boolean = false) => {
-    try {
-      const processedText = prepareTextForAnalysis(textToAnalyze, isQuestionContext);
-      const analysis = await aiClient.analyze(processedText);
-        
-      if (analysis?.isGibberish) {
-        setError(ERROR_MESSAGES.GIBBERISH);
-        setCurrentStep('writing');
-        setIsAnalyzing(false);
-        setIsProcessing(false);
-        return;
-      }
-
-      const processedExtractedData = {
-        ...analysis.extractedData,
-        type: analysis.contentType,
-        contentType: analysis.contentType,
-        description: isQuestionContext 
-          ? (analysis.extractedData.description || processedText) 
-          : prepareTextForAnalysis(analysis.extractedData.description || processedText, false)
-      };
-
-      setExtractedData(processedExtractedData);
-      setMissingFields(analysis.missingFields || []);
-      
-      // Initialize highlights from extractedData if available (only for places)
-      if (analysis.contentType === 'place' && processedExtractedData.highlights) {
-        const highlightsValue = Array.isArray(processedExtractedData.highlights)
-          ? processedExtractedData.highlights.join(', ')
-          : String(processedExtractedData.highlights);
-        if (highlightsValue.trim()) {
-          setHighlights(highlightsValue);
-        }
-      }
-      
-      setCurrentStep(
-        analysis.missingFields && analysis.missingFields.length > 0 
-          ? 'completing' 
-          : 'preview'
-      );
-    } catch (error) {
-      handleError(error, {
-        context: 'useRecommendationComposer.performAnalysis',
-        showToast: false,
-        logError: true
-      });
-      setError(
-        error instanceof Error 
-          ? error.message 
-          : ERROR_MESSAGES.ANALYSIS_ERROR
-      );
-      setCurrentStep('writing');
-    } finally {
-      setIsAnalyzing(false);
-      setIsProcessing(false);
-    }
-  }, [prepareTextForAnalysis]);
-
-  const handleAnalyze = useCallback(async () => {
-    if (!text.trim()) {
-      setError(ERROR_MESSAGES.EMPTY_TEXT);
-      return;
-    }
-
-    if (text.trim().length < MIN_TEXT_LENGTH) {
-      setError(ERROR_MESSAGES.TEXT_TOO_SHORT);
-      return;
-    }
-
-    setError(null);
-    setCurrentStep('analyzing');
-    setIsAnalyzing(true);
-    setIsProcessing(true);
-
-    await performAnalysis(text, false);
-  }, [text, performAnalysis]);
-
-  const moveToNextField = useCallback(() => {
-    setCurrentFieldIndex(prev => {
-      if (prev < missingFields.length - 1) {
-        return prev + 1;
-      } else {
-        setCurrentStep('preview');
-        return prev;
-      }
-    });
-  }, [missingFields.length]);
-
-  const handleFieldResponse = useCallback(async (field: string, response: any) => {
-    if (typeof response === 'string') {
-      if (!response.trim()) return;
-    } else if (response == null) {
-      return;
-    }
-
-    try {
-      if (field === 'contact_info' && typeof response === 'object') {
-        const cleaned = {
-          phone: response.phone ? String(response.phone).replace(/\D/g, '') : undefined,
-          email: response.email ? String(response.email).trim().toLowerCase() : undefined
-        };
-        setFieldResponses(prev => ({ ...prev, [field]: cleaned }));
-        setExtractedData(prev => ({ ...prev, [field]: cleaned }));
-        moveToNextField();
-        return;
-      }
-
-      const validation = await aiClient.validate(
-        missingFields[currentFieldIndex]?.question || '',
-        String(response),
-        field
-      );
-      
-      if (!validation.isValid) {
-        toast.error(validation.feedback || ERROR_MESSAGES.VALIDATION_ERROR);
-        return;
-      }
-
-      const extractedValue = validation.extractedValue || String(response);
-      setFieldResponses(prev => ({ ...prev, [field]: extractedValue }));
-      setExtractedData(prev => ({ ...prev, [field]: extractedValue }));
-      moveToNextField();
-    } catch (error) {
-      handleError(error, {
-        context: 'useRecommendationComposer.handleFieldResponse',
-        showToast: false,
-        logError: true
-      });
-      setFieldResponses(prev => ({ ...prev, [field]: response }));
-      setExtractedData(prev => ({ ...prev, [field]: response }));
-      moveToNextField();
-    }
-  }, [missingFields, currentFieldIndex, moveToNextField]);
-
-  const handleLocationSelected = useCallback((location: {
+  // Handler for place selection from map (for place recommendations)
+  const handlePlaceSelectedFromMap = useCallback((location: {
     name: string;
     address: string;
     lat: number;
@@ -225,35 +116,40 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
     admin1_name?: string;
     country_code?: string;
   }) => {
-    const field = missingFields[currentFieldIndex]?.field;
-    if (!field) return;
-    
-    const locationText = `${location.name}, ${location.address}`;
-    
+    // Extract place name, address, coordinates, Google Place ID
+    // Set extractedData with all location fields
+    const locationUpdate = {
+      name: location.name,
+      location_name: location.name,
+      title: location.name,
+      location: location.address,
+      location_address: location.address,
+      location_lat: location.lat,
+      location_lng: location.lng,
+      place_lat: location.lat,
+      place_lng: location.lng,
+      google_place_id: location.google_place_id,
+      location_google_place_id: location.google_place_id,
+      city_name: location.city_name,
+      admin1_name: location.admin1_name,
+      country_code: location.country_code,
+      type: 'place' as const,
+      contentType: 'place' as const,
+    };
+
     setExtractedData(prev => ({
       ...prev,
-      [field]: locationText,
-      [`${field}_lat`]: location.lat,
-      [`${field}_lng`]: location.lng,
-      [`${field}_google_place_id`]: location.google_place_id,
-      [`${field}_name`]: location.name,
-      [`${field}_address`]: location.address,
-      // normalized fields (store both generic and field-scoped for mapper compatibility)
-      city_name: location.city_name || prev.city_name,
-      admin1_name: location.admin1_name || prev.admin1_name,
-      country_code: location.country_code || prev.country_code,
-      [`${field}_city_name`]: location.city_name,
-      [`${field}_admin1_name`]: location.admin1_name,
-      [`${field}_country_code`]: location.country_code,
+      ...locationUpdate,
     }));
 
-    setFieldResponses(prev => ({ ...prev, [field]: locationText }));
-    moveToNextField();
-  }, [missingFields, currentFieldIndex, moveToNextField]);
+    setFieldResponses(prev => ({
+      ...prev,
+      ...locationUpdate,
+    }));
 
-  const handleSkipField = useCallback(() => {
-    moveToNextField();
-  }, [moveToNextField]);
+    // Move directly to PreviewStep
+    setCurrentStep('preview');
+  }, []);
 
   const improveText = useCallback(async (currentText: string): Promise<string | null> => {
     setIsImprovingText(true);
@@ -286,23 +182,65 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
       const textWithTokens = convertUsernamesToTokens(text, getMapping());
       const formattedRecommendation = convertUsernamesToTokens(editedPreview || text, getMapping());
       
+      // For services, use explicit contentType and serviceBasics data
+      // Normalize to valid ContentType (only 'place', 'service', or 'unclear')
+      const rawContentType = explicitContentType || extractedData.type || 'place';
+      const contentType: ContentType = 
+        rawContentType === CONTENT_TYPES.PLACE || 
+        rawContentType === CONTENT_TYPES.SERVICE || 
+        rawContentType === CONTENT_TYPES.UNCLEAR
+          ? rawContentType
+          : CONTENT_TYPES.PLACE; // Default to 'place' for invalid types like 'tip' or 'contact'
+      
+      // Build description for services from serviceDetails.experience_summary (primary)
+      // or editedPreview (if user edited it), or text
+      let serviceDescription = formattedRecommendation;
+      if (contentType === 'service') {
+        if (serviceDetails.experience_summary?.trim()) {
+          serviceDescription = serviceDetails.experience_summary;
+        } else if (editedPreview?.trim()) {
+          // Use edited preview text if user edited it
+          serviceDescription = editedPreview;
+        } else if (text.trim()) {
+          serviceDescription = text;
+        } else {
+          // Fallback: use service name as description
+          serviceDescription = serviceBasics?.name || extractedData.name || 'Service recommendation';
+        }
+      }
+
       const finalData = {
         ...extractedData,
         ...fieldResponses,
-        originalText: textWithTokens,
-        formattedText: formattedRecommendation,
-        type: extractedData.type || 'place',
-        contentType: (extractedData as any).contentType || extractedData.type || 'place',
+        ...serviceDetails,
+        ...(serviceBasics ? {
+          service_name: serviceBasics.name,
+          service_address: serviceBasics.city_location?.name,
+          service_phone: serviceBasics.phone,
+          service_email: serviceBasics.email,
+          contact_info: {
+            phone: serviceBasics.phone,
+            email: serviceBasics.email,
+          },
+          phone_country_code: serviceBasics.phone_country_code,
+          city_name: serviceBasics.city_location?.city_name,
+          admin1_name: serviceBasics.city_location?.admin1_name,
+          country_code: serviceBasics.city_location?.country_code,
+          city_lat: serviceBasics.city_location?.lat,
+          city_lng: serviceBasics.city_location?.lng,
+        } : {}),
+        originalText: contentType === 'service' ? (text || '') : textWithTokens,
+        formattedText: contentType === 'service' ? serviceDescription : formattedRecommendation,
+        type: contentType,
+        contentType: contentType,
         highlights: highlights.trim() || undefined
       };
-      
-      const contentType = (finalData.type as ('place' | 'service' | 'tip' | 'contact' | 'unclear')) || 'place';
 
       const requestBody = buildSaveRecommendationDto({
         contentType,
         extractedData: finalData,
         fieldResponses,
-        formattedRecommendation,
+        formattedRecommendation: contentType === 'service' ? serviceDescription : formattedRecommendation,
         rating,
         currentUserId,
         labels
@@ -333,95 +271,193 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
     } finally {
       setIsSubmitting(false);
     }
-  }, [text, editedPreview, extractedData, fieldResponses, rating, currentUserId, labels, highlights, questionId]);
+  }, [text, editedPreview, extractedData, fieldResponses, serviceDetails, serviceBasics, explicitContentType, rating, currentUserId, labels, highlights, questionId]);
 
-  const reset = useCallback(() => {
+  const handleContentTypeSelect = useCallback((contentType: ContentType) => {
+    // Only handle 'place' and 'service' explicitly; 'unclear' defaults to place flow
+    if (contentType === 'service') {
+      setExplicitContentType('service');
+      // For services, skip writing step and go directly to service basics
+      setCurrentStep('service-basics');
+    } else {
+      // For places, go directly to map selection step
+      setExplicitContentType(contentType === 'place' ? 'place' : null);
+      setCurrentStep('map-selection');
+    }
+  }, []);
+
+  const handleServiceBasicsSubmit = useCallback((data: {
+    category_id: number | null;
+    name: string;
+    city_location?: {
+      name: string;
+      city_name?: string;
+      admin1_name?: string;
+      country_code?: string;
+      lat?: number;
+      lng?: number;
+    } | null;
+    phone_country_code?: string;
+    phone?: string;
+    email?: string;
+    description?: string;
+  }) => {
+    setServiceBasics(data);
+    // Update extractedData and fieldResponses with service basics
+    // Backend will derive service_type from category_id
+    setExtractedData(prev => ({
+      ...prev,
+      name: data.name,
+      service_name: data.name,
+      service_address: data.city_location?.name,
+      service_category_id: data.category_id, // Backend will use this to get slug/service_type
+      type: 'service',
+      contentType: 'service',
+      description: data.description || '',
+      contact_info: {
+        phone: data.phone,
+        email: data.email,
+      },
+      // Phone country code
+      phone_country_code: data.phone_country_code,
+      // Structured location fields
+      city_name: data.city_location?.city_name,
+      admin1_name: data.city_location?.admin1_name,
+      country_code: data.city_location?.country_code,
+      city_lat: data.city_location?.lat,
+      city_lng: data.city_location?.lng,
+    }));
+    setFieldResponses(prev => ({
+      ...prev,
+      name: data.name,
+      service_name: data.name,
+      service_address: data.city_location?.name,
+      service_category_id: data.category_id,
+      contact_info: {
+        phone: data.phone,
+        email: data.email,
+      },
+      // Phone country code
+      phone_country_code: data.phone_country_code,
+      // Structured location fields
+      city_name: data.city_location?.city_name,
+      admin1_name: data.city_location?.admin1_name,
+      country_code: data.city_location?.country_code,
+      city_lat: data.city_location?.lat,
+      city_lng: data.city_location?.lng,
+    }));
+    // Move to service details step
+    setCurrentStep('service-details');
+  }, []);
+
+  const reset = useCallback((skipStepReset = false) => {
     setText('');
     setExtractedData({});
-    setMissingFields([]);
-    setCurrentFieldIndex(0);
     setFieldResponses({});
-    setError(null);
-    setIsProcessing(false);
     setEditedPreview('');
     setIsEditingDescription(false);
     setRating(null);
     setLabels([]);
     setHighlights('');
     setIsImprovingText(false);
+    setServiceDetails({});
+    setExplicitContentType(null);
+    setServiceBasics(null);
+    
+    // Only reset step if not skipping (allows initializeWithQuestion to set it directly)
+    if (!skipStepReset) {
+      setCurrentStep('content-type-selection');
+    }
   }, []);
 
   const initializeWithQuestion = useCallback((questionContext: string | undefined) => {
     if (questionContext && typeof questionContext === 'string' && questionContext.trim().length > 0) {
       setText(questionContext);
-      setCurrentStep('analyzing');
-      setIsAnalyzing(true);
-      setIsProcessing(true);
       
-      // Small delay to ensure state updates are processed
-      setTimeout(() => {
-        performAnalysis(questionContext, true); // Pass true for question context
-      }, QUESTION_ANALYSIS_DELAY_MS);
+      // Check if we have detected category from question metadata
+      const detectedCategory = questionMetadata?.detected_category;
+      
+      if (detectedCategory && detectedCategory.content_type !== 'unclear') {
+        // Route directly based on detected category
+        if (detectedCategory.content_type === 'service') {
+          setExplicitContentType('service');
+          
+          // Pre-populate service basics with detected category if available
+          if (detectedCategory.service_category_id) {
+            setServiceBasics({
+              category_id: detectedCategory.service_category_id,
+              name: '',
+            });
+          }
+          
+          setCurrentStep('service-basics');
+        } else if (detectedCategory.content_type === 'place') {
+          setExplicitContentType('place');
+          setCurrentStep('map-selection');
+        } else {
+          // Fallback to content-type-selection
+          setCurrentStep('content-type-selection');
+        }
+      } else {
+        // No detected category or unclear - go directly to content-type-selection
+        setCurrentStep('content-type-selection');
+      }
     } else {
       setText('');
-      setCurrentStep('writing');
-      setIsAnalyzing(false);
+      // Start with content type selection for new recommendations
+      setCurrentStep('content-type-selection');
     }
-  }, [performAnalysis]);
+  }, [questionMetadata]);
 
   // Allow user to go back and make edits
   const goBack = useCallback(() => {
     if (currentStep === 'preview') {
-      // Go back to completing at the last field (if any)
-      if (missingFields.length > 0) {
-        setCurrentFieldIndex(Math.max(0, missingFields.length - 1));
-        setCurrentStep('completing');
-      } else {
-        // If there were no fields, go back to writing to edit original text
-        setCurrentStep('writing');
+      // For services, go back to service-details
+      if (explicitContentType === 'service') {
+        setCurrentStep('service-details');
+        return;
       }
+      // For places, go back to map-selection
+      if (explicitContentType === 'place') {
+        setCurrentStep('map-selection');
+        return;
+      }
+      // Default: go to content type selection
+      setCurrentStep('content-type-selection');
       return;
     }
 
-    if (currentStep === 'completing') {
-      if (currentFieldIndex > 0) {
-        setCurrentFieldIndex(prev => Math.max(0, prev - 1));
-      } else {
-        setCurrentStep('writing');
-      }
+    if (currentStep === 'map-selection') {
+      setCurrentStep('content-type-selection');
       return;
     }
 
-    if (currentStep === 'analyzing') {
-      // Cancel analysis and go back to writing
-      setIsAnalyzing(false);
-      setIsProcessing(false);
-      setCurrentStep('writing');
+    if (currentStep === 'service-details') {
+      setCurrentStep('service-basics');
       return;
     }
-  }, [currentStep, currentFieldIndex, missingFields.length]);
+
+    if (currentStep === 'service-basics') {
+      setCurrentStep('content-type-selection');
+      return;
+    }
+  }, [currentStep, explicitContentType]);
 
   return {
     // State
     text,
     setText,
-    isAnalyzing,
     extractedData,
     setExtractedData,
-    missingFields,
     currentStep,
     setCurrentStep,
     isSubmitting,
-    currentFieldIndex,
     fieldResponses,
     setFieldResponses,
-    error,
-    setError,
     labels,
     setLabels,
     highlights,
     setHighlights,
-    isProcessing,
     editedPreview,
     setEditedPreview,
     isEditingDescription,
@@ -429,18 +465,21 @@ export function useRecommendationComposer(currentUserId: string, questionId?: nu
     rating,
     setRating,
     isImprovingText,
-    
     // Actions
-    handleAnalyze,
-    handleFieldResponse,
-    handleLocationSelected,
-    handleSkipField,
+    handlePlaceSelectedFromMap,
     handleSubmit,
-    performAnalysis,
     improveText,
     reset,
     initializeWithQuestion,
     goBack,
+    handleContentTypeSelect,
+    handleServiceBasicsSubmit,
+    
+    // Service details
+    serviceDetails,
+    setServiceDetails,
+    serviceBasics,
+    explicitContentType,
     
     // Computed
     location

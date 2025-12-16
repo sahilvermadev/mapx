@@ -7,8 +7,9 @@
 
 import Groq from 'groq-sdk';
 import type { ChatCompletionTool } from 'groq-sdk/resources/chat/completions';
-import { SEARCH_MY_NETWORK_TOOL, ASK_MY_NETWORK_TOOL, type AskMyNetworkArgs } from '../config/searchTools';
+import { SEARCH_MY_NETWORK_TOOL, ASK_MY_NETWORK_TOOL, LOOKUP_SERVICE_CATEGORY_TOOL, type AskMyNetworkArgs } from '../config/searchTools';
 import { executeStructuredSearch, type StructuredSearchArgs, type StructuredSearchResult } from './structuredSearch';
+import { lookupCategory } from './categoryLookupService';
 import {
   formatStructuredResultsForResponse,
   addDistanceLabelsToResults,
@@ -84,6 +85,10 @@ export async function executeSearchOrchestration(
   const tools = [
     {
       type: 'function',
+      function: LOOKUP_SERVICE_CATEGORY_TOOL
+    },
+    {
+      type: 'function',
       function: SEARCH_MY_NETWORK_TOOL
     },
     {
@@ -104,8 +109,11 @@ export async function executeSearchOrchestration(
   console.log('🤖 [ORCHESTRATOR] Initializing LLM conversation...', {
     systemPromptLength: systemPrompt.length,
     userQueryLength: query.trim().length,
+    userQuery: query.trim(),
     availableTools: tools.map(t => t.function.name),
-    messageCount: messages.length
+    messageCount: messages.length,
+    userId: userId,
+    userLocation: user_lat && user_lng ? { lat: user_lat, lng: user_lng } : 'not provided'
   });
 
   // Tool-calling loop state
@@ -192,25 +200,173 @@ export async function executeSearchOrchestration(
         });
         
         try {
-          if (toolCall.function.name === 'search_my_network') {
+          if (toolCall.function.name === 'lookup_service_category') {
+            console.log('   ✅ [TOOL] lookup_service_category - LLM is calling category lookup tool!');
             const rawArgs = parseToolArguments(toolCall.function.arguments);
+            const serviceType = rawArgs.service_type?.trim();
+            
+            if (!serviceType) {
+              console.log('   ⚠️  [TOOL] lookup_service_category - ERROR: service_type missing from LLM arguments');
+              throw new Error('service_type is required for lookup_service_category');
+            }
+            
+            console.log('   🔍 [TOOL] lookup_service_category - service_type:', serviceType);
+            console.log('   🔍 [TOOL] lookup_service_category - raw args:', JSON.stringify(rawArgs, null, 2));
+            
+            const lookupStartTime = Date.now();
+            const matches = await lookupCategory(serviceType);
+            const lookupTime = Date.now() - lookupStartTime;
+            
+            console.log('   📊 [TOOL] lookup_service_category - found matches:', {
+              serviceType,
+              matchCount: matches.length,
+              topMatch: matches[0] ? {
+                category_id: matches[0].category_id,
+                category_slug: matches[0].category_slug,
+                category_name: matches[0].category_name,
+                confidence: matches[0].confidence,
+                match_type: matches[0].match_type
+              } : null,
+              lookupTimeMs: lookupTime
+            });
+            
+            if (matches.length === 0) {
+              console.log('   ⚠️  [TOOL] lookup_service_category - No matches found for:', serviceType);
+            } else {
+              console.log('   ✅ [TOOL] lookup_service_category - Top matches:', matches.slice(0, 3).map(m => ({
+                id: m.category_id,
+                slug: m.category_slug,
+                name: m.category_name,
+                confidence: m.confidence.toFixed(2),
+                type: m.match_type
+              })));
+            }
+            
+            const toolResponse = {
+              type: 'category_lookup_results',
+              service_type: serviceType,
+              matches: matches.map(m => ({
+                category_id: m.category_id,
+                category_slug: m.category_slug,
+                category_name: m.category_name,
+                confidence: Math.round(m.confidence * 100) / 100, // Round to 2 decimal places
+                match_type: m.match_type
+              })),
+              best_match: matches.length > 0 ? {
+                category_id: matches[0].category_id,
+                category_slug: matches[0].category_slug,
+                category_name: matches[0].category_name,
+                confidence: Math.round(matches[0].confidence * 100) / 100
+              } : null,
+              recommendation: matches.length > 0 && matches[0].confidence >= 0.5
+                ? `Use category_id=${matches[0].category_id} (${matches[0].category_name}) in your search_my_network call`
+                : 'No high-confidence match found. Consider searching without category_id filter, but results may include irrelevant services.'
+            };
+            
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(toolResponse, null, 2)
+            });
+            
+            const toolTotalTime = Date.now() - toolStartTime;
+            console.log(`   ✅ [TOOL] lookup_service_category - completed in ${toolTotalTime}ms`);
+          } else if (toolCall.function.name === 'search_my_network') {
+            const rawArgs = parseToolArguments(toolCall.function.arguments);
+            console.log('   📋 [TOOL] search_my_network - RAW args from LLM:', JSON.stringify(rawArgs, null, 2));
             const normalizedArgs = normalizeStructuredSearchArgs(rawArgs, user_lat ?? undefined, user_lng ?? undefined);
-            console.log('   📋 [TOOL] search_my_network - normalized args:', normalizedArgs);
+            console.log('   📋 [TOOL] search_my_network - normalized args:', JSON.stringify(normalizedArgs, null, 2));
+            
+            // Service-specific logging
+            if (normalizedArgs.content_type === 'service') {
+              console.log('   🔧 [SERVICE] Service search detected!');
+              console.log('   🔧 [SERVICE] Intent:', normalizedArgs.intent);
+              console.log('   🔧 [SERVICE] Category ID:', normalizedArgs.category_id);
+              if (!normalizedArgs.category_id) {
+                console.log('   ⚠️  [SERVICE] WARNING: No category_id set! This may return irrelevant services.');
+                console.log('   ⚠️  [SERVICE] Example: "architect" should have category_id=51, "tutor" should have category_id=10');
+              } else {
+                console.log('   ✅ [SERVICE] Category filter will be applied - only matching services will be returned');
+              }
+              console.log('   🔧 [SERVICE] Price range:', normalizedArgs.price_range);
+              console.log('   🔧 [SERVICE] Context tags:', normalizedArgs.context_tags);
+            } else if (normalizedArgs.content_type === 'place') {
+              console.log('   🏢 [PLACE] Place search detected');
+            } else {
+              console.log('   ❓ [MIXED] No content_type specified - will search both places and services');
+            }
 
+            console.log('   🔍 [TOOL] search_my_network - About to execute structured search with args:', {
+              userId,
+              content_type: normalizedArgs.content_type,
+              intent: normalizedArgs.intent,
+              category_id: normalizedArgs.category_id,
+              location: normalizedArgs.location,
+              user_lat: normalizedArgs.user_lat,
+              user_lng: normalizedArgs.user_lng,
+              limit: normalizedArgs.limit
+            });
+            
             const searchStartTime = Date.now();
             const structuredResult = await executeStructuredSearch(userId, normalizedArgs);
             const searchTime = Date.now() - searchStartTime;
+            
+            console.log('   🔍 [TOOL] search_my_network - Structured search returned:', {
+              recommendationsCount: structuredResult.recommendations.length,
+              topConfidence: structuredResult.top_confidence,
+              usedCurrentLocation: structuredResult.used_current_location,
+              filtersApplied: structuredResult.metadata.filters_applied,
+              totalMatched: structuredResult.metadata.total_matched
+            });
             const formatted = formatStructuredResultsForResponse(structuredResult);
             const formattedWithDistance = addDistanceLabelsToResults(formatted, user_lat, user_lng);
             structuredContext = { raw: structuredResult, formatted: formattedWithDistance };
             
+            // Breakdown by content type
+            const placeResults = formattedWithDistance.filter(r => r.type === 'place');
+            const serviceResults = formattedWithDistance.filter(r => r.type === 'service');
+            
             console.log('   ✅ [TOOL] search_my_network - search completed:', {
               searchTimeMs: searchTime,
               resultsFound: formattedWithDistance.length,
+              placeResults: placeResults.length,
+              serviceResults: serviceResults.length,
               topConfidence: structuredResult.top_confidence,
               usedLocation: structuredResult.used_current_location,
               filtersApplied: structuredResult.metadata.filters_applied
             });
+            
+            // Service-specific result logging
+            if (serviceResults.length > 0) {
+              console.log('   ✅ [SERVICE] Service results found:', serviceResults.length);
+              serviceResults.forEach((result, idx) => {
+                const rec = result.recommendations?.[0];
+                // Access service_category_name from content_data if available (for logging only)
+                const category = (rec?.content_data as any)?.service_category_name || 
+                                (rec as any)?.service_category_name || 
+                                'N/A';
+                console.log(`   ✅ [SERVICE] Result ${idx + 1}:`, {
+                  serviceName: result.service_name,
+                  serviceId: result.service_id,
+                  category: category,
+                  rating: rec?.rating || 'N/A',
+                  similarity: result.average_similarity?.toFixed(2) || 'N/A',
+                  recommendations: result.total_recommendations
+                });
+              });
+            } else if (normalizedArgs.content_type === 'service') {
+              console.log('   ⚠️  [SERVICE] WARNING: Service search requested but NO service results found!');
+              console.log('   ⚠️  [SERVICE] This could indicate:');
+              console.log('      - No services in network matching the query');
+              console.log('      - Service embeddings not generated');
+              console.log('      - Service full-text search not working');
+              console.log('      - Filters too restrictive');
+            }
+            
+            // Place-specific result logging
+            if (placeResults.length > 0) {
+              console.log('   ✅ [PLACE] Place results found:', placeResults.length);
+            }
 
             // Create clear summary for LLM - extract key info from each result
             const resultsSummary = formattedWithDistance.map((result, idx) => {

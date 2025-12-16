@@ -23,6 +23,7 @@ import dbViewerRoutes from './routes/dbViewerRoutes';
 import questionRoutes from './routes/questionRoutes';
 import publicPreviewRoutes from './routes/publicPreviewRoutes';
 import ogRoutes from './routes/ogRoutes';
+import serviceCategoryRoutes from './routes/serviceCategoryRoutes';
 import pool from './db';
 
 // env is loaded by ./config/env
@@ -429,6 +430,7 @@ app.use('/api/username', authenticateJWT, usernameRoutes);
 app.use('/api/notifications', authenticateJWT, notificationRoutes);
 app.use('/api/db', authenticateJWT, dbViewerRoutes);
 app.use('/api/questions', authenticateJWT, questionRoutes);
+app.use('/api/service-categories', authenticateJWT, serviceCategoryRoutes);
 
 // 404 handler for unmatched routes
 app.use((req, res) => {

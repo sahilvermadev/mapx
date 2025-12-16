@@ -29,6 +29,10 @@ export interface StructuredSearchArgs {
   require_fresh?: boolean;
   require_high_trust?: boolean;
   content_type?: 'place' | 'service' | null;
+  // Service-specific filters
+  category_id?: number | null;
+  price_range?: '₹' | '₹₹' | '₹₹₹' | '₹₹₹₹' | null;
+  context_tags?: string[] | null;
   limit?: 1 | 2 | 3;
 }
 
@@ -40,6 +44,10 @@ interface LocationBounds {
   lng: number;
   radiusKm: number;
   usedCurrentLocation: boolean;
+  // Location metadata for service filtering
+  country_code?: string;
+  city_name?: string;
+  admin1_name?: string;
 }
 
 /**
@@ -66,6 +74,10 @@ export interface StructuredSearchResult {
     service_id?: number;
     service_name?: string;
     service_address?: string;
+    service_price_range?: string;
+    service_exact_price?: string;
+    service_category_name?: string;
+    service_category_slug?: string;
     similarity?: number;
     created_at: Date;
   }>;
@@ -85,22 +97,86 @@ export interface StructuredSearchResult {
  * 2. If location is null AND user_lat/user_lng provided -> use GPS coordinates (15km radius)
  * 3. If location is null AND no GPS -> search without location filter
  */
+/**
+ * Extract location metadata from Google Geocoding result
+ */
+function extractLocationMetadata(result: any): { country_code?: string; city_name?: string; admin1_name?: string } {
+  const metadata: { country_code?: string; city_name?: string; admin1_name?: string } = {};
+  
+  if (result.address_components) {
+    for (const component of result.address_components) {
+      const types = component.types || [];
+      
+      if (!metadata.country_code && types.includes('country')) {
+        metadata.country_code = (component.short_name || component.long_name || '').toUpperCase();
+      }
+      
+      if (!metadata.city_name && (types.includes('locality') || types.includes('postal_town'))) {
+        metadata.city_name = component.long_name || component.short_name;
+      }
+      
+      if (!metadata.admin1_name && types.includes('administrative_area_level_1')) {
+        metadata.admin1_name = component.long_name || component.short_name;
+      }
+    }
+  }
+  
+  return metadata;
+}
+
 async function resolveLocation(
   location: string | null | undefined,
   userLat: number | null | undefined,
   userLng: number | null | undefined
 ): Promise<LocationBounds | null> {
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    throw new Error('Google Maps API key not configured for geocoding');
+  }
+  
+  const googleMapsClient = new Client({});
+  let lat: number;
+  let lng: number;
+  let locationMetadata: { country_code?: string; city_name?: string; admin1_name?: string } = {};
+  
   // If null, try to use user's current GPS coordinates from request
   if (location === null || location === undefined) {
     // Check if GPS coordinates were provided in the request
     if (typeof userLat === 'number' && typeof userLng === 'number' && 
         !isNaN(userLat) && !isNaN(userLng) &&
         userLat >= -90 && userLat <= 90 && userLng >= -180 && userLng <= 180) {
+      lat = userLat;
+      lng = userLng;
+      
+      // Reverse geocode GPS coordinates to get location metadata for service filtering
+      try {
+        const reverseGeocodeResponse = await googleMapsClient.reverseGeocode({
+          params: {
+            latlng: { lat: userLat, lng: userLng },
+            key: process.env.GOOGLE_MAPS_API_KEY
+          }
+        });
+        
+        if (reverseGeocodeResponse.data.status === 'OK' && reverseGeocodeResponse.data.results?.[0]) {
+          locationMetadata = extractLocationMetadata(reverseGeocodeResponse.data.results[0]);
+          console.log('   🌍 Reverse geocoded GPS coordinates:', {
+            lat,
+            lng,
+            country_code: locationMetadata.country_code,
+            city_name: locationMetadata.city_name,
+            admin1_name: locationMetadata.admin1_name
+          });
+        }
+      } catch (reverseGeocodeError) {
+        console.warn('   ⚠️  Failed to reverse geocode GPS coordinates, proceeding without location metadata:', reverseGeocodeError);
+        // Continue without metadata - we'll still filter places by distance
+      }
+      
       return {
-        lat: userLat,
-        lng: userLng,
+        lat,
+        lng,
         radiusKm: GPS_RADIUS_KM,
-        usedCurrentLocation: true
+        usedCurrentLocation: true,
+        ...locationMetadata
       };
     }
     
@@ -110,11 +186,6 @@ async function resolveLocation(
   }
   
   // String location: geocode it
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    throw new Error('Google Maps API key not configured for geocoding');
-  }
-  
-  const googleMapsClient = new Client({});
   const geocodeResponse = await googleMapsClient.geocode({
     params: {
       address: location,
@@ -127,14 +198,25 @@ async function resolveLocation(
   }
   
   const result = geocodeResponse.data.results[0];
-  const lat = result.geometry.location.lat;
-  const lng = result.geometry.location.lng;
+  lat = result.geometry.location.lat;
+  lng = result.geometry.location.lng;
+  locationMetadata = extractLocationMetadata(result);
+  
+  console.log('   🌍 Geocoded location:', {
+    location,
+    lat,
+    lng,
+    country_code: locationMetadata.country_code,
+    city_name: locationMetadata.city_name,
+    admin1_name: locationMetadata.admin1_name
+  });
   
   return {
     lat,
     lng,
     radiusKm: LOCATION_RADIUS_KM,
-    usedCurrentLocation: false
+    usedCurrentLocation: false,
+    ...locationMetadata
   };
 }
 
@@ -184,6 +266,17 @@ export async function executeStructuredSearch(
   userId: string,
   args: StructuredSearchArgs
 ): Promise<StructuredSearchResult> {
+  console.log('   🗄️  [STRUCTURED_SEARCH] Starting structured search:', {
+    userId,
+    intent: args.intent,
+    content_type: args.content_type,
+    category_id: args.category_id,
+    location: args.location,
+    user_lat: args.user_lat,
+    user_lng: args.user_lng,
+    limit: args.limit
+  });
+  
   const filtersApplied: string[] = [];
   let locationBounds: LocationBounds | null = null;
   let usedCurrentLocation = false;
@@ -223,7 +316,7 @@ export async function executeStructuredSearch(
     SELECT DISTINCT
       r.id as recommendation_id,
       r.content_type,
-      r.title,
+      COALESCE(p.name, s.name) as title,
       r.description,
       r.content_data,
       r.rating,
@@ -241,13 +334,27 @@ export async function executeStructuredSearch(
       s.id as service_id,
       s.name as service_name,
       s.address as service_address,
-      s.city_name as service_city_name
+      s.city_name as service_city_name,
+      s.admin1_name as service_admin1_name,
+      s.country_code as service_country_code,
+      srd.rating as service_rating,
+      srd.price_range as service_price_range,
+      srd.exact_price as service_exact_price,
+      srd.experience_summary as service_experience_summary,
+      srd.verbatim_quote as service_quote,
+      srd.context_tags as service_context_tags,
+      srd.search_vector as service_search_vector,
+      sc.name as service_category_name,
+      sc.slug as service_category_slug
     FROM recommendations r
     INNER JOIN users u ON r.user_id = u.id
-    LEFT JOIN places p ON r.place_id = p.id
-    LEFT JOIN services s ON r.service_id = s.id
+    LEFT JOIN places p ON r.place_id = p.id AND p.deleted_at IS NULL
+    LEFT JOIN services s ON r.service_id = s.id AND s.deleted_at IS NULL
+    LEFT JOIN service_recommendation_details srd ON r.id = srd.recommendation_id
+    LEFT JOIN service_categories sc ON sc.id = r.service_category_id
     INNER JOIN user_follows uf ON uf.following_id = r.user_id AND uf.follower_id = $1
     WHERE r.visibility IN ('friends', 'public')
+      AND r.deleted_at IS NULL
   `;
   
   const queryParams: any[] = [userId];
@@ -259,32 +366,214 @@ export async function executeStructuredSearch(
     queryParams.push(args.content_type);
     paramIndex++;
     filtersApplied.push('content_type');
-    console.log(`   🏷️  Adding content_type filter: ${args.content_type}`);
+    console.log(`   🏷️  [CONTENT_TYPE] Adding content_type filter: ${args.content_type}`);
+    
+    if (args.content_type === 'service') {
+      console.log('   🔧 [SERVICE] Filtering for services only');
+      console.log('   🔧 [SERVICE] Query intent:', args.intent);
+      
+      // Diagnostic: Check total services in network before filters
+      try {
+        const serviceCheckResult = await pool.query(
+          `SELECT COUNT(*) as count 
+           FROM recommendations r
+           INNER JOIN user_follows uf ON uf.following_id = r.user_id AND uf.follower_id = $1
+           WHERE r.visibility IN ('friends', 'public')
+             AND r.deleted_at IS NULL
+             AND r.content_type = 'service'`,
+          [userId]
+        );
+        const totalServices = parseInt(serviceCheckResult.rows[0]?.count || '0');
+        console.log(`   🔧 [SERVICE] DIAGNOSTIC: Total services in network (before filters): ${totalServices}`);
+      } catch (error) {
+        console.log(`   ⚠️  [SERVICE] Could not check total services:`, error);
+      }
+    }
+  } else {
+    console.log('   📋 [MIXED] No content_type filter - will search both places and services');
+  }
+
+  // Service category filter
+  if (args.category_id !== null && args.category_id !== undefined) {
+    console.log(`   🏷️  [CATEGORY] Adding category filter: category_id=${args.category_id}`);
+    console.log(`   🏷️  [CATEGORY] This will filter services to only those with category_id=${args.category_id} in service_to_category table`);
+    
+    // Diagnostic: Check how many services exist with this category_id and their location data
+    try {
+      const categoryCheckResult = await pool.query(
+        `SELECT COUNT(*) as count FROM service_to_category WHERE category_id = $1`,
+        [args.category_id]
+      );
+      const serviceCount = parseInt(categoryCheckResult.rows[0]?.count || '0');
+      console.log(`   🏷️  [CATEGORY] DIAGNOSTIC: Found ${serviceCount} services linked to category_id=${args.category_id} in database`);
+      
+      if (serviceCount > 0) {
+        // Get sample services with their location data
+        const serviceLocationCheck = await pool.query(
+          `SELECT s.id, s.name, s.country_code, s.city_name, s.admin1_name, s.city_slug
+           FROM services s
+           INNER JOIN service_to_category stc ON s.id = stc.service_id
+           WHERE stc.category_id = $1 AND s.deleted_at IS NULL
+           LIMIT 5`,
+          [args.category_id]
+        );
+        console.log(`   🏷️  [CATEGORY] DIAGNOSTIC: Sample services with category_id=${args.category_id}:`, 
+          serviceLocationCheck.rows.map(r => ({
+            id: r.id,
+            name: r.name,
+            country_code: r.country_code,
+            city_name: r.city_name,
+            admin1_name: r.admin1_name,
+            city_slug: r.city_slug
+          }))
+        );
+      } else {
+        console.log(`   ⚠️  [CATEGORY] WARNING: No services found with category_id=${args.category_id}! This category may not have any services yet.`);
+      }
+    } catch (error) {
+      console.log(`   ⚠️  [CATEGORY] Could not check category count:`, error);
+    }
+    
+    query += ` AND EXISTS (
+      SELECT 1 FROM service_to_category stc
+      WHERE stc.service_id = s.id AND stc.category_id = $${paramIndex}
+    )`;
+    queryParams.push(args.category_id);
+    paramIndex++;
+    filtersApplied.push('category');
+  } else if (args.content_type === 'service') {
+    console.log(`   ⚠️  [CATEGORY] WARNING: Service search but no category_id provided!`);
+    console.log(`   ⚠️  [CATEGORY] This may return services from any category, which could be irrelevant.`);
+    console.log(`   ⚠️  [CATEGORY] Expected: LLM should call lookup_service_category first, then use returned category_id.`);
+  }
+
+  // Service price range filter
+  if (args.price_range !== null && args.price_range !== undefined) {
+    query += ` AND srd.price_range = $${paramIndex}`;
+    queryParams.push(args.price_range);
+    paramIndex++;
+    filtersApplied.push('price_range');
+    console.log(`   💰 Adding price_range filter: ${args.price_range}`);
+  }
+
+  // Service context tags filter
+  if (args.context_tags && Array.isArray(args.context_tags) && args.context_tags.length > 0) {
+    query += ` AND srd.context_tags && $${paramIndex}::text[]`;
+    queryParams.push(args.context_tags);
+    paramIndex++;
+    filtersApplied.push('context_tags');
+    console.log(`   🏷️  Adding context_tags filter: ${args.context_tags.join(', ')}`);
+  }
+
+  // Full-text search on service recommendation details
+  // For services: Use full-text search if available, but don't require it (allow NULL search_vector)
+  let serviceFulltextApplied = false;
+  if (args.intent && args.content_type === 'service') {
+    // Add full-text search on service_recommendation_details.search_vector
+    // Make it optional: if search_vector is NULL, this condition is true (allows service through)
+    // This way services without search_vector can still be found via embedding similarity
+    query += ` AND (
+      srd.search_vector IS NULL OR
+      srd.search_vector @@ plainto_tsquery('english', $${paramIndex})
+    )`;
+    queryParams.push(args.intent);
+    paramIndex++;
+    filtersApplied.push('service_fulltext');
+    serviceFulltextApplied = true;
+    console.log(`   🔍 [SERVICE] Adding optional full-text search on service details for: "${args.intent}"`);
+    console.log(`   🔍 [SERVICE] Services with NULL search_vector will still be included (can match via embeddings)`);
+  } else if (args.content_type === 'service' && args.intent) {
+    console.log(`   ⚠️  [SERVICE] WARNING: Service search with intent but full-text search not applied!`);
+    console.log(`   ⚠️  [SERVICE] Intent: "${args.intent}"`);
+    console.log(`   ⚠️  [SERVICE] Will rely on embedding similarity or text matching`);
   }
   
-  // Location filter (PostGIS distance for places)
-  // Note: Services don't have PostGIS geometry, so we can't filter them by location.
-  // When location is specified:
-  // - Places are filtered by location (must be within radius)
-  // - Services are included regardless of location (since we can't filter them spatially)
+  // Location filter
+  // For places: Use PostGIS distance (ST_DWithin)
+  // For services: Filter by country_code (and optionally city/state) since services don't have PostGIS geometry
   if (locationBounds) {
     console.log('   📍 Adding location filter:', {
       lat: locationBounds.lat,
       lng: locationBounds.lng,
       radiusKm: locationBounds.radiusKm,
-      radiusMeters: locationBounds.radiusKm * 1000
+      radiusMeters: locationBounds.radiusKm * 1000,
+      country_code: locationBounds.country_code,
+      city_name: locationBounds.city_name,
+      admin1_name: locationBounds.admin1_name
     });
-    // Include places within radius OR services (services can't be filtered by location)
-    query += ` AND (
-      (p.id IS NOT NULL AND p.geom IS NOT NULL AND ST_DWithin(
+    
+    // Build location filter conditions
+    const locationConditions: string[] = [];
+    
+    // Places: Filter by PostGIS distance
+    locationConditions.push(`(
+      p.id IS NOT NULL AND 
+      p.geom IS NOT NULL AND 
+      ST_DWithin(
         p.geom::geography,
         ST_MakePoint($${paramIndex}, $${paramIndex + 1})::geography,
         $${paramIndex + 2}
-      ))
-      OR (s.id IS NOT NULL)
-    )`;
+      )
+    )`);
     queryParams.push(locationBounds.lng, locationBounds.lat, locationBounds.radiusKm * 1000); // Convert km to meters
     paramIndex += 3;
+    
+    // Services: Filter by location metadata (country_code is minimum requirement)
+    // IMPORTANT: Services with NULL location data should still be included (they might be valid but location not set)
+    if (locationBounds.country_code) {
+      const serviceConditions: string[] = [];
+      serviceConditions.push(`s.id IS NOT NULL`);
+      
+      // Build location matching condition: either matches location OR has NULL location data
+      const locationMatchConditions: string[] = [];
+      
+      // Match country_code
+      locationMatchConditions.push(`s.country_code = $${paramIndex}`);
+      queryParams.push(locationBounds.country_code);
+      paramIndex++;
+      
+      // Optionally match city if available
+      if (locationBounds.city_name) {
+        locationMatchConditions.push(`s.city_name ILIKE $${paramIndex}`);
+        queryParams.push(`%${locationBounds.city_name}%`);
+        paramIndex++;
+        console.log('   📍 [SERVICE] Filtering services by country and city (fuzzy match):', {
+          country_code: locationBounds.country_code,
+          city_name: locationBounds.city_name,
+          city_pattern: `%${locationBounds.city_name}%`
+        });
+      } else {
+        console.log('   📍 [SERVICE] Filtering services by country only:', {
+          country_code: locationBounds.country_code
+        });
+      }
+      
+      // Optionally match state/admin1 if available and city not available
+      if (!locationBounds.city_name && locationBounds.admin1_name) {
+        locationMatchConditions.push(`s.admin1_name = $${paramIndex}`);
+        queryParams.push(locationBounds.admin1_name);
+        paramIndex++;
+        console.log('   📍 [SERVICE] Also filtering by state:', {
+          admin1_name: locationBounds.admin1_name
+        });
+      }
+      
+      // Include services that match location OR have NULL location data (location not set yet)
+      serviceConditions.push(`(
+        (${locationMatchConditions.join(' AND ')})
+        OR
+        (s.country_code IS NULL AND s.city_name IS NULL)
+      )`);
+      
+      locationConditions.push(`(${serviceConditions.join(' AND ')})`);
+      console.log('   📍 [SERVICE] Location filter will include services with NULL location data (location not set)');
+    } else {
+      // No country_code available - include all services (fallback behavior)
+      console.log('   ⚠️  [SERVICE] No country_code available from location, including all services (may return irrelevant results)');
+      locationConditions.push(`(s.id IS NOT NULL)`);
+    }
+    
+    query += ` AND (${locationConditions.join(' OR ')})`;
     filtersApplied.push('location');
     
     // Diagnostic query: Check how many recommendations exist with location filter (only in debug mode)
@@ -310,9 +599,19 @@ export async function executeStructuredSearch(
   }
   
   // Intent filter using embedding similarity (replaces ILIKE for semantic matching)
+  // For services: Always use embedding similarity (full-text search is now optional, so this is the primary filter)
+  // For places: Use embedding similarity as primary filter
   let intentEmbeddingStr: string | null = null;
+  const isServiceSearch = args.content_type === 'service';
+  
   if (args.intent) {
-    console.log('   🔍 Adding intent filter using embedding similarity:', args.intent);
+    // Always use embedding similarity for intent matching (for both services and places)
+    // For services, full-text search is optional, so embedding similarity is the primary matching method
+    if (isServiceSearch) {
+      console.log('   🔍 [SERVICE] Adding embedding similarity for service search:', args.intent);
+    } else {
+      console.log('   🔍 Adding intent filter using embedding similarity:', args.intent);
+    }
     
     try {
       // Generate embedding for the intent
@@ -335,13 +634,19 @@ export async function executeStructuredSearch(
       paramIndex++;
       filtersApplied.push('intent');
       
-      console.log('      ✅ Using vector similarity for intent matching');
+      if (isServiceSearch) {
+        console.log('      ✅ [SERVICE] Using vector similarity for service intent matching');
+        console.log('      ⚠️  [SERVICE] NOTE: Services without embeddings (r.embedding IS NULL) will be excluded');
+        console.log('      ⚠️  [SERVICE] Similarity threshold: < 0.3 (cosine distance) = > 0.7 similarity');
+      } else {
+        console.log('      ✅ Using vector similarity for intent matching');
+      }
     } catch (embeddingError) {
       console.error('      ❌ Failed to generate intent embedding, falling back to text search:', embeddingError);
       // Fallback to text matching if embedding generation fails
       query += ` AND (
         r.description ILIKE $${paramIndex}
-        OR r.title ILIKE $${paramIndex}
+        OR COALESCE(p.name, s.name) ILIKE $${paramIndex}
         OR EXISTS (
           SELECT 1 FROM unnest(r.labels) AS label
           WHERE label ILIKE $${paramIndex}
@@ -352,7 +657,7 @@ export async function executeStructuredSearch(
       filtersApplied.push('intent');
     }
   } else {
-    // No intent filter - add null similarity for consistency
+    // No intent filter or using service fulltext - add null similarity for consistency
     query = query.replace(
       'SELECT DISTINCT',
       `SELECT DISTINCT
@@ -371,9 +676,234 @@ export async function executeStructuredSearch(
   console.log('   🗄️  Executing final database query...');
   console.log('   📊 Query params:', queryParams.length);
   console.log('   📝 Query preview:', query.substring(0, 200) + '...');
+  
+  // Service-specific query logging
+  if (args.content_type === 'service') {
+    console.log('   🔧 [SERVICE] Executing service search query...');
+    console.log('   🔧 [SERVICE] Query includes service_recommendation_details join:', query.includes('service_recommendation_details'));
+    console.log('   🔧 [SERVICE] Query includes service_categories join:', query.includes('service_categories'));
+  }
+  
+  console.log('   🗄️  [STRUCTURED_SEARCH] Executing database query with', queryParams.length, 'parameters');
+  console.log('   🗄️  [STRUCTURED_SEARCH] Query preview (first 500 chars):', query.substring(0, 500));
+  
   const candidatesResult = await pool.query(query, queryParams);
   const candidates = candidatesResult.rows;
-  console.log('   ✅ Found', candidates.length, 'candidates from database');
+  console.log('   ✅ [STRUCTURED_SEARCH] Found', candidates.length, 'candidates from database');
+  
+  if (candidates.length === 0) {
+    console.log('   ⚠️  [STRUCTURED_SEARCH] DIAGNOSTIC: Zero candidates found!');
+    console.log('   ⚠️  [STRUCTURED_SEARCH] Applied filters:', filtersApplied);
+    console.log('   ⚠️  [STRUCTURED_SEARCH] Query params:', queryParams.map((p, i) => `$${i + 1}: ${typeof p === 'string' && p.length > 100 ? p.substring(0, 100) + '...' : p}`));
+  }
+  
+  // Breakdown by content type
+  const serviceCandidates = candidates.filter(c => c.content_type === 'service');
+  const placeCandidates = candidates.filter(c => c.content_type === 'place');
+  const unclearCandidates = candidates.filter(c => c.content_type === 'unclear');
+  
+  console.log('   📊 [BREAKDOWN] Candidates by type:', {
+    services: serviceCandidates.length,
+    places: placeCandidates.length,
+    unclear: unclearCandidates.length,
+    total: candidates.length
+  });
+  
+  // Log service locations if location filter was applied
+  if (locationBounds && serviceCandidates.length > 0) {
+    const serviceLocations = serviceCandidates.map((c: any) => ({
+      service_name: c.service_name || 'Unknown',
+      country_code: c.service_country_code || 'N/A',
+      city_name: c.service_city_name || 'N/A',
+      admin1_name: c.service_admin1_name || 'N/A'
+    }));
+    console.log('   📍 [SERVICE] Service locations after filter:', {
+      expected_country: locationBounds.country_code,
+      expected_city: locationBounds.city_name,
+      expected_admin1: locationBounds.admin1_name,
+      services_found: serviceCandidates.length,
+      sample_locations: serviceLocations.slice(0, 3)
+    });
+    
+    // Warn if services from wrong country are found (data quality issue)
+    if (locationBounds.country_code) {
+      const wrongCountryServices = serviceCandidates.filter((c: any) => 
+        c.service_country_code && c.service_country_code !== locationBounds.country_code
+      );
+      if (wrongCountryServices.length > 0) {
+        console.log('   ⚠️  [SERVICE] WARNING: Found services from different country!', {
+          expected: locationBounds.country_code,
+          found: wrongCountryServices.map((c: any) => ({
+            name: c.service_name,
+            country: c.service_country_code
+          }))
+        });
+      }
+    }
+  }
+  
+  // Log similarity scores for services (if available)
+  if (serviceCandidates.length > 0 && args.intent) {
+    const servicesWithScores = serviceCandidates
+      .filter(c => c.similarity !== null && c.similarity !== undefined)
+      .map(c => ({ 
+        id: c.recommendation_id, 
+        similarity: c.similarity,
+        service_name: c.service_name || 'N/A'
+      }))
+      .sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+    
+    const servicesWithoutScores = serviceCandidates.filter(c => c.similarity === null || c.similarity === undefined);
+    
+    console.log('   🔍 [SERVICE] Similarity scores:', {
+      with_scores: servicesWithScores.length,
+      without_scores: servicesWithoutScores.length,
+      top_similarities: servicesWithScores.slice(0, 5).map(s => ({
+        name: s.service_name,
+        score: s.similarity?.toFixed(3)
+      }))
+    });
+    
+    if (servicesWithScores.length > 0) {
+      const avgSimilarity = servicesWithScores.reduce((sum, s) => sum + (s.similarity || 0), 0) / servicesWithScores.length;
+      const maxSimilarity = Math.max(...servicesWithScores.map(s => s.similarity || 0));
+      const minSimilarity = Math.min(...servicesWithScores.map(s => s.similarity || 0));
+      console.log('   📊 [SERVICE] Similarity stats:', {
+        avg: avgSimilarity.toFixed(3),
+        max: maxSimilarity.toFixed(3),
+        min: minSimilarity.toFixed(3),
+        threshold: '0.7 (cosine distance < 0.3)'
+      });
+    }
+  }
+  
+  if (args.content_type === 'service' && serviceCandidates.length === 0) {
+    console.log('   ⚠️  [SERVICE] DIAGNOSTIC: No service candidates found in database query!');
+    console.log('   ⚠️  [SERVICE] Possible issues:');
+    console.log('      1. No services in network (check if user follows anyone with service recommendations)');
+    console.log('      2. Service full-text search_vector is NULL or not matching');
+    console.log('      3. Service embeddings not generated (r.embedding IS NULL) - THIS IS LIKELY THE ISSUE');
+    console.log('      4. Service category filter too restrictive');
+    console.log('      5. Location filter excluding services (city_name might not match exactly)');
+    console.log('      6. Embedding similarity threshold too strict (< 0.3 cosine distance = > 0.7 similarity)');
+    
+    // Diagnostic: Check what services exist with the category_id in the user's network
+    if (args.category_id) {
+      try {
+        const diagnosticQuery = `
+          SELECT s.id, s.name, s.country_code, s.city_name, s.admin1_name, s.city_slug,
+                 r.id as recommendation_id, r.embedding IS NOT NULL as has_embedding,
+                 r.user_id, uf.follower_id IS NOT NULL as in_network
+          FROM services s
+          INNER JOIN service_to_category stc ON s.id = stc.service_id
+          INNER JOIN recommendations r ON r.service_id = s.id
+          LEFT JOIN user_follows uf ON uf.following_id = r.user_id AND uf.follower_id = $1
+          WHERE stc.category_id = $2
+            AND s.deleted_at IS NULL
+            AND r.deleted_at IS NULL
+            AND r.visibility IN ('friends', 'public')
+          LIMIT 10
+        `;
+        const diagnosticResult = await pool.query(diagnosticQuery, [userId, args.category_id]);
+        console.log(`   🔍 [SERVICE] DIAGNOSTIC: Services with category_id=${args.category_id} in network:`, 
+          diagnosticResult.rows.length > 0 ? diagnosticResult.rows.map(r => ({
+            service_id: r.id,
+            service_name: r.name,
+            country_code: r.country_code,
+            city_name: r.city_name,
+            admin1_name: r.admin1_name,
+            city_slug: r.city_slug,
+            recommendation_id: r.recommendation_id,
+            has_embedding: r.has_embedding,
+            in_network: r.in_network
+          })) : 'NONE FOUND'
+        );
+        
+        if (locationBounds && diagnosticResult.rows.length > 0) {
+          console.log(`   🔍 [SERVICE] DIAGNOSTIC: Location filter comparison:`, {
+            expected_country: locationBounds.country_code,
+            expected_city: locationBounds.city_name,
+            services_found: diagnosticResult.rows.map(r => ({
+              name: r.name,
+              country: r.country_code,
+              city: r.city_name,
+              matches_country: r.country_code === locationBounds.country_code,
+              matches_city: r.city_name && locationBounds.city_name && r.city_name.toLowerCase().includes(locationBounds.city_name.toLowerCase())
+            }))
+          });
+        }
+      } catch (error) {
+        console.log(`   ⚠️  [SERVICE] Could not run diagnostic query:`, error);
+      }
+    }
+    
+    // Run diagnostic query to check service embeddings
+    if (args.intent) {
+      try {
+        const diagnosticQuery = `
+          SELECT 
+            COUNT(*) as total_services,
+            COUNT(r.embedding) as services_with_embeddings,
+            COUNT(*) - COUNT(r.embedding) as services_without_embeddings
+          FROM recommendations r
+          INNER JOIN user_follows uf ON uf.following_id = r.user_id AND uf.follower_id = $1
+          WHERE r.content_type = 'service'
+            AND r.visibility IN ('friends', 'public')
+            AND r.deleted_at IS NULL
+        `;
+        const diagnosticResult = await pool.query(diagnosticQuery, [userId]);
+        const diag = diagnosticResult.rows[0];
+        console.log('   🔍 [SERVICE] Embedding diagnostic:', {
+          total_services: diag.total_services,
+          with_embeddings: diag.services_with_embeddings,
+          without_embeddings: diag.services_without_embeddings,
+          embedding_coverage: diag.total_services > 0 
+            ? `${((diag.services_with_embeddings / diag.total_services) * 100).toFixed(1)}%`
+            : 'N/A'
+        });
+        
+        if (parseInt(diag.services_without_embeddings) > 0) {
+          console.log('   ⚠️  [SERVICE] CRITICAL: Some services are missing embeddings!');
+          console.log('   ⚠️  [SERVICE] These services will be excluded from embedding similarity search');
+          console.log('   ⚠️  [SERVICE] Solution: Run embedding generation script for services');
+        }
+      } catch (diagError) {
+        console.error('   ❌ [SERVICE] Failed to run embedding diagnostic:', diagError);
+      }
+    }
+    
+    // Diagnostic query to check if services exist at all
+    if (SEARCH_CONFIG.DEBUG.ENABLE_DIAGNOSTIC_QUERIES) {
+      const serviceCheckResult = await pool.query(
+        `SELECT COUNT(*) as total
+         FROM recommendations r
+         INNER JOIN user_follows uf ON uf.following_id = r.user_id AND uf.follower_id = $1
+         WHERE r.content_type = 'service'
+           AND r.visibility IN ('friends', 'public')
+           AND r.deleted_at IS NULL`,
+        [userId]
+      );
+      const totalServices = parseInt(serviceCheckResult.rows[0]?.total || '0');
+      console.log('   📊 [SERVICE] Total services in network:', totalServices);
+      
+      if (totalServices > 0) {
+        const serviceWithDetailsResult = await pool.query(
+          `SELECT COUNT(*) as total
+           FROM recommendations r
+           INNER JOIN user_follows uf ON uf.following_id = r.user_id AND uf.follower_id = $1
+           INNER JOIN service_recommendation_details srd ON r.id = srd.recommendation_id
+           WHERE r.content_type = 'service'
+             AND r.visibility IN ('friends', 'public')
+             AND r.deleted_at IS NULL
+             AND srd.search_vector IS NOT NULL`,
+          [userId]
+        );
+        const servicesWithSearchVector = parseInt(serviceWithDetailsResult.rows[0]?.total || '0');
+        console.log('   📊 [SERVICE] Services with search_vector:', servicesWithSearchVector);
+        console.log('   📊 [SERVICE] Services without search_vector:', totalServices - servicesWithSearchVector);
+      }
+    }
+  }
   
   if (candidates.length === 0) {
     console.log('   ⚠️  DIAGNOSTIC: No candidates found. Possible reasons:');
@@ -390,7 +920,9 @@ export async function executeStructuredSearch(
   const filterStats = {
     rating: 0,
     price: 0,
-    fresh: 0
+    fresh: 0,
+    services: 0,
+    places: 0
   };
   
   // Note: require_high_trust filter is not yet implemented - will be added in a future phase
@@ -410,12 +942,42 @@ export async function executeStructuredSearch(
       if (!filtersApplied.includes('min_rating')) filtersApplied.push('min_rating');
     }
     
-    // Price filter
+    // Price filter (for places - service price_range is filtered in SQL)
     if (args.max_price_inr !== null && args.max_price_inr !== undefined) {
-      if (!isWithinPrice(contentData, args.max_price_inr)) {
-        filterStats.price++;
-        passed = false;
-        continue;
+      // For services, check service_price_range from service_recommendation_details
+      if (candidate.service_id) {
+        const servicePriceRange = candidate.service_price_range;
+        if (servicePriceRange) {
+          const priceMap: Record<string, number> = {
+            '₹': 500,
+            '₹₹': 1000,
+            '₹₹₹': 2000,
+            '₹₹₹₹': 5000,
+          };
+          const servicePriceValue = priceMap[servicePriceRange] || 0;
+          if (servicePriceValue > args.max_price_inr) {
+            filterStats.price++;
+            filterStats.services++;
+            if (args.content_type === 'service') {
+              console.log(`   💰 [SERVICE] Filtered out service "${candidate.service_name}" - price ${servicePriceRange} (${servicePriceValue} INR) > max ${args.max_price_inr} INR`);
+            }
+            passed = false;
+            continue;
+          }
+        } else {
+          // Service has no price_range - allow it through
+          if (args.content_type === 'service') {
+            console.log(`   💰 [SERVICE] Service "${candidate.service_name}" has no price_range - allowing through`);
+          }
+        }
+      } else {
+        // For places, use existing logic
+        if (!isWithinPrice(contentData, args.max_price_inr)) {
+          filterStats.price++;
+          filterStats.places++;
+          passed = false;
+          continue;
+        }
       }
       if (!filtersApplied.includes('max_price')) filtersApplied.push('max_price');
     }
@@ -434,15 +996,38 @@ export async function executeStructuredSearch(
     
     if (passed) {
       filtered.push(candidate);
+      // Log service that passed all filters
+      if (candidate.content_type === 'service' && args.content_type === 'service') {
+        console.log(`   ✅ [SERVICE] Service "${candidate.service_name || 'Unknown'}" passed all filters`, {
+          service_id: candidate.service_id,
+          recommendation_id: candidate.recommendation_id,
+          similarity: candidate.similarity?.toFixed(3) || 'N/A',
+          rating: candidate.rating || 'N/A',
+          price_range: candidate.service_price_range || 'N/A'
+        });
+      }
     }
   }
   
+  // Breakdown filtered results by type
+  const filteredServices = filtered.filter(c => c.content_type === 'service');
+  const filteredPlaces = filtered.filter(c => c.content_type === 'place');
+  
   console.log('   📊 Filter statistics:');
   console.log('      - Candidates before filters:', candidates.length);
+  console.log('        • Services:', serviceCandidates.length);
+  console.log('        • Places:', placeCandidates.length);
   console.log('      - Filtered out by rating:', filterStats.rating);
-  console.log('      - Filtered out by price:', filterStats.price);
+  console.log('      - Filtered out by price:', filterStats.price, `(services: ${filterStats.services}, places: ${filterStats.places})`);
   console.log('      - Filtered out by freshness:', filterStats.fresh);
   console.log('      - Candidates after filters:', filtered.length);
+  console.log('        • Services:', filteredServices.length);
+  console.log('        • Places:', filteredPlaces.length);
+  
+  if (args.content_type === 'service' && filteredServices.length === 0 && serviceCandidates.length > 0) {
+    console.log('   ⚠️  [SERVICE] WARNING: Services found in query but ALL filtered out by post-query filters!');
+    console.log('   ⚠️  [SERVICE] Check rating, price, and freshness filters');
+  }
   
   // Limit results
   const limit = args.limit || 2;
@@ -522,17 +1107,36 @@ export async function executeStructuredSearch(
       service_id: rec.service_id,
       service_name: rec.service_name,
       service_address: rec.service_address,
+      service_price_range: rec.service_price_range,
+      service_exact_price: rec.service_exact_price,
+      service_category_name: rec.service_category_name,
+      service_category_slug: rec.service_category_slug,
       created_at: rec.created_at,
       similarity: rec.similarity ? parseFloat(rec.similarity) : undefined
     };
   });
   
+  // Final breakdown by content type
+  const finalServices = recommendations.filter(r => r.content_type === 'service');
+  const finalPlaces = recommendations.filter(r => r.content_type === 'place');
+  
   console.log('   ✅ Structured search complete');
   console.log('      - Recommendations:', recommendations.length);
+  console.log('        • Services:', finalServices.length);
+  console.log('        • Places:', finalPlaces.length);
   console.log('      - Top confidence:', topConfidence);
   console.log('      - Used current location:', usedCurrentLocation);
   console.log('      - Total matched:', filtered.length);
   console.log('      - Filters applied:', [...new Set(filtersApplied)].join(', '));
+  
+  if (args.content_type === 'service' && finalServices.length === 0) {
+    console.log('   ❌ [SERVICE] ERROR: Service search returned ZERO service results!');
+    console.log('   ❌ [SERVICE] Summary:');
+    console.log('      - Service candidates from DB:', serviceCandidates.length);
+    console.log('      - Services after filters:', filteredServices.length);
+    console.log('      - Final service recommendations:', finalServices.length);
+    console.log('   ❌ [SERVICE] This indicates a problem in the service search pipeline');
+  }
   
   return {
     recommendations,

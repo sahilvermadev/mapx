@@ -34,6 +34,9 @@ COPY migrations ./migrations
 # Copy scripts folder (needed for refresh-embeddings and other utilities)
 COPY --from=builder /app/scripts ./scripts
 
+# Copy sync-categories script to scripts folder for consistency
+COPY --from=builder /app/sync-categories.js ./scripts/sync-service-categories.js
+
 # Copy health check script
 COPY healthcheck.js ./
 

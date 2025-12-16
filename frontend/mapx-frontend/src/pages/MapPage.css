@@ -72,18 +72,14 @@ header[class*="bg-black"] {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
 }
 
-/* App bar */
-.searchbar {
-  position: relative; top: 16px; left: 50%; transform: translateX(-50%);
-  width: min(900px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px; border-radius: 18px; backdrop-filter: blur(12px);
-  background: rgba(0, 0, 0, 0.7);  border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7); z-index: 20;
-}
-
-.searchbar .search {
-  flex: 1;
-  margin-right: 12px;
+/* App bar - wrapper removed, styling moved to search-container */
+.search-container {
+  position: relative; 
+  top: 16px; 
+  left: 50%; 
+  transform: translateX(-50%);
+  width: min(900px, calc(100% - 32px)); 
+  z-index: 20;
 }
 
 /* Profile avatar + menu */

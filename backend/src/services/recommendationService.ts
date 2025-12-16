@@ -11,6 +11,7 @@ import { embeddingQueue } from './embeddingQueue';
 import { onRecommendationCreated } from '../db/questionCounters';
 import { createQuestionAnswerNotification } from '../db/notifications';
 import { handleError } from '../utils/errorHandling';
+import { serviceRecommendationDetailsService } from './serviceRecommendationDetailsService';
 
 export interface SaveRecommendationRequest {
   content_type: 'place' | 'service' | 'tip' | 'contact' | 'unclear';
@@ -80,6 +81,32 @@ export class RecommendationService {
       
       // Step 3: Save recommendation to database
       const recommendationId = await this.insertRecommendationWithOptimizations(recommendationData, opts);
+      
+      // Step 3.5: Create service recommendation details if this is a service recommendation
+      if (serviceId && request.content_type === 'service') {
+        try {
+          const experienceSummary = serviceRecommendationDetailsService.extractExperienceSummary(
+            request.description || '',
+            request.content_data?.service_quote || request.content_data?.verbatim_quote
+          );
+
+          await serviceRecommendationDetailsService.upsertRecommendationDetails(
+            recommendationId,
+            serviceId,
+            {
+              rating: request.content_data?.service_rating || request.rating,
+              price_range: request.content_data?.service_price_range,
+              exact_price: request.content_data?.service_exact_price,
+              experience_summary: experienceSummary,
+              verbatim_quote: request.content_data?.service_quote || request.content_data?.verbatim_quote,
+              context_tags: request.content_data?.context_tags || [],
+            }
+          );
+        } catch (error) {
+          // Non-fatal: log but don't fail the recommendation save
+          console.warn('[RecommendationService] Failed to create service recommendation details:', error);
+        }
+      }
       
       // Step 4: Process async operations (mentions, notifications, embeddings)
       await this.processAsyncOperations(recommendationData, recommendationId, opts);
@@ -214,15 +241,19 @@ export class RecommendationService {
     placeId?: number,
     serviceId?: number
   ): RecommendationData {
-    const title = request.title || request.place_name || request.service_name;
     const finalContentType = this.determineContentType(request);
+    
+    // Extract service_category_id from content_data if present
+    const serviceCategoryId = request.content_data?.service_category_id 
+      ? parseInt(request.content_data.service_category_id, 10) 
+      : undefined;
 
     return {
       user_id: userId,
       content_type: finalContentType,
       place_id: placeId,
       service_id: serviceId,
-      title,
+      service_category_id: serviceCategoryId,
       description: request.description,
       content_data: request.content_data || {},
       rating: request.rating,

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { HelpCircle } from 'lucide-react';
 import { questionsApi, type CreateQuestionPayload } from '@/services/questionsService';
+import { QUESTION_CONTENT_TYPES } from '@/components/composer/constants';
 import { useTheme } from '@/contexts/ThemeContext';
 import { THEMES } from '@/services/profileService';
 import { getReadableTextColor } from '@/utils/color';
@@ -16,15 +17,6 @@ const useAskQuestion = () => {
     mutationFn: (payload: CreateQuestionPayload) => questionsApi.createQuestion(payload),
   });
 };
-
-const CATEGORIES = [
-  { key: 'food', label: 'Food' },
-  { key: 'places', label: 'Places' },
-  { key: 'services', label: 'Services' },
-  { key: 'entertainment', label: 'Entertainment' },
-  { key: 'work', label: 'Work' },
-  { key: 'other', label: 'Other' },
-] as const;
 
 const AskQuestionPage: React.FC = () => {
   const navigate = useNavigate();
@@ -308,8 +300,8 @@ const AskQuestionPage: React.FC = () => {
 
               {/* Category Selection */}
               <div className="w-full flex flex-wrap gap-2 md:gap-2.5">
-              {CATEGORIES.map((category) => {
-                const isSelected = selectedCategory === category.key;
+              {QUESTION_CONTENT_TYPES.map((contentType) => {
+                const isSelected = selectedCategory === contentType.key;
                 const baseBg = isSelected
                   ? selectedTheme?.accentColor || '#3B82F6'
                   : selectedTheme?.hoverBackground || 'rgba(15, 23, 42, 0.75)';
@@ -325,8 +317,8 @@ const AskQuestionPage: React.FC = () => {
 
                 return (
                   <button
-                    key={category.key}
-                    onClick={() => setSelectedCategory(isSelected ? null : category.key)}
+                    key={contentType.key}
+                    onClick={() => setSelectedCategory(isSelected ? null : contentType.key)}
                     className="px-4 md:px-5 py-1.5 md:py-2 rounded-full text-sm font-medium border transition-all duration-150 ease-out shadow-sm"
                     style={{
                       backgroundColor: baseBg,
@@ -340,7 +332,7 @@ const AskQuestionPage: React.FC = () => {
                       e.currentTarget.style.backgroundColor = baseBg;
                     }}
                   >
-                    {category.label}
+                    {contentType.label}
                   </button>
                 );
               })}

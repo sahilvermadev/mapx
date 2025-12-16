@@ -308,7 +308,6 @@ export function validateServiceData(data: {
   phone_number?: string;
   email?: string;
   service_type?: string;
-  business_name?: string;
 }): {
   isValid: boolean;
   errors: string[];
@@ -352,9 +351,6 @@ export function validateServiceData(data: {
   // Clean other fields
   if (data.service_type) {
     cleaned.service_type = data.service_type.trim();
-  }
-  if (data.business_name) {
-    cleaned.business_name = data.business_name.trim();
   }
   
   return {

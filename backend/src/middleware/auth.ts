@@ -122,3 +122,48 @@ export const getUserIdFromRequest = (req: Request): string | null => {
     return null;
   }
 };
+
+/**
+ * Check if a user is an admin based on email
+ * 
+ * Admin emails are configured via ADMIN_EMAILS environment variable.
+ * Format: Comma-separated list of email addresses
+ * Example: ADMIN_EMAILS=admin@example.com,superadmin@example.com
+ * 
+ * @param email - User's email address to check
+ * @returns true if the email is in the admin list
+ */
+export const isAdmin = (email: string): boolean => {
+  const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(e => e.trim().toLowerCase()) || [];
+  return adminEmails.includes(email.toLowerCase());
+};
+
+/**
+ * Middleware to require admin access
+ */
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  // First ensure user is authenticated
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required'
+    });
+  }
+
+  const userEmail = (req.user as any).email;
+  if (!userEmail) {
+    return res.status(403).json({
+      success: false,
+      error: 'User email not found'
+    });
+  }
+
+  if (!isAdmin(userEmail)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Admin access required'
+    });
+  }
+
+  next();
+};

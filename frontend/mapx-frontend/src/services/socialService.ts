@@ -63,6 +63,14 @@ export interface FeedPost {
   likes_count: number;
   is_liked_by_current_user: boolean;
   is_saved?: boolean;
+  // Service-specific fields
+  service_price_range?: string | null;
+  service_exact_price?: string | null;
+  service_experience_summary?: string | null;
+  service_verbatim_quote?: string | null;
+  service_context_tags?: string[] | null;
+  service_category_name?: string | null;
+  service_category_slug?: string | null;
 }
 
 export interface PaginationInfo {

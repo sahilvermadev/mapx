@@ -84,9 +84,18 @@ export function formatStructuredResultsForResponse(
   structured: StructuredSearchResult
 ): FormattedStructuredResult[] {
   const groups = new Map<string, FormattedStructuredResult>();
+  
+  // Count services vs places
+  let serviceCount = 0;
+  let placeCount = 0;
 
   for (const rec of structured.recommendations) {
     const isPlace = Boolean(rec.place_id);
+    const isService = Boolean(rec.service_id);
+    
+    if (isPlace) placeCount++;
+    if (isService) serviceCount++;
+    
     const key = isPlace
       ? `place:${rec.place_id}`
       : rec.service_id
@@ -94,11 +103,21 @@ export function formatStructuredResultsForResponse(
         : `service:unknown:${rec.recommendation_id}`;
 
     const existing = groups.get(key);
+    
+    // Log service formatting
+    if (isService && !existing) {
+      console.log(`   🔧 [SERVICE] Formatting service result:`, {
+        serviceId: rec.service_id,
+        serviceName: rec.service_name,
+        recommendationId: rec.recommendation_id,
+        contentType: rec.content_type
+      });
+    }
 
     const baseRecommendation = {
         recommendation_id: rec.recommendation_id,
         content_type: rec.content_type,
-        title: rec.title,
+        title: rec.title || rec.place_name || rec.service_name || '',
         description: rec.description,
         content_data: rec.content_data,
         user_name: rec.user_name,
@@ -144,7 +163,25 @@ export function formatStructuredResultsForResponse(
     }
   }
 
-  return Array.from(groups.values());
+  const formatted = Array.from(groups.values());
+  const formattedServices = formatted.filter(r => r.type === 'service');
+  const formattedPlaces = formatted.filter(r => r.type === 'place');
+  
+  console.log('   📦 [FORMAT] Formatting complete:', {
+    totalRecommendations: structured.recommendations.length,
+    services: serviceCount,
+    places: placeCount,
+    formattedGroups: formatted.length,
+    formattedServices: formattedServices.length,
+    formattedPlaces: formattedPlaces.length
+  });
+  
+  if (serviceCount > 0 && formattedServices.length === 0) {
+    console.log('   ⚠️  [SERVICE] WARNING: Services in recommendations but NO service groups in formatted results!');
+    console.log('   ⚠️  [SERVICE] This suggests a formatting issue');
+  }
+  
+  return formatted;
 }
 
 function computeDistanceLabelForResult(
@@ -259,7 +296,6 @@ export function convertStructuredResultsToSearchContext(
         service_id: result.service_id ?? null,
         service_name: result.service_name || '',
         service_type: result.recommendations[0]?.content_data?.service_type || null,
-        service_business_name: result.recommendations[0]?.content_data?.business_name || null,
         service_address: result.service_address || undefined,
         total_recommendations: result.total_recommendations,
         average_similarity: result.average_similarity ?? 0,
@@ -333,6 +369,39 @@ export function normalizeStructuredSearchArgs(
   } else if (rawArgs.content_type === null || rawArgs.content_type === undefined) {
     normalizedContentType = null;
   }
+  
+  // Log LLM's content_type decision
+  console.log('   🤖 [LLM] Content type decision:', {
+    raw: rawArgs.content_type,
+    normalized: normalizedContentType,
+    intent: rawArgs.intent?.substring(0, 50)
+  });
+  
+  if (normalizedContentType === 'service') {
+    console.log('   ✅ [LLM] LLM correctly identified this as a SERVICE search');
+  } else if (normalizedContentType === 'place') {
+    console.log('   ✅ [LLM] LLM identified this as a PLACE search');
+  } else {
+    console.log('   ⚠️  [LLM] LLM did not specify content_type - will search both places and services');
+  }
+
+  // Normalize category_id
+  let normalizedCategoryId: number | null | undefined = undefined;
+  if (typeof rawArgs.category_id === 'number') {
+    normalizedCategoryId = rawArgs.category_id;
+  } else if (rawArgs.category_id === null || rawArgs.category_id === undefined) {
+    normalizedCategoryId = null;
+  }
+  
+  // Log category_id decision
+  if (normalizedContentType === 'service') {
+    if (normalizedCategoryId) {
+      console.log('   ✅ [LLM] LLM set category_id:', normalizedCategoryId);
+    } else {
+      console.log('   ⚠️  [LLM] WARNING: LLM did not set category_id for service search!');
+      console.log('   ⚠️  [LLM] This may return irrelevant services (e.g., tutors when searching for architects)');
+    }
+  }
 
   const normalized: StructuredSearchArgs = {
     intent: rawArgs.intent.trim(),
@@ -344,6 +413,9 @@ export function normalizeStructuredSearchArgs(
     require_fresh: Boolean(rawArgs.require_fresh),
     require_high_trust: Boolean(rawArgs.require_high_trust),
     content_type: normalizedContentType,
+    category_id: normalizedCategoryId,
+    price_range: rawArgs.price_range && ['₹', '₹₹', '₹₹₹', '₹₹₹₹'].includes(rawArgs.price_range) ? rawArgs.price_range : null,
+    context_tags: Array.isArray(rawArgs.context_tags) ? rawArgs.context_tags : null,
     limit: [1, 2, 3].includes(rawArgs.limit) ? rawArgs.limit : 2
   };
 
@@ -394,29 +466,41 @@ export async function enqueueAskNetworkRequest(userId: string, args: AskMyNetwor
 
 // Helpers
 function normalizeContactInfo(raw: any, description?: string): { phone?: string; email?: string } {
+  // Import normalization functions for consistency
+  const { normalizePhoneNumber, normalizeEmail } = require('../db/services');
+  
   // Accept string or { phone, email }
   let phone: string | undefined;
   let email: string | undefined;
 
-    if (raw && typeof raw === 'object') {
+  if (raw && typeof raw === 'object') {
     if (raw.phone && typeof raw.phone === 'string') {
-      const digits = raw.phone.replace(/\D/g, '');
-        if (digits.length >= 10 && digits.length <= 15) phone = digits;
+      phone = normalizePhoneNumber(raw.phone);
+      if (!phone || phone.length < 10) phone = undefined;
     }
     if (raw.email && typeof raw.email === 'string' && /@/.test(raw.email)) {
-      email = raw.email.toLowerCase().trim();
+      email = normalizeEmail(raw.email);
     }
   } else if (typeof raw === 'string') {
     const trimmed = raw.trim();
-    const digits = trimmed.replace(/\D/g, '');
-    if (digits.length >= 10 && digits.length <= 15) phone = digits;
-    if (!phone && /@/.test(trimmed)) email = trimmed.toLowerCase();
+    // Try phone first
+    phone = normalizePhoneNumber(trimmed);
+    if (!phone || phone.length < 10) {
+      phone = undefined;
+      // Then try email
+      if (/@/.test(trimmed)) {
+        email = normalizeEmail(trimmed);
+      }
+    }
   }
 
   // Fallback: try description for a phone-like number
   if (!phone && typeof description === 'string') {
     const m = description.replace(/\s+/g, '').match(/\+?\d{10,15}/);
-    if (m) phone = m[0].replace(/\D/g, '');
+    if (m) {
+      phone = normalizePhoneNumber(m[0]);
+      if (!phone || phone.length < 10) phone = undefined;
+    }
   }
 
   return { phone, email };
@@ -442,7 +526,7 @@ interface SaveRecommendationRequest {
   service_phone?: string;
   service_email?: string;
   service_type?: string;
-  service_business_name?: string;
+  // service_business_name removed from the API surface; retained only in legacy content_data
   service_address?: string;
   service_website?: string;
   service_metadata?: Record<string, any>;
@@ -543,7 +627,6 @@ router.post('/save', async (req, res) => {
       service_phone,
       service_email,
       service_type,
-      service_business_name,
       service_address,
       service_website,
       service_metadata,
@@ -599,8 +682,8 @@ router.post('/save', async (req, res) => {
     }
     let finalContentType: 'place' | 'service' | 'unclear' = (content_type === 'place' || content_type === 'service' || content_type === 'unclear') ? content_type : 'unclear';
     if (finalContentType === 'unclear' || !finalContentType) {
-      // Infer from payload: if service identifiers exist, treat as service
-      if (service_name || service_phone || service_email || service_type || service_business_name) {
+      // Infer from payload: if core service identifiers exist, treat as service
+      if (service_name || service_phone || service_email || service_type) {
         finalContentType = 'service';
       } else if (google_place_id || place_name || (typeof place_lat === 'number' && typeof place_lng === 'number')) {
         finalContentType = 'place';
@@ -733,7 +816,7 @@ router.post('/save', async (req, res) => {
       const { phone: normPhone, email: normEmail } = normalizeContactInfo(cd.contact_info, description);
       const derivedPhone = service_phone || cd.service_phone || normPhone;
       const derivedEmail = service_email || cd.service_email || normEmail;
-      const derivedBusinessName = service_business_name || cd.business_name;
+      const derivedBusinessName = cd.business_name;
       const derivedAddress = service_address || place_address || cd.service_address || cd.address;
       const derivedWebsite = service_website || cd.service_website || cd.website;
       const derivedServiceType = service_type || cd.service_type || cd.category;
@@ -767,7 +850,7 @@ router.post('/save', async (req, res) => {
         phone_number: derivedPhone,
         email: derivedEmail,
         service_type: extractedServiceType || undefined,
-        business_name: derivedBusinessName,
+        // business_name deprecated at write-path; legacy column remains populated for old data only
         address: derivedAddress,
         website: derivedWebsite,
         // normalized location fields for city filtering (prefer values from composer payload)
@@ -843,7 +926,6 @@ router.post('/save', async (req, res) => {
         service_phone: service_phone,
         service_email: service_email,
         service_type: service_type,
-        service_business_name: service_business_name,
         service_address: service_address,
         service_website: service_website,
         ...service_metadata,
@@ -864,12 +946,17 @@ router.post('/save', async (req, res) => {
       user_id
     });
     
+    // Extract service_category_id from content_data if present
+    const serviceCategoryId = finalContentType === 'service' && finalContentData?.service_category_id
+      ? parseInt(finalContentData.service_category_id, 10)
+      : undefined;
+
     const recommendationId = await insertRecommendation({
       user_id,
       content_type: finalContentType,
       place_id: placeId,
       service_id: serviceId,
-      title: title || place_name || service_name,
+      service_category_id: serviceCategoryId,
       description,
       content_data: finalContentData,
       rating,
@@ -939,15 +1026,17 @@ router.get('/user/:userId', async (req, res) => {
     // Get user's recommendations with pagination
     const recommendations = await getRecommendationsByUserId(userId, limit, offset);
 
-    // Transform recommendations to include place information where applicable
+    // Transform recommendations to include place/service information where applicable
     const transformedRecommendations = await Promise.all(
       recommendations.map(async (recommendation) => {
         let placeInfo = {};
+        let serviceInfo = {};
+        let title = '';
         
         // Get place information if this is a place-type recommendation
         if (recommendation.place_id) {
           const placeQuery = await pool.query(
-            'SELECT name, address, lat, lng FROM places WHERE id = $1',
+            'SELECT name, address, lat, lng FROM places WHERE id = $1 AND deleted_at IS NULL',
             [recommendation.place_id]
           );
           const place = placeQuery.rows[0] || {};
@@ -957,12 +1046,26 @@ router.get('/user/:userId', async (req, res) => {
             place_lat: place.lat,
             place_lng: place.lng
           };
+          title = place.name || 'Unknown Place';
+        }
+        
+        // Get service information if this is a service-type recommendation
+        if (recommendation.service_id) {
+          const serviceQuery = await pool.query(
+            'SELECT name FROM services WHERE id = $1 AND deleted_at IS NULL',
+            [recommendation.service_id]
+          );
+          const service = serviceQuery.rows[0] || {};
+          serviceInfo = {
+            service_name: service.name || 'Unknown Service'
+          };
+          title = service.name || 'Unknown Service';
         }
 
         return {
           id: recommendation.id,
           content_type: recommendation.content_type,
-          title: recommendation.title,
+          title: title,
           description: recommendation.description,
           content_data: recommendation.content_data,
           rating: recommendation.rating,
@@ -971,7 +1074,8 @@ router.get('/user/:userId', async (req, res) => {
           metadata: recommendation.metadata,
           created_at: recommendation.created_at,
           updated_at: recommendation.updated_at,
-          ...placeInfo
+          ...placeInfo,
+          ...serviceInfo
         };
       })
     );
@@ -1029,7 +1133,7 @@ router.get('/place/:placeId', async (req, res) => {
     // Get place recommendations
     const recommendations = await getRecommendationsByPlaceId(placeIdNum, visibility, limit, currentUserId);
 
-    // Transform recommendations to include user information
+    // Transform recommendations to include user information and derive title
     const transformedRecommendations = await Promise.all(
       recommendations.map(async (recommendation) => {
         // Get user information (you might want to add a join query for better performance)
@@ -1038,11 +1142,27 @@ router.get('/place/:placeId', async (req, res) => {
           [recommendation.user_id]
         );
         const user = userQuery.rows[0] || {};
+        
+        // Derive title from place or service name
+        let title = '';
+        if (recommendation.place_id) {
+          const placeQuery = await pool.query(
+            'SELECT name FROM places WHERE id = $1 AND deleted_at IS NULL',
+            [recommendation.place_id]
+          );
+          title = placeQuery.rows[0]?.name || 'Unknown Place';
+        } else if (recommendation.service_id) {
+          const serviceQuery = await pool.query(
+            'SELECT name FROM services WHERE id = $1 AND deleted_at IS NULL',
+            [recommendation.service_id]
+          );
+          title = serviceQuery.rows[0]?.name || 'Unknown Service';
+        }
 
         return {
           id: recommendation.id,
           content_type: recommendation.content_type,
-          title: recommendation.title,
+          title: title,
           description: recommendation.description,
           content_data: recommendation.content_data,
           user_id: recommendation.user_id,
@@ -1463,6 +1583,16 @@ router.post('/search', aiRateLimiter, async (req, res) => {
           hasTrustCircle: personalDNA.topReviewers.length > 0,
           hasPreferences: personalDNA.loves.length > 0 || personalDNA.hates.length > 0
         });
+        
+        // Log query for service detection
+        const queryLower = sanitizedQuery.toLowerCase();
+        const serviceKeywords = ['service', 'plumber', 'tutor', 'instructor', 'contractor', 'doctor', 'lawyer', 'therapist', 'coach', 'trainer', 'photographer', 'designer', 'developer', 'consultant'];
+        const hasServiceKeywords = serviceKeywords.some(keyword => queryLower.includes(keyword));
+        console.log('🔍 [QUERY] Query analysis:', {
+          query: sanitizedQuery,
+          hasServiceKeywords,
+          detectedKeywords: serviceKeywords.filter(kw => queryLower.includes(kw))
+        });
 
         // Simplified system prompt - works without personal DNA data
         const systemPrompt = `You are a recommendation assistant that helps users find places and services from their trusted network.
@@ -1482,6 +1612,14 @@ CONTENT TYPE DETERMINATION:
 - Use content_type="place" for: restaurants, cafes, shops, venues, gyms, hotels, parks, beaches, tourist attractions, any physical location
 - Use content_type="service" for: professionals (plumbers, tutors, instructors, contractors, doctors, lawyers), service providers, people offering services
 - Use content_type=null when the query could be either type or is ambiguous (e.g., "massage" could be a spa place or a massage therapist service)
+
+SERVICE CATEGORY FILTERING (CRITICAL FOR ACCURACY):
+- When content_type="service", you MUST call lookup_service_category first to find the correct category_id
+- Pass the service type from the query (e.g., "architect", "physics tutor", "plumber", "wedding photographer")
+- The lookup tool will return matching categories with confidence scores
+- Use the highest confidence match (confidence >= 0.5) in your search_my_network call
+- If no high-confidence matches found (confidence < 0.5), proceed without category_id but note this may return irrelevant services
+- IMPORTANT: Setting category_id ensures only relevant services are returned (e.g., architect queries won't return tutors)
 
 EVALUATING SEARCH RESULTS:
 1. ALWAYS check the "results_summary" array - it shows what was actually found
@@ -1524,17 +1662,46 @@ CRITICAL: If top_confidence >= 0.8 and results_count > 0, you MUST set decision=
         const orchestrationTime = Date.now() - orchestrationStartTime;
         console.log(`✅ [STEP 1.3] Search orchestration completed in ${orchestrationTime}ms`);
         
-        const { finalMessage, structuredContext, askNetworkContext } = orchestrationResult;
+          const { finalMessage, structuredContext, askNetworkContext } = orchestrationResult;
+          
+          // Log service results breakdown
+          if (structuredContext?.formatted) {
+            const serviceResults = structuredContext.formatted.filter((r: any) => r.type === 'service');
+            const placeResults = structuredContext.formatted.filter((r: any) => r.type === 'place');
+            console.log('📊 [STEP 2] Results breakdown after orchestration:', {
+              total: structuredContext.formatted.length,
+              services: serviceResults.length,
+              places: placeResults.length,
+              rawRecommendationsCount: structuredContext.raw?.recommendations?.length || 0
+            });
+            
+            if (serviceResults.length > 0) {
+              console.log('✅ [SERVICE] Service results found in orchestration:', serviceResults.length);
+              serviceResults.forEach((result: any, idx: number) => {
+                console.log(`   [SERVICE] ${idx + 1}. ${result.service_name} (ID: ${result.service_id}, category: ${result.service_category_name || 'N/A'})`);
+              });
+            } else {
+              console.log('⚠️  [SERVICE] No service results found in orchestration');
+              console.log('   ⚠️  [SERVICE] Raw recommendations count:', structuredContext.raw?.recommendations?.length || 0);
+              if (structuredContext.raw?.recommendations && structuredContext.raw.recommendations.length > 0) {
+                console.log('   ⚠️  [SERVICE] Raw recommendations exist but were not formatted as services. Sample:', 
+                  structuredContext.raw.recommendations[0]);
+              }
+            }
+          } else {
+            console.log('⚠️  [STEP 2] No structured context available after orchestration');
+          }
 
         // Process LLM's final decision
         if (finalMessage) {
           console.log('📋 [STEP 3] Processing LLM final decision...');
           const finalContent = finalMessage.content?.trim() || '';
+          console.log('   📝 [STEP 3] Final message content:', finalContent.substring(0, 500));
           let finalDecision: any;
 
           try {
             finalDecision = finalContent ? JSON.parse(finalContent) : {};
-            console.log('   ✅ [STEP 3] Successfully parsed LLM JSON response');
+            console.log('   ✅ [STEP 3] Successfully parsed LLM JSON response:', finalDecision);
           } catch (parseError) {
             console.warn('   ⚠️ [STEP 3] LLM returned freeform text instead of JSON:', {
               contentPreview: finalContent.substring(0, 200),

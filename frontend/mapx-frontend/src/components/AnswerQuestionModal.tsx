@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import RecommendationComposer from '@/components/RecommendationComposer';
+import { extractQuestionMetadata } from '@/utils/questionMetadata';
+import type { QuestionMetadata } from '@/hooks/useRecommendationComposer';
 
 interface AnswerQuestionModalProps {
   open: boolean;
@@ -19,6 +21,30 @@ export const AnswerQuestionModal: React.FC<AnswerQuestionModalProps> = ({
   currentUserId 
 }) => {
   const [showComposer, setShowComposer] = useState(false);
+  const [questionMetadata, setQuestionMetadata] = useState<QuestionMetadata | undefined>(undefined);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+
+  // Fetch question metadata when modal opens (before showing composer)
+  useEffect(() => {
+    if (open && questionId) {
+      setIsLoadingMetadata(true);
+      extractQuestionMetadata(questionId)
+        .then((metadata) => {
+          setQuestionMetadata(metadata);
+        })
+        .catch((error) => {
+          // Non-fatal; just log and continue without metadata
+          console.warn('Failed to fetch question metadata:', error);
+        })
+        .finally(() => {
+          setIsLoadingMetadata(false);
+        });
+    } else {
+      // Reset when modal closes
+      setQuestionMetadata(undefined);
+      setIsLoadingMetadata(false);
+    }
+  }, [open, questionId]);
 
   const handleComposerClose = () => {
     setShowComposer(false);
@@ -56,6 +82,7 @@ export const AnswerQuestionModal: React.FC<AnswerQuestionModalProps> = ({
                 currentUserId={currentUserId}
                 questionContext={questionText}
                 questionId={questionId}
+                questionMetadata={questionMetadata}
               />
             </div>
           </div>
@@ -78,10 +105,11 @@ export const AnswerQuestionModal: React.FC<AnswerQuestionModalProps> = ({
         <div className="flex justify-end gap-2">
           <button className="px-4 py-2 rounded-md border" onClick={onClose}>Cancel</button>
           <button 
-            className="px-4 py-2 rounded-md bg-blue-600 text-white" 
+            className="px-4 py-2 rounded-md bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed" 
             onClick={() => setShowComposer(true)}
+            disabled={isLoadingMetadata}
           >
-            Create Recommendation
+            {isLoadingMetadata ? 'Loading...' : 'Create Recommendation'}
           </button>
         </div>
       </div>
