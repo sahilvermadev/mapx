@@ -24,7 +24,7 @@ export function TrustCommonsSection() {
           <p className="text-xs uppercase tracking-[0.4em] text-zinc-500">Protected commons</p>
           <h2 className="text-3xl sm:text-4xl font-medium tracking-tight leading-tight">We refuse to become another public square.</h2>
           <p className="text-lg text-zinc-700 leading-relaxed">
-            Rekky flips every incentive that ruined the open web. No ads, no algorithmic trending, no incentive to go viral.
+            Rekky flips every incentive that ruined the open web. No algorithmic trending, no incentive to go viral.
           </p>
         </div>
 

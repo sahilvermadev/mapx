@@ -74,7 +74,7 @@ export function RekkyManifesto() {
           <ul className="list-disc pl-6 space-y-2 text-base sm:text-xl text-zinc-200 leading-relaxed">
             <li>No public profiles discoverable by strangers</li>
             <li>No algorithmic “trending” section that incentivizes virality</li>
-            <li>No advertising, sponsored posts, or business-owner dashboard to bribe for visibility</li>
+            <li>No sponsored posts, or business-owner dashboard to bribe for visibility</li>
             <li>No export to the open web</li>
           </ul>
           <p className="text-base sm:text-xl text-zinc-200 leading-relaxed font-semibold">Instead:</p>

@@ -24,6 +24,11 @@ export function Hero({ onReadManifesto }: HeroProps) {
                 Rekky rebuilds discovery around small, high-trust networks. Private vaults, taste-based search,
                 and AI that only learns from people you actually know.
               </p>
+              <div className="inline-flex items-center px-4 py-2 bg-zinc-800/50 border border-zinc-700/50 rounded-md">
+                <p className="text-sm text-zinc-400 uppercase tracking-[0.1em]">
+                  Under Development
+                </p>
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-3 pt-4 w-full">
               {/* <button

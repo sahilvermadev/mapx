@@ -39,9 +39,10 @@ export function Header({ onSignInClick, variant = 'light', hideNav = false, posi
         {/* CTA Buttons */}
         <div className="flex items-center space-x-4">
           {!isAuthenticated ? (
-            <Button variant={variant === 'dark' ? 'secondary' : 'ghost'} size="sm" onClick={onSignInClick}>
-              Sign In
-            </Button>
+            null
+            // <Button variant={variant === 'dark' ? 'secondary' : 'ghost'} size="sm" onClick={onSignInClick}>
+            //   Sign In
+            // </Button>
           ) : (
             <>
               <Button variant={variant === 'dark' ? 'secondary' : 'ghost'} size="sm" onClick={logout}>

@@ -35,9 +35,9 @@ export function Footer({ variant = 'light' }: FooterProps) {
               © 2025 Rekky. All rights reserved.
             </div>
 
-            <p className={`text-xs uppercase tracking-[0.35em] ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
+            {/* <p className={`text-xs uppercase tracking-[0.35em] ${isDark ? 'text-zinc-500' : 'text-gray-500'}`}>
               No ads · No viral loops
-            </p>
+            </p> */}
           </div>
         </div>
       </div>

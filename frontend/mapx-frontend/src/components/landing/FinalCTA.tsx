@@ -26,9 +26,9 @@ export function FinalCTA() {
             Talk to the team
           </a>
         </div> */}
-        <p className="text-xs uppercase tracking-[0.35em] text-zinc-500 pt-6 border-t border-white/10">
+        {/* <p className="text-xs uppercase tracking-[0.35em] text-zinc-500 pt-6 border-t border-white/10">
           No ads · No viral loops
-        </p>
+        </p> */}
       </div>
     </section>
   );
